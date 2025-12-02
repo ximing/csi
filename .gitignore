@@ -1,0 +1,10 @@
+# Node
+node_modules/
+extension/dist/
+
+# Go
+daemon/cdp-bridge
+*.exe
+
+# OS / editor
+.DS_Store
