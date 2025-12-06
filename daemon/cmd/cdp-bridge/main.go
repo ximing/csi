@@ -1,6 +1,4 @@
 // cdp-bridge daemon CLI。
-//
-// 先搭个最小骨架：serve 起一个只有 /healthz 的 HTTP server，version 打印版本。
 package main
 
 import (
@@ -8,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
+	"cdp-bridge/daemon/internal/server"
 	"cdp-bridge/daemon/internal/version"
 )
 
@@ -33,14 +33,18 @@ func main() {
 	}
 }
 
-// serve 最小占位：只监听回环，先跑通进程模型再加功能。
+// serve 前台运行 daemon，只监听回环。
 func serve() error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("ok"))
-	})
-	log.Printf("cdp-bridge %s serving on 127.0.0.1:10088", version.Version)
-	return http.ListenAndServe("127.0.0.1:10088", mux)
+	port := 10088
+	if v := os.Getenv("CDP_BRIDGE_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			port = p
+		}
+	}
+	srv := server.New(port, nil)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	log.Printf("cdp-bridge %s serving on %s", version.Version, addr)
+	return http.ListenAndServe(addr, srv.Handler())
 }
 
 func usage() {
@@ -49,5 +53,8 @@ func usage() {
 commands:
   serve    run daemon in foreground
   version  print version
+
+environment:
+  CDP_BRIDGE_PORT  listen port (default 10088)
 `)
 }
