@@ -1,0 +1,266 @@
+// Package ws 实现与 Chrome 扩展之间的 WebSocket 通道（协议 §3）。
+// 同一时间只接受一个扩展连接，新连接到来时踢掉旧连接。
+package ws
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+// 消息类型（协议 §3.3）。
+const (
+	MsgHello      = "hello"
+	MsgHelloAck   = "hello_ack"
+	MsgPing       = "ping"
+	MsgPong       = "pong"
+	MsgToolCall   = "tool_call"
+	MsgToolResult = "tool_result"
+)
+
+// ErrNotConnected 扩展未连接。
+var ErrNotConnected = errors.New("extension not connected")
+
+// Message 顶层消息结构（协议 §3.2）。
+type Message struct {
+	Type                string          `json:"type"`
+	RequestID           string          `json:"requestId,omitempty"`
+	ResponseToRequestID string          `json:"responseToRequestId,omitempty"`
+	Payload             json.RawMessage `json:"payload,omitempty"`
+}
+
+// toolResultPayload tool_result 的 payload：{data} 或 {error}。
+type toolResultPayload struct {
+	Data  json.RawMessage `json:"data"`
+	Error string          `json:"error"`
+}
+
+// Hub 管理唯一的扩展 WS 连接及 tool_call 请求/响应关联。
+type Hub struct {
+	Version      string        // hello_ack 中告知扩展的 daemon 版本
+	ToolTimeout  time.Duration // 工具调用超时，默认 120s（协议 §3.3）
+	PingInterval time.Duration // 应用层 ping 间隔，默认 30s
+	Logger       *log.Logger
+
+	mu         sync.Mutex
+	conn       *websocket.Conn
+	extVersion string
+	pending    map[string]chan toolResultPayload
+
+	writeMu sync.Mutex // 写帧串行化（ping 与 tool_call 并发写）
+	counter atomic.Uint64
+}
+
+// New 创建 Hub。
+func New(daemonVersion string, logger *log.Logger) *Hub {
+	if logger == nil {
+		logger = log.Default()
+	}
+	return &Hub{
+		Version:      daemonVersion,
+		ToolTimeout:  120 * time.Second,
+		PingInterval: 30 * time.Second,
+		Logger:       logger,
+		pending:      make(map[string]chan toolResultPayload),
+	}
+}
+
+// Connected 扩展当前是否已连接。
+func (h *Hub) Connected() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.conn != nil
+}
+
+// ExtensionVersion 扩展 hello 上报的版本。
+func (h *Hub) ExtensionVersion() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.extVersion
+}
+
+var upgrader = websocket.Upgrader{
+	// v1 无认证，仅依赖 127.0.0.1 回环隔离（协议 §7），不做 Origin 校验。
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+// HandleWS 处理 /ws 端点。新连接踢掉旧连接。
+func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		h.Logger.Printf("ws upgrade failed: %v", err)
+		return
+	}
+	h.setConn(conn)
+	go h.pingLoop(conn)
+	h.readLoop(conn) // 阻塞直至连接断开
+}
+
+func (h *Hub) setConn(conn *websocket.Conn) {
+	h.mu.Lock()
+	old := h.conn
+	h.conn = conn
+	h.extVersion = ""
+	h.mu.Unlock()
+	if old != nil && old != conn {
+		h.Logger.Printf("new extension connected, kicking old connection")
+		old.Close() // 旧连接的 readLoop 会自行清理 pending
+	}
+}
+
+// readLoop 读循环：hello / pong / tool_result。
+func (h *Hub) readLoop(conn *websocket.Conn) {
+	defer func() {
+		h.mu.Lock()
+		same := h.conn == conn
+		if same {
+			h.conn = nil
+			h.extVersion = ""
+		}
+		pending := h.pending
+		h.pending = make(map[string]chan toolResultPayload)
+		h.mu.Unlock()
+		// 连接断开，唤醒所有等待中的调用
+		for _, ch := range pending {
+			ch <- toolResultPayload{Error: ErrNotConnected.Error()}
+		}
+		conn.Close()
+		if same {
+			h.Logger.Printf("extension disconnected")
+		}
+	}()
+
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var msg Message
+		if err := json.Unmarshal(data, &msg); err != nil {
+			h.Logger.Printf("ws: bad message: %v", err)
+			continue
+		}
+		switch msg.Type {
+		case MsgHello:
+			var p struct {
+				ExtensionVersion string `json:"extensionVersion"`
+			}
+			_ = json.Unmarshal(msg.Payload, &p)
+			h.mu.Lock()
+			h.extVersion = p.ExtensionVersion
+			h.mu.Unlock()
+			h.Logger.Printf("extension hello, version=%q", p.ExtensionVersion)
+			ack, _ := json.Marshal(map[string]any{"daemonVersion": h.Version})
+			if err := h.writeJSON(conn, Message{Type: MsgHelloAck, Payload: ack}); err != nil {
+				return
+			}
+		case MsgPong:
+			// 心跳应答，无需处理
+		case MsgToolResult:
+			h.mu.Lock()
+			ch, ok := h.pending[msg.ResponseToRequestID]
+			if ok {
+				delete(h.pending, msg.ResponseToRequestID)
+			}
+			h.mu.Unlock()
+			if !ok {
+				h.Logger.Printf("ws: tool_result for unknown requestId %q", msg.ResponseToRequestID)
+				continue
+			}
+			var p toolResultPayload
+			if err := json.Unmarshal(msg.Payload, &p); err != nil {
+				p = toolResultPayload{Error: "bad tool_result payload: " + err.Error()}
+			}
+			ch <- p
+		default:
+			// 未知类型忽略（协议 §3.3）
+			h.Logger.Printf("ws: ignore unknown message type %q", msg.Type)
+		}
+	}
+}
+
+// pingLoop 每 PingInterval 发送应用层 ping。
+func (h *Hub) pingLoop(conn *websocket.Conn) {
+	t := time.NewTicker(h.PingInterval)
+	defer t.Stop()
+	for range t.C {
+		h.mu.Lock()
+		cur := h.conn
+		h.mu.Unlock()
+		if cur != conn {
+			return
+		}
+		if err := h.writeJSON(conn, Message{Type: MsgPing}); err != nil {
+			return
+		}
+	}
+}
+
+func (h *Hub) writeJSON(conn *websocket.Conn, msg Message) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	return conn.WriteJSON(msg)
+}
+
+func (h *Hub) removePending(id string) {
+	h.mu.Lock()
+	delete(h.pending, id)
+	h.mu.Unlock()
+}
+
+// CallTool 向扩展发送 tool_call 并等待 tool_result（requestId 关联）。
+func (h *Hub) CallTool(ctx context.Context, name string, args map[string]any) (json.RawMessage, error) {
+	h.mu.Lock()
+	conn := h.conn
+	if conn == nil {
+		h.mu.Unlock()
+		return nil, ErrNotConnected
+	}
+	id := newRequestID(h.counter.Add(1))
+	ch := make(chan toolResultPayload, 1)
+	h.pending[id] = ch
+	h.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]any{"name": name, "args": args})
+	if err := h.writeJSON(conn, Message{Type: MsgToolCall, RequestID: id, Payload: payload}); err != nil {
+		h.removePending(id)
+		return nil, err
+	}
+
+	timeout := h.ToolTimeout
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case res := <-ch:
+		if res.Error != "" {
+			return nil, errors.New(res.Error)
+		}
+		return res.Data, nil
+	case <-ctx.Done():
+		h.removePending(id)
+		return nil, ctx.Err()
+	case <-timer.C:
+		h.removePending(id)
+		return nil, fmt.Errorf("tool call timeout (%ds)", int(timeout.Seconds()))
+	}
+}
+
+func newRequestID(n uint64) string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("req-%s-%d", hex.EncodeToString(b[:]), n)
+}
