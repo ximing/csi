@@ -1,4 +1,4 @@
-// Package server 实现 daemon 的 HTTP API 与 /ws 端点挂载。
+// Package server 实现 daemon 的 HTTP API（协议 §2）与 /ws 端点挂载。
 package server
 
 import (
@@ -7,16 +7,21 @@ import (
 	"net/http"
 	"time"
 
+	"cdp-bridge/daemon/internal/backend"
+	"cdp-bridge/daemon/internal/session"
+	"cdp-bridge/daemon/internal/tools"
 	"cdp-bridge/daemon/internal/version"
 	"cdp-bridge/daemon/internal/ws"
 )
 
 // Server 聚合各内部组件，提供 HTTP Handler。
 type Server struct {
-	Hub     *ws.Hub
-	Port    int
-	started time.Time
-	logger  *log.Logger
+	Hub      *ws.Hub
+	Executor *tools.Executor
+	Sessions *session.Manager
+	Port     int
+	started  time.Time
+	logger   *log.Logger
 }
 
 // New 组装 daemon 服务。port 仅用于 /status 展示。
@@ -25,31 +30,73 @@ func New(port int, logger *log.Logger) *Server {
 		logger = log.Default()
 	}
 	hub := ws.New(version.Version, logger)
+	sessions := session.NewManager()
+	be := backend.NewExtensionBackend(hub)
 	return &Server{
-		Hub:     hub,
-		Port:    port,
-		started: time.Now(),
-		logger:  logger,
+		Hub:      hub,
+		Executor: tools.NewExecutor(be, sessions),
+		Sessions: sessions,
+		Port:     port,
+		started:  time.Now(),
+		logger:   logger,
 	}
 }
 
 // Handler 返回 daemon 的 HTTP 路由。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /command", s.handleCommand)
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("/ws", s.Hub.HandleWS)
 	return mux
 }
 
-// statusResponse /status 响应。
+// commandRequest /command 请求体（协议 §2.1）。
+type commandRequest struct {
+	Action  string         `json:"action"`
+	Args    map[string]any `json:"args"`
+	Session string         `json:"session"`
+}
+
+// commandResponse /command 响应体：错误一律放 body，HTTP 200。
+type commandResponse struct {
+	Success bool   `json:"success"`
+	Data    any    `json:"data,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
+	var req commandRequest
+	// upload 工具会带文件路径列表，请求体上限放宽到 64MB
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, commandResponse{Success: false, Error: "bad request body: " + err.Error()})
+		return
+	}
+	if req.Action == "" {
+		writeJSON(w, commandResponse{Success: false, Error: "action is required"})
+		return
+	}
+
+	data, err := s.Executor.Execute(r.Context(), req.Action, req.Session, req.Args)
+	if err != nil {
+		s.logger.Printf("command %s failed: %v", req.Action, err)
+		writeJSON(w, commandResponse{Success: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, commandResponse{Success: true, Data: data})
+}
+
+// statusResponse /status 响应（协议 §2.2）。
 type statusResponse struct {
-	Running            bool   `json:"running"`
-	Version            string `json:"version"`
-	ExtensionConnected bool   `json:"extension_connected"`
-	ExtensionVersion   string `json:"extension_version"`
-	UptimeSeconds      int64  `json:"uptime_seconds"`
-	Port               int    `json:"port"`
+	Running            bool     `json:"running"`
+	Version            string   `json:"version"`
+	ExtensionConnected bool     `json:"extension_connected"`
+	ExtensionVersion   string   `json:"extension_version"`
+	UptimeSeconds      int64    `json:"uptime_seconds"`
+	Sessions           []string `json:"sessions"`
+	Port               int      `json:"port"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +106,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ExtensionConnected: s.Hub.Connected(),
 		ExtensionVersion:   s.Hub.ExtensionVersion(),
 		UptimeSeconds:      int64(time.Since(s.started).Seconds()),
+		Sessions:           s.Sessions.Names(),
 		Port:               s.Port,
 	})
 }
