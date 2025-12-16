@@ -1,0 +1,18 @@
+{
+  "name": "cdp-bridge-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "cdp-bridge Chrome MV3 extension — lets a local daemon drive the browser over CDP",
+  "scripts": {
+    "build": "vite build",
+    "watch": "vite build --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^26.1.2",
+    "typescript": "^5.5.0",
+    "vite": "^6.0.0"
+  }
+}
