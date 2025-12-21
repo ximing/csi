@@ -9,6 +9,10 @@ import type { Tool } from './tools/types';
 import { ensureAttached, setAttachedTabId } from './debugger-session';
 import { ensureGroupRemovedListener } from './tab-group';
 
+import { NavigateTool } from './tools/navigate';
+import { FindTabTool } from './tools/find-tab';
+import { CloseTabTool } from './tools/close-tab';
+import { ListTabsTool } from './tools/list-tabs';
 
 const registry = new Map<string, Tool>();
 
@@ -21,6 +25,10 @@ const SESSION_SCOPED_TOOLS = new Set(['close_tab', 'list_tabs', 'close_session']
 
 export function registerAllTools(): void {
   ensureGroupRemovedListener();
+  register(new NavigateTool());
+  register(new FindTabTool());
+  register(new CloseTabTool());
+  register(new ListTabsTool());
 }
 
 export async function dispatchTool(name: string, args: ToolArgs): Promise<unknown> {
