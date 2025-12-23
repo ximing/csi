@@ -11,6 +11,8 @@ import { ensureGroupRemovedListener } from './tab-group';
 
 import { NavigateTool } from './tools/navigate';
 import { FindTabTool } from './tools/find-tab';
+import { EvaluateTool } from './tools/evaluate';
+import { CdpTool } from './tools/cdp';
 import { CloseTabTool } from './tools/close-tab';
 import { ListTabsTool } from './tools/list-tabs';
 
@@ -27,6 +29,8 @@ export function registerAllTools(): void {
   ensureGroupRemovedListener();
   register(new NavigateTool());
   register(new FindTabTool());
+  register(new EvaluateTool());
+  register(new CdpTool());
   register(new CloseTabTool());
   register(new ListTabsTool());
 }
