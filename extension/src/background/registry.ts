@@ -13,6 +13,8 @@ import { NavigateTool } from './tools/navigate';
 import { FindTabTool } from './tools/find-tab';
 import { EvaluateTool } from './tools/evaluate';
 import { CdpTool } from './tools/cdp';
+import { ScreenshotTool } from './tools/screenshot';
+import { SaveAsPdfTool } from './tools/save-as-pdf';
 import { CloseTabTool } from './tools/close-tab';
 import { ListTabsTool } from './tools/list-tabs';
 
@@ -31,6 +33,8 @@ export function registerAllTools(): void {
   register(new FindTabTool());
   register(new EvaluateTool());
   register(new CdpTool());
+  register(new ScreenshotTool());
+  register(new SaveAsPdfTool());
   register(new CloseTabTool());
   register(new ListTabsTool());
 }
