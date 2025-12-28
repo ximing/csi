@@ -12,6 +12,7 @@ import { ensureGroupRemovedListener } from './tab-group';
 import { NavigateTool } from './tools/navigate';
 import { FindTabTool } from './tools/find-tab';
 import { EvaluateTool } from './tools/evaluate';
+import { SnapshotTool } from './tools/snapshot';
 import { CdpTool } from './tools/cdp';
 import { ScreenshotTool } from './tools/screenshot';
 import { SaveAsPdfTool } from './tools/save-as-pdf';
@@ -32,6 +33,7 @@ export function registerAllTools(): void {
   register(new NavigateTool());
   register(new FindTabTool());
   register(new EvaluateTool());
+  register(new SnapshotTool());
   register(new CdpTool());
   register(new ScreenshotTool());
   register(new SaveAsPdfTool());
