@@ -12,6 +12,7 @@ import { ensureGroupRemovedListener } from './tab-group';
 import { NavigateTool } from './tools/navigate';
 import { FindTabTool } from './tools/find-tab';
 import { EvaluateTool } from './tools/evaluate';
+import { NetworkTool } from './tools/network';
 import { SnapshotTool } from './tools/snapshot';
 import { ClickTool } from './tools/click';
 import { FillTool } from './tools/fill';
@@ -38,6 +39,7 @@ export function registerAllTools(): void {
   register(new NavigateTool());
   register(new FindTabTool());
   register(new EvaluateTool());
+  register(new NetworkTool());
   register(new SnapshotTool());
   register(new ClickTool());
   register(new FillTool());
