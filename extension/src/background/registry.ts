@@ -22,8 +22,10 @@ import { KeyTypeTool } from './tools/key-type';
 import { SendKeysTool } from './tools/send-keys';
 import { ScreenshotTool } from './tools/screenshot';
 import { SaveAsPdfTool } from './tools/save-as-pdf';
+import { UploadTool } from './tools/upload';
 import { CloseTabTool } from './tools/close-tab';
 import { ListTabsTool } from './tools/list-tabs';
+import { CloseSessionTool } from './tools/close-session';
 
 const registry = new Map<string, Tool>();
 
@@ -49,8 +51,10 @@ export function registerAllTools(): void {
   register(new SendKeysTool());
   register(new ScreenshotTool());
   register(new SaveAsPdfTool());
+  register(new UploadTool());
   register(new CloseTabTool());
   register(new ListTabsTool());
+  register(new CloseSessionTool());
 }
 
 export async function dispatchTool(name: string, args: ToolArgs): Promise<unknown> {
