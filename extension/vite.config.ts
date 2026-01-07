@@ -7,8 +7,8 @@ const rootDir = fileURLToPath(new URL('.', import.meta.url));
 const r = (p: string) => resolve(rootDir, p);
 
 /**
- * MV3 needs a fixed directory layout in dist/. Vite only bundles JS,
- * so copy the static parts (manifest, icons) after the build.
+ * MV3 needs a fixed directory layout in dist/. Vite only bundles JS/HTML/CSS,
+ * so copy the static parts (manifest, icons, locales) after the build.
  */
 function copyStaticAssets(): Plugin {
   return {
@@ -16,6 +16,7 @@ function copyStaticAssets(): Plugin {
     closeBundle() {
       copyFileSync(r('manifest.json'), r('dist/manifest.json'));
       cpSync(r('icons'), r('dist/icons'), { recursive: true });
+      cpSync(r('_locales'), r('dist/_locales'), { recursive: true });
     },
   };
 }
@@ -27,6 +28,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         background: r('src/background/index.ts'),
+        popup: r('popup.html'),
       },
       output: {
         // manifest.json references background.js by fixed name — no hashes.

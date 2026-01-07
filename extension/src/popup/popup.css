@@ -1,0 +1,105 @@
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  min-width: 280px;
+}
+
+#popup {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-on {
+  background: #22c55e;
+}
+
+.dot-off {
+  background: #9ca3af;
+}
+
+label {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.test-result {
+  margin: 0;
+  min-height: 16px;
+  font-size: 12px;
+}
+
+.test-result.ok {
+  color: #16a34a;
+}
+
+.test-result.fail {
+  color: #dc2626;
+}
+
+footer {
+  font-size: 11px;
+  opacity: 0.6;
+  text-align: center;
+}

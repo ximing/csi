@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cdp-bridge</title>
+</head>
+<body>
+  <main id="popup">
+    <h1 id="title">cdp-bridge</h1>
+
+    <div class="status-row">
+      <span id="status-dot" class="dot dot-off"></span>
+      <span id="status-text">—</span>
+    </div>
+
+    <label id="server-url-label" for="server-url">Daemon WebSocket URL</label>
+    <input id="server-url" type="text" spellcheck="false" placeholder="ws://127.0.0.1:10088/ws">
+
+    <div class="button-row">
+      <button id="btn-connect" type="button">Connect</button>
+      <button id="btn-disconnect" type="button">Disconnect</button>
+      <button id="btn-test" type="button">Test Connection</button>
+    </div>
+
+    <p id="test-result" class="test-result"></p>
+
+    <footer id="version-footer"></footer>
+  </main>
+  <script type="module" src="/src/popup/popup.ts"></script>
+</body>
+</html>

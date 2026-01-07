@@ -1,0 +1,42 @@
+{
+  "description": {
+    "message": "cdp-bridge — browser extension for AI agents. A local daemon can open pages, click, fill forms, read page contents, and automate web tasks.",
+    "description": "Extension description shown in Chrome Web Store and extension management page."
+  },
+  "popupTitle": {
+    "message": "cdp-bridge"
+  },
+  "statusConnected": {
+    "message": "Connected"
+  },
+  "statusDisconnected": {
+    "message": "Disconnected"
+  },
+  "serverUrlLabel": {
+    "message": "Daemon WebSocket URL"
+  },
+  "connectButton": {
+    "message": "Connect"
+  },
+  "disconnectButton": {
+    "message": "Disconnect"
+  },
+  "testButton": {
+    "message": "Test Connection"
+  },
+  "testTesting": {
+    "message": "Testing…"
+  },
+  "testOk": {
+    "message": "Connection OK"
+  },
+  "testFailed": {
+    "message": "Connection failed — check address, network, and that the daemon is running"
+  },
+  "versionFooter": {
+    "message": "Extension $VER$",
+    "placeholders": {
+      "ver": { "content": "$1" }
+    }
+  }
+}

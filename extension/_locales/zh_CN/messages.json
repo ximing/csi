@@ -1,0 +1,41 @@
+{
+  "description": {
+    "message": "cdp-bridge — 专为 AI Agent 设计的浏览器插件，让本机 daemon 帮你打开网页、点击按钮、填写表单、读取页面内容，自动化各种网页操作。"
+  },
+  "popupTitle": {
+    "message": "cdp-bridge"
+  },
+  "statusConnected": {
+    "message": "已连接"
+  },
+  "statusDisconnected": {
+    "message": "未连接"
+  },
+  "serverUrlLabel": {
+    "message": "Daemon WebSocket 地址"
+  },
+  "connectButton": {
+    "message": "连接"
+  },
+  "disconnectButton": {
+    "message": "断开"
+  },
+  "testButton": {
+    "message": "测试连接"
+  },
+  "testTesting": {
+    "message": "测试中…"
+  },
+  "testOk": {
+    "message": "连接成功"
+  },
+  "testFailed": {
+    "message": "连接失败 — 请检查地址、网络、目标服务是否运行"
+  },
+  "versionFooter": {
+    "message": "扩展 $VER$",
+    "placeholders": {
+      "ver": { "content": "$1" }
+    }
+  }
+}
