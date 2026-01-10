@@ -1,14 +1,19 @@
 // cdp-bridge daemon CLI。
+//
+// 子命令：
+//
+//	serve    前台运行 daemon
+//	start    后台守护（幂等：已在运行则 no-op）
+//	stop     停止后台 daemon
+//	status   查询运行状态
+//	version  打印版本
+//	mcp      stdio MCP server（17 个浏览器工具，转发到本机 daemon）
 package main
 
 import (
 	"fmt"
-	"log"
-	"net/http"
 	"os"
-	"strconv"
 
-	"cdp-bridge/daemon/internal/server"
 	"cdp-bridge/daemon/internal/version"
 )
 
@@ -17,13 +22,20 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	var err error
 	switch os.Args[1] {
 	case "serve":
-		if err := serve(); err != nil {
-			log.Fatal(err)
-		}
+		err = cmdServe()
+	case "start":
+		err = cmdStart()
+	case "stop":
+		err = cmdStop()
+	case "status":
+		err = cmdStatus()
 	case "version":
 		fmt.Println("cdp-bridge " + version.Version)
+	case "mcp":
+		err = cmdMCP()
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -31,20 +43,10 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
-}
-
-// serve 前台运行 daemon，只监听回环。
-func serve() error {
-	port := 10088
-	if v := os.Getenv("CDP_BRIDGE_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			port = p
-		}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cdp-bridge %s: %v\n", os.Args[1], err)
+		os.Exit(1)
 	}
-	srv := server.New(port, nil)
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	log.Printf("cdp-bridge %s serving on %s", version.Version, addr)
-	return http.ListenAndServe(addr, srv.Handler())
 }
 
 func usage() {
@@ -52,7 +54,11 @@ func usage() {
 
 commands:
   serve    run daemon in foreground
+  start    start daemon in background (no-op if already running)
+  stop     stop background daemon
+  status   show daemon status
   version  print version
+  mcp      run MCP server over stdio (forwards to the local daemon)
 
 environment:
   CDP_BRIDGE_PORT  listen port (default 10088)
