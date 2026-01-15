@@ -1,0 +1,404 @@
+package server_test
+
+import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+
+	"cdp-bridge/daemon/internal/server"
+	"cdp-bridge/daemon/internal/ws"
+)
+
+// newTestServer 起随机端口的真实 HTTP server（不占 10088）。
+func newTestServer(t *testing.T) (*server.Server, *httptest.Server) {
+	t.Helper()
+	srv := server.New(0, nil)
+	srv.Hub.PingInterval = time.Hour // 测试里不打心跳
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return srv, ts
+}
+
+// fakeExt 模拟扩展客户端：连接 /ws、发 hello、按 handler 应答 tool_call。
+type fakeExt struct {
+	t    *testing.T
+	conn *websocket.Conn
+
+	mu      sync.Mutex
+	handler func(name string, args map[string]any) (any, string) // 返回 (data, errMsg)
+
+	lastArgsMu sync.Mutex
+	lastArgs   map[string]any
+}
+
+func connectExt(t *testing.T, ts *httptest.Server, handler func(name string, args map[string]any) (any, string)) *fakeExt {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	ext := &fakeExt{t: t, conn: conn, handler: handler}
+	t.Cleanup(func() { conn.Close() })
+
+	hello, _ := json.Marshal(map[string]any{"extensionVersion": "0.1.0"})
+	if err := conn.WriteJSON(ws.Message{Type: ws.MsgHello, Payload: hello}); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+	go ext.readLoop()
+	return ext
+}
+
+func (e *fakeExt) readLoop() {
+	for {
+		var msg ws.Message
+		if err := e.conn.ReadJSON(&msg); err != nil {
+			return
+		}
+		switch msg.Type {
+		case ws.MsgToolCall:
+			var p struct {
+				Name string         `json:"name"`
+				Args map[string]any `json:"args"`
+			}
+			if err := json.Unmarshal(msg.Payload, &p); err != nil {
+				continue
+			}
+			e.lastArgsMu.Lock()
+			e.lastArgs = p.Args
+			e.lastArgsMu.Unlock()
+
+			e.mu.Lock()
+			h := e.handler
+			e.mu.Unlock()
+			if h == nil {
+				continue // 不应答 → 触发超时
+			}
+			data, errMsg := h(p.Name, p.Args)
+			var payload []byte
+			if errMsg != "" {
+				payload, _ = json.Marshal(map[string]any{"error": errMsg})
+			} else {
+				d, _ := json.Marshal(data)
+				payload, _ = json.Marshal(map[string]any{"data": json.RawMessage(d)})
+			}
+			_ = e.conn.WriteJSON(ws.Message{
+				Type:                ws.MsgToolResult,
+				ResponseToRequestID: msg.RequestID,
+				Payload:             payload,
+			})
+		}
+	}
+}
+
+func (e *fakeExt) lastCallArgs() map[string]any {
+	e.lastArgsMu.Lock()
+	defer e.lastArgsMu.Unlock()
+	return e.lastArgs
+}
+
+// postCommand 发送 /command 并解析响应。
+func postCommand(t *testing.T, ts *httptest.Server, body string) map[string]any {
+	t.Helper()
+	resp, err := http.Post(ts.URL+"/command", "application/json", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("post /command: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/command status = %d, body %s", resp.StatusCode, raw)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("bad /command json: %v, body %s", err, raw)
+	}
+	return out
+}
+
+func waitFor(t *testing.T, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for %s", what)
+}
+
+func TestToolCallSuccess(t *testing.T) {
+	t.Parallel()
+	srv, ts := newTestServer(t)
+	ext := connectExt(t, ts, func(name string, args map[string]any) (any, string) {
+		return map[string]any{"success": true, "url": "https://example.com", "tabId": 123}, ""
+	})
+	waitFor(t, srv.Hub.Connected, "extension connected")
+
+	resp := postCommand(t, ts, `{"action":"navigate","args":{"url":"https://example.com","newTab":true},"session":"my-task"}`)
+	if resp["success"] != true {
+		t.Fatalf("success = %v, resp %v", resp["success"], resp)
+	}
+	data := resp["data"].(map[string]any)
+	if data["tabId"].(float64) != 123 {
+		t.Fatalf("tabId = %v", data["tabId"])
+	}
+
+	// 校验注入字段（协议 §3.4）
+	args := ext.lastCallArgs()
+	if args["_session"] != "my-task" {
+		t.Fatalf("_session = %v", args["_session"])
+	}
+	if args["_tabId"].(float64) != 0 {
+		t.Fatalf("_tabId = %v (first call, want 0)", args["_tabId"])
+	}
+	if ids, ok := args["_tabIds"].([]any); !ok || len(ids) != 0 {
+		t.Fatalf("_tabIds = %v (first call, want [])", args["_tabIds"])
+	}
+	if args["url"] != "https://example.com" {
+		t.Fatalf("url arg lost: %v", args)
+	}
+
+	// 第二次调用：session 应记住 tabId=123
+	resp = postCommand(t, ts, `{"action":"snapshot","session":"my-task"}`)
+	if resp["success"] != true {
+		t.Fatalf("second call failed: %v", resp)
+	}
+	args = ext.lastCallArgs()
+	if args["_tabId"].(float64) != 123 {
+		t.Fatalf("_tabId = %v (want 123 after navigate)", args["_tabId"])
+	}
+	ids := args["_tabIds"].([]any)
+	if len(ids) != 1 || ids[0].(float64) != 123 {
+		t.Fatalf("_tabIds = %v (want [123])", args["_tabIds"])
+	}
+}
+
+func TestToolCallError(t *testing.T) {
+	t.Parallel()
+	srv, ts := newTestServer(t)
+	connectExt(t, ts, func(name string, args map[string]any) (any, string) {
+		return nil, "click: element not found: #x"
+	})
+	waitFor(t, srv.Hub.Connected, "extension connected")
+
+	resp := postCommand(t, ts, `{"action":"click","args":{"selector":"#x"}}`)
+	if resp["success"] != false {
+		t.Fatalf("success = %v", resp["success"])
+	}
+	if resp["error"] != "click: element not found: #x" {
+		t.Fatalf("error = %v", resp["error"])
+	}
+}
+
+func TestToolCallTimeout(t *testing.T) {
+	t.Parallel()
+	srv, ts := newTestServer(t)
+	srv.Hub.ToolTimeout = 300 * time.Millisecond
+	connectExt(t, ts, nil) // 不应答
+	waitFor(t, srv.Hub.Connected, "extension connected")
+
+	resp := postCommand(t, ts, `{"action":"snapshot"}`)
+	if resp["success"] != false {
+		t.Fatalf("success = %v", resp["success"])
+	}
+	errMsg, _ := resp["error"].(string)
+	if !strings.Contains(errMsg, "tool call timeout") {
+		t.Fatalf("error = %q, want timeout", errMsg)
+	}
+}
+
+func TestSessionDefaultAndInjection(t *testing.T) {
+	t.Parallel()
+	srv, ts := newTestServer(t)
+	ext := connectExt(t, ts, func(name string, args map[string]any) (any, string) {
+		return map[string]any{"success": true, "tabId": 7}, ""
+	})
+	waitFor(t, srv.Hub.Connected, "extension connected")
+
+	// 不传 session → default；调用方传 _ 前缀字段应被覆盖
+	resp := postCommand(t, ts, `{"action":"navigate","args":{"url":"https://a.com","_session":"evil","_tabId":999}}`)
+	if resp["success"] != true {
+		t.Fatalf("resp = %v", resp)
+	}
+	args := ext.lastCallArgs()
+	if args["_session"] != "default" {
+		t.Fatalf("_session = %v (want default, caller value must be overridden)", args["_session"])
+	}
+	if args["_tabId"].(float64) != 0 {
+		t.Fatalf("_tabId = %v (caller value must be overridden)", args["_tabId"])
+	}
+
+	// close_tab 后 session 移除 tabId
+	resp = postCommand(t, ts, `{"action":"close_tab"}`)
+	if resp["success"] != true {
+		t.Fatalf("close_tab resp = %v", resp)
+	}
+	snap := srv.Sessions.Snapshot("default")
+	if len(snap.TabIDs) != 0 || snap.LastTabID != 0 {
+		t.Fatalf("after close_tab: %+v (want empty)", snap)
+	}
+}
+
+func TestScreenshotSavedToDisk(t *testing.T) {
+	t.Parallel()
+	srv, ts := newTestServer(t)
+	pngBytes := []byte("fake-png-bytes")
+	connectExt(t, ts, func(name string, args map[string]any) (any, string) {
+		return map[string]any{
+			"format":     "png",
+			"dataLength": len(pngBytes),
+			"data":       base64.StdEncoding.EncodeToString(pngBytes),
+		}, ""
+	})
+	waitFor(t, srv.Hub.Connected, "extension connected")
+
+	// args.path 优先，父目录自动创建
+	outPath := filepath.Join(t.TempDir(), "sub", "dir", "shot.png")
+	body := fmt.Sprintf(`{"action":"screenshot","args":{"path":%q}}`, outPath)
+	resp := postCommand(t, ts, body)
+	if resp["success"] != true {
+		t.Fatalf("resp = %v", resp)
+	}
+	data := resp["data"].(map[string]any)
+	if data["path"] != outPath {
+		t.Fatalf("path = %v", data["path"])
+	}
+	if data["sizeBytes"].(float64) != float64(len(pngBytes)) {
+		t.Fatalf("sizeBytes = %v", data["sizeBytes"])
+	}
+	if data["mimeType"] != "image/png" {
+		t.Fatalf("mimeType = %v", data["mimeType"])
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read saved screenshot: %v", err)
+	}
+	if !bytes.Equal(got, pngBytes) {
+		t.Fatalf("saved content mismatch: %q", got)
+	}
+}
+
+func TestUnknownTool(t *testing.T) {
+	t.Parallel()
+	_, ts := newTestServer(t)
+	resp := postCommand(t, ts, `{"action":"not_a_tool"}`)
+	if resp["success"] != false {
+		t.Fatalf("success = %v", resp["success"])
+	}
+	if resp["error"] != "unknown tool: not_a_tool" {
+		t.Fatalf("error = %v", resp["error"])
+	}
+}
+
+func TestExtensionNotConnected(t *testing.T) {
+	t.Parallel()
+	_, ts := newTestServer(t)
+	resp := postCommand(t, ts, `{"action":"navigate","args":{"url":"https://example.com"}}`)
+	if resp["success"] != false {
+		t.Fatalf("success = %v", resp["success"])
+	}
+	if resp["error"] != "extension not connected" {
+		t.Fatalf("error = %v", resp["error"])
+	}
+}
+
+func TestHelloAckAndStatus(t *testing.T) {
+	t.Parallel()
+	srv, ts := newTestServer(t)
+
+	// 手动发 hello，验证 hello_ack
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+	hello, _ := json.Marshal(map[string]any{"extensionVersion": "9.9.9"})
+	if err := conn.WriteJSON(ws.Message{Type: ws.MsgHello, Payload: hello}); err != nil {
+		t.Fatal(err)
+	}
+	var ack ws.Message
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatalf("read hello_ack: %v", err)
+	}
+	if ack.Type != ws.MsgHelloAck {
+		t.Fatalf("ack type = %q", ack.Type)
+	}
+	var p map[string]any
+	_ = json.Unmarshal(ack.Payload, &p)
+	if p["daemonVersion"] != "0.1.0" {
+		t.Fatalf("daemonVersion = %v", p["daemonVersion"])
+	}
+	waitFor(t, srv.Hub.Connected, "extension connected")
+
+	// /status 应反映扩展连接状态
+	resp, err := http.Get(ts.URL + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var st map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&st)
+	if st["running"] != true || st["version"] != "0.1.0" {
+		t.Fatalf("status = %v", st)
+	}
+	if st["extension_connected"] != true || st["extension_version"] != "9.9.9" {
+		t.Fatalf("status ext fields = %v", st)
+	}
+	if _, ok := st["sessions"].([]any); !ok {
+		t.Fatalf("sessions field = %v", st["sessions"])
+	}
+
+	// /healthz
+	resp2, err := http.Get(ts.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	body, _ := io.ReadAll(resp2.Body)
+	if resp2.StatusCode != http.StatusOK || string(body) != "ok" {
+		t.Fatalf("healthz = %d %q", resp2.StatusCode, body)
+	}
+}
+
+func TestNewConnectionKicksOld(t *testing.T) {
+	t.Parallel()
+	srv, ts := newTestServer(t)
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+
+	conn1, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn1.Close()
+	waitFor(t, srv.Hub.Connected, "first connection")
+
+	conn2, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn2.Close()
+
+	// 旧连接应被踢掉
+	_ = conn1.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn1.ReadMessage(); err == nil {
+		t.Fatal("old connection should have been closed")
+	}
+	if !srv.Hub.Connected() {
+		t.Fatal("hub should still be connected via new connection")
+	}
+}
