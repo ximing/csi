@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	"cdp-bridge/daemon/internal/backend"
-	"cdp-bridge/daemon/internal/session"
+	"csi/daemon/internal/backend"
+	"csi/daemon/internal/session"
 )
 
 // 协议 §4 的 17 个工具名。

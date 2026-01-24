@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"cdp-bridge/daemon/internal/daemon"
-	mcpserver "cdp-bridge/daemon/internal/mcp"
-	"cdp-bridge/daemon/internal/server"
-	"cdp-bridge/daemon/internal/version"
+	"csi/daemon/internal/daemon"
+	mcpserver "csi/daemon/internal/mcp"
+	"csi/daemon/internal/server"
+	"csi/daemon/internal/version"
 )
 
 // cmdServe 前台运行 daemon：日志同时写文件与 stdout，响应 SIGINT/SIGTERM 优雅退出。
@@ -56,7 +56,7 @@ func cmdServe() error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	logger.Printf("cdp-bridge %s serving on 127.0.0.1:%d (pid %d, id %s)",
+	logger.Printf("csi %s serving on 127.0.0.1:%d (pid %d, id %s)",
 		version.Version, port, os.Getpid(), id)
 
 	select {
@@ -79,7 +79,7 @@ func cmdStart() error {
 		return err
 	}
 	if pid, err := daemon.ReadPID(dir); err == nil && daemon.PIDAlive(pid) {
-		fmt.Printf("cdp-bridge already running (pid %d)\n", pid)
+		fmt.Printf("csi already running (pid %d)\n", pid)
 		return nil
 	}
 	daemon.RemovePID(dir) // 清理残留 pid 文件
@@ -111,7 +111,7 @@ func cmdStart() error {
 	for time.Now().Before(deadline) {
 		if err := ping(url); err == nil {
 			pid, _ := daemon.ReadPID(dir)
-			fmt.Printf("cdp-bridge started (pid %d, port %d)\n", pid, port)
+			fmt.Printf("csi started (pid %d, port %d)\n", pid, port)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -134,7 +134,7 @@ func cmdStop() error {
 	pid, err := daemon.ReadPID(dir)
 	if err != nil || !daemon.PIDAlive(pid) {
 		daemon.RemovePID(dir)
-		fmt.Println("cdp-bridge not running")
+		fmt.Println("csi not running")
 		return nil
 	}
 	proc, err := os.FindProcess(pid)
@@ -148,7 +148,7 @@ func cmdStop() error {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if !daemon.PIDAlive(pid) {
-			fmt.Printf("cdp-bridge stopped (pid %d)\n", pid)
+			fmt.Printf("csi stopped (pid %d)\n", pid)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -163,7 +163,7 @@ func cmdStatus() error {
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		fmt.Println("cdp-bridge not running")
+		fmt.Println("csi not running")
 		return nil
 	}
 	defer resp.Body.Close()

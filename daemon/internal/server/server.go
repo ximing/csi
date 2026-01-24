@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"time"
 
-	"cdp-bridge/daemon/internal/backend"
-	"cdp-bridge/daemon/internal/session"
-	"cdp-bridge/daemon/internal/tools"
-	"cdp-bridge/daemon/internal/version"
-	"cdp-bridge/daemon/internal/ws"
+	"csi/daemon/internal/backend"
+	"csi/daemon/internal/session"
+	"csi/daemon/internal/tools"
+	"csi/daemon/internal/version"
+	"csi/daemon/internal/ws"
 )
 
 // Server 聚合各内部组件，提供 HTTP Handler。

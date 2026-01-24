@@ -24,7 +24,7 @@ func TestScreenshotDefaultTempPath(t *testing.T) {
 	if filepath.Dir(path) != filepath.Clean(os.TempDir()) {
 		t.Fatalf("path = %q, want under TMPDIR", path)
 	}
-	if !strings.HasPrefix(filepath.Base(path), "cdp-bridge-screenshot-") ||
+	if !strings.HasPrefix(filepath.Base(path), "csi-screenshot-") ||
 		!strings.HasSuffix(path, ".jpeg") {
 		t.Fatalf("path = %q", path)
 	}

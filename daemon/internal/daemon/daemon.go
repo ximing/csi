@@ -1,4 +1,4 @@
-// Package daemon 提供运行目录（~/.cdp-bridge）相关能力：
+// Package daemon 提供运行目录（~/.csi）相关能力：
 // 目录初始化、pid 文件、identity.json、日志文件。
 package daemon
 
@@ -20,9 +20,9 @@ import (
 // DefaultPort 默认监听端口（协议 §1）。
 const DefaultPort = 10088
 
-// Port 返回监听端口：环境变量 CDP_BRIDGE_PORT 覆盖默认值。
+// Port 返回监听端口：环境变量 CSI_PORT 覆盖默认值。
 func Port() int {
-	if v := os.Getenv("CDP_BRIDGE_PORT"); v != "" {
+	if v := os.Getenv("CSI_PORT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n < 65536 {
 			return n
 		}
@@ -30,13 +30,13 @@ func Port() int {
 	return DefaultPort
 }
 
-// RunDir 返回运行目录 ~/.cdp-bridge。
+// RunDir 返回运行目录 ~/.csi。
 func RunDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".cdp-bridge"), nil
+	return filepath.Join(home, ".csi"), nil
 }
 
 // EnsureRunDir 创建运行目录及 logs 子目录。

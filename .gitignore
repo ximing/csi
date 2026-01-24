@@ -3,7 +3,7 @@ node_modules/
 extension/dist/
 
 # Go
-daemon/cdp-bridge
+daemon/csi
 *.exe
 
 # OS / editor

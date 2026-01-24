@@ -218,7 +218,7 @@ func TestForwardFailure(t *testing.T) {
 	}
 }
 
-// TestForwardUnreachable daemon 不可达时返回带 cdp-bridge start 提示的错误。
+// TestForwardUnreachable daemon 不可达时返回带 csi start 提示的错误。
 func TestForwardUnreachable(t *testing.T) {
 	// 申请一个端口后立刻关闭，保证不可达。
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -234,8 +234,8 @@ func TestForwardUnreachable(t *testing.T) {
 		t.Fatalf("want error result, got: %s", resultText(res))
 	}
 	text := resultText(res)
-	if !strings.Contains(text, "cdp-bridge start") {
-		t.Errorf("error should hint `cdp-bridge start`, got: %s", text)
+	if !strings.Contains(text, "csi start") {
+		t.Errorf("error should hint `csi start`, got: %s", text)
 	}
 }
 

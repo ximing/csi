@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"cdp-bridge/daemon/internal/ws"
+	"csi/daemon/internal/ws"
 )
 
 // ExtensionBackend 基于 WS hub 的扩展后端（协议 §3：tool_call/tool_result）。

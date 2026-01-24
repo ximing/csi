@@ -1,4 +1,4 @@
-// Package mcp 实现 cdp-bridge 的 stdio MCP server：
+// Package mcp 实现 csi 的 stdio MCP server：
 // 将协议 §4 的 17 个浏览器工具暴露为 MCP tools，
 // 作为薄代理转发到本机 daemon 的 POST /command（协议 §2.1）。
 package mcp
@@ -12,8 +12,8 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"cdp-bridge/daemon/internal/daemon"
-	"cdp-bridge/daemon/internal/version"
+	"csi/daemon/internal/daemon"
+	"csi/daemon/internal/version"
 )
 
 // Run 以 stdio 传输启动 MCP server，阻塞直到 stdin 关闭或 ctx 取消。
@@ -35,7 +35,7 @@ func Run(ctx context.Context) error {
 // NewServer 构建注册好 17 个工具的 MCP server，工具调用转发到 baseURL（daemon HTTP 地址）。
 func NewServer(baseURL string) *mcpsdk.Server {
 	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
-		Name:    "cdp-bridge",
+		Name:    "csi",
 		Version: version.Version,
 	}, nil)
 	fwd := &forwarder{baseURL: baseURL}

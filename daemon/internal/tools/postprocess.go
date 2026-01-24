@@ -42,7 +42,7 @@ func saveScreenshot(args map[string]any, data any) (any, error) {
 	path, _ := args["path"].(string)
 	if path == "" {
 		path = filepath.Join(os.TempDir(),
-			fmt.Sprintf("cdp-bridge-screenshot-%d.%s", time.Now().UnixMilli(), ext))
+			fmt.Sprintf("csi-screenshot-%d.%s", time.Now().UnixMilli(), ext))
 	}
 	if err := writeFileWithParents(path, raw); err != nil {
 		return nil, fmt.Errorf("screenshot: %w", err)

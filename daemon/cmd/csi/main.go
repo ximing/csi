@@ -1,4 +1,4 @@
-// cdp-bridge daemon CLI。
+// csi daemon CLI。
 //
 // 子命令：
 //
@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"os"
 
-	"cdp-bridge/daemon/internal/version"
+	"csi/daemon/internal/version"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 	case "status":
 		err = cmdStatus()
 	case "version":
-		fmt.Println("cdp-bridge " + version.Version)
+		fmt.Println("csi " + version.Version)
 	case "mcp":
 		err = cmdMCP()
 	case "-h", "--help", "help":
@@ -44,13 +44,13 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cdp-bridge %s: %v\n", os.Args[1], err)
+		fmt.Fprintf(os.Stderr, "csi %s: %v\n", os.Args[1], err)
 		os.Exit(1)
 	}
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `usage: cdp-bridge <command>
+	fmt.Fprint(os.Stderr, `usage: csi <command>
 
 commands:
   serve    run daemon in foreground
@@ -61,6 +61,6 @@ commands:
   mcp      run MCP server over stdio (forwards to the local daemon)
 
 environment:
-  CDP_BRIDGE_PORT  listen port (default 10088)
+  CSI_PORT  listen port (default 10088)
 `)
 }

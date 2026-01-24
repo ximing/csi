@@ -17,8 +17,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"cdp-bridge/daemon/internal/server"
-	"cdp-bridge/daemon/internal/ws"
+	"csi/daemon/internal/server"
+	"csi/daemon/internal/ws"
 )
 
 // newTestServer 起随机端口的真实 HTTP server（不占 10088）。

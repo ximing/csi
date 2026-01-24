@@ -1,4 +1,4 @@
-module cdp-bridge/daemon
+module csi/daemon
 
 go 1.26
 

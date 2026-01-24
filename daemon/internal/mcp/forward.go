@@ -97,7 +97,7 @@ func (f *forwarder) call(ctx context.Context, action string, args map[string]any
 
 	resp, err := f.httpClient().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("cdp-bridge daemon unreachable at %s (%v) — is it running? try `cdp-bridge start`", f.baseURL, err)
+		return nil, fmt.Errorf("csi daemon unreachable at %s (%v) — is it running? try `csi start`", f.baseURL, err)
 	}
 	defer resp.Body.Close()
 
