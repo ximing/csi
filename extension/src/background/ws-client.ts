@@ -3,7 +3,7 @@
  *
  * Connection intent (`ws_should_connect`, `local_url`) is persisted in
  * chrome.storage.local so a suspended service worker can be reconciled by
- * the `webbridge-reconcile` alarm (every 0.5 min): if we should be
+ * the `csi-reconcile` alarm (every 0.5 min): if we should be
  * connected but aren't, reconnect.
  */
 import {

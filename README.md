@@ -1,4 +1,6 @@
-# cdp-bridge
+# CSI
+
+**CSI** — Ctrl+Shift+I，每个程序员都按过的 DevTools 快捷键；也是 Crime Scene Investigation——AI 勘查浏览器案发现场。
 
 Let AI (Claude Code and other agents) control your **real Chrome browser** — navigate, click, type, read pages, take screenshots, save PDFs — using your actual login sessions. No automation-flagged browser, no separate profile: the agent drives the Chrome you already use.
 
@@ -31,14 +33,14 @@ The full wire contract is in [docs/protocol.md](docs/protocol.md).
 Prerequisites: Go, Node.js + npm, Chrome.
 
 ```bash
-# 1. Build and install (daemon → ~/.cdp-bridge/bin, extension → extension/dist)
+# 1. Build and install (daemon → ~/.csi/bin, extension → extension/dist)
 bash scripts/install.sh
 
 # 2. Load the extension in Chrome:
 #    chrome://extensions → Developer mode → Load unpacked → select extension/dist
 
 # 3. Start the daemon (idempotent — safe to run anytime)
-~/.cdp-bridge/bin/cdp-bridge start
+~/.csi/bin/csi start
 
 # 4. Check everything is wired up
 curl -s http://127.0.0.1:10088/status
@@ -58,16 +60,16 @@ curl -s -X POST http://127.0.0.1:10088/command \
   -d '{"action":"screenshot","args":{},"session":"demo"}'
 ```
 
-The installer can also copy the Claude Code skill to `~/.claude/skills/cdp-bridge/`, after which Claude Code will use the bridge automatically whenever you ask it to interact with websites.
+The installer can also copy the Claude Code skill to `~/.claude/skills/csi/`, after which Claude Code will use the bridge automatically whenever you ask it to interact with websites.
 
 ## MCP server
 
-`cdp-bridge mcp` runs a stdio MCP server exposing all 17 browser tools. It is a thin proxy: each tool call is forwarded to the local daemon's `POST /command` (same `CDP_BRIDGE_PORT`, default 10088), so the daemon must be running (`cdp-bridge start`).
+`csi mcp` runs a stdio MCP server exposing all 17 browser tools. It is a thin proxy: each tool call is forwarded to the local daemon's `POST /command` (same `CSI_PORT`, default 10088), so the daemon must be running (`csi start`).
 
 Mount it in Claude Code:
 
 ```bash
-claude mcp add cdp-bridge -- ~/.cdp-bridge/bin/cdp-bridge mcp
+claude mcp add csi -- ~/.csi/bin/csi mcp
 ```
 
 Each tool also takes an optional top-level `session` argument (default `"default"`) that maps to the daemon's session field. `screenshot`/`save_as_pdf` return a file path — view it with the Read tool.
@@ -79,10 +81,10 @@ Each tool also takes an optional top-level `session` argument (default `"default
 ## Directory layout
 
 ```
-cdp-bridge/
+csi/
 ├── docs/protocol.md        # the single source of truth for the wire protocol
 ├── daemon/                 # Go daemon (HTTP + WS server, session state)
-│   └── cmd/cdp-bridge/
+│   └── cmd/csi/
 ├── extension/              # Chrome MV3 extension (TypeScript, service worker)
 │   └── dist/               # build output — load this in chrome://extensions
 ├── skill/                  # Claude Code skill (SKILL.md + references/)
@@ -95,7 +97,7 @@ cdp-bridge/
 # daemon
 cd daemon
 go test ./...
-go build -o ~/.cdp-bridge/bin/cdp-bridge ./cmd/cdp-bridge
+go build -o ~/.csi/bin/csi ./cmd/csi
 
 # extension
 cd extension
@@ -105,7 +107,7 @@ npm run build        # outputs extension/dist — reload in chrome://extensions
 
 Protocol changes: edit `docs/protocol.md` first, then update both sides. The protocol file is the contract; implementations must follow it.
 
-Port: default `10088`, override with the `CDP_BRIDGE_PORT` environment variable (set the same port in the extension popup).
+Port: default `10088`, override with the `CSI_PORT` environment variable (set the same port in the extension popup).
 
 ## Security notes
 

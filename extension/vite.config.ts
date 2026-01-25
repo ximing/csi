@@ -12,7 +12,7 @@ const r = (p: string) => resolve(rootDir, p);
  */
 function copyStaticAssets(): Plugin {
   return {
-    name: 'cdp-bridge-copy-static',
+    name: 'csi-copy-static',
     closeBundle() {
       copyFileSync(r('manifest.json'), r('dist/manifest.json'));
       cpSync(r('icons'), r('dist/icons'), { recursive: true });

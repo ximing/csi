@@ -1,9 +1,9 @@
 {
   "description": {
-    "message": "cdp-bridge — 专为 AI Agent 设计的浏览器插件，让本机 daemon 帮你打开网页、点击按钮、填写表单、读取页面内容，自动化各种网页操作。"
+    "message": "CSI — 专为 AI Agent 设计的浏览器插件，让本机 daemon 帮你打开网页、点击按钮、填写表单、读取页面内容，自动化各种网页操作。"
   },
   "popupTitle": {
-    "message": "cdp-bridge"
+    "message": "CSI"
   },
   "statusConnected": {
     "message": "已连接"

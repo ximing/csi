@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 #
-# cdp-bridge installer
+# csi installer
 #
 # Builds the daemon (Go) and the Chrome extension (TS), installs the daemon
-# binary to ~/.cdp-bridge/bin/, and optionally installs the Claude Code skill
-# to ~/.claude/skills/cdp-bridge/.
+# binary to ~/.csi/bin/, and optionally installs the Claude Code skill
+# to ~/.claude/skills/csi/.
 #
 # Usage: bash scripts/install.sh
 
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-INSTALL_DIR="$HOME/.cdp-bridge"
-SKILL_DIR="$HOME/.claude/skills/cdp-bridge"
+INSTALL_DIR="$HOME/.csi"
+SKILL_DIR="$HOME/.claude/skills/csi"
 
-echo "==> cdp-bridge install"
+echo "==> csi install"
 echo "    project root : $PROJECT_ROOT"
 echo "    daemon dir   : $INSTALL_DIR"
 echo ""
@@ -32,10 +32,10 @@ mkdir -p "$INSTALL_DIR/bin"
 
 (
   cd "$PROJECT_ROOT/daemon"
-  go build -o "$INSTALL_DIR/bin/cdp-bridge" ./cmd/cdp-bridge
+  go build -o "$INSTALL_DIR/bin/csi" ./cmd/csi
 )
 
-echo "    built: $INSTALL_DIR/bin/cdp-bridge"
+echo "    built: $INSTALL_DIR/bin/csi"
 echo ""
 
 # --- 2. Build extension -------------------------------------------------------
@@ -101,7 +101,7 @@ fi
 
 echo ""
 echo "==> Done. Next steps:"
-echo "    - Start the daemon:   $INSTALL_DIR/bin/cdp-bridge start"
+echo "    - Start the daemon:   $INSTALL_DIR/bin/csi start"
 echo "    - Check status:       curl -s http://127.0.0.1:10088/status"
 echo "    - Smoke test:         curl -s -X POST http://127.0.0.1:10088/command \\"
 echo "                            -H 'Content-Type: application/json' \\"

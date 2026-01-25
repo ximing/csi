@@ -1,10 +1,10 @@
 {
   "description": {
-    "message": "cdp-bridge — browser extension for AI agents. A local daemon can open pages, click, fill forms, read page contents, and automate web tasks.",
+    "message": "CSI — browser extension for AI agents. A local daemon can open pages, click, fill forms, read page contents, and automate web tasks.",
     "description": "Extension description shown in Chrome Web Store and extension management page."
   },
   "popupTitle": {
-    "message": "cdp-bridge"
+    "message": "CSI"
   },
   "statusConnected": {
     "message": "Connected"

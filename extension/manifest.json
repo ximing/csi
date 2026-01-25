@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "cdp-bridge",
+  "name": "CSI",
   "description": "__MSG_description__",
   "version": "0.1.0",
   "default_locale": "en",

@@ -1,4 +1,4 @@
-# cdp-bridge 协议契约 v1
+# CSI 协议契约 v1
 
 本文件是 daemon（Go）与 extension（TS）两侧实现的**唯一契约**。任何一侧的实现都必须严格遵循本文件；如需变更，先改本文件再改实现。
 
@@ -11,7 +11,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 ```
 
 - daemon 是 **HTTP server** 兼 **WebSocket server**；扩展作为 WS **客户端**主动连 daemon。
-- 默认端口 `10088`，环境变量 `CDP_BRIDGE_PORT` 可覆盖。扩展默认连接 `ws://127.0.0.1:10088/ws`，popup 中可改。
+- 默认端口 `10088`，环境变量 `CSI_PORT` 可覆盖。扩展默认连接 `ws://127.0.0.1:10088/ws`，popup 中可改。
 - daemon 只绑定 `127.0.0.1`。
 
 ## 2. HTTP API
@@ -82,7 +82,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 ### 3.1 连接与重连
 
 - 扩展连接 `ws://127.0.0.1:<port>/ws`。
-- 扩展在 `chrome.storage.local` 持久化连接意愿（`ws_should_connect`、`local_url`），service worker 被挂起后通过 `chrome.alarms`（周期 0.5 分钟，名 `webbridge-reconcile`）做 reconcile：意愿为连接且当前未连接则重连。
+- 扩展在 `chrome.storage.local` 持久化连接意愿（`ws_should_connect`、`local_url`），service worker 被挂起后通过 `chrome.alarms`（周期 0.5 分钟，名 `csi-reconcile`）做 reconcile：意愿为连接且当前未连接则重连。
 - daemon 侧同一时间**只接受一个扩展连接**；新连接到来时踢掉旧连接。
 - daemon 每 30s 发 `ping`，扩展回 `pong`（应用层，非 WS 控制帧）。
 
@@ -175,7 +175,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 
 ## 5. 大结果后处理（daemon 侧）
 
-- `screenshot`：扩展返回 `{format, dataLength, data(base64)}`。daemon base64 解码后写入 `args.path`（父目录自动创建、覆盖写）；未提供 `path` 时写入 `$TMPDIR/cdp-bridge-screenshot-<ts>.<ext>`。最终响应 `{format, path, sizeBytes, mimeType}`。
+- `screenshot`：扩展返回 `{format, dataLength, data(base64)}`。daemon base64 解码后写入 `args.path`（父目录自动创建、覆盖写）；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>.<ext>`。最终响应 `{format, path, sizeBytes, mimeType}`。
 - `save_as_pdf`：扩展返回 `{data(base64), dataLength, pageTitle, requestedFileName}`。落盘规则同上；默认文件名取页面标题（清洗非法字符）+ `.pdf`。解码后 >100MB 拒绝并返回错误。
 
 ## 6. 版本与兼容

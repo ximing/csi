@@ -1,9 +1,9 @@
 {
-  "name": "cdp-bridge-extension",
+  "name": "csi-extension",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "cdp-bridge Chrome MV3 extension — lets a local daemon drive the browser over CDP",
+  "description": "CSI Chrome MV3 extension — lets a local daemon drive the browser over CDP",
   "scripts": {
     "build": "vite build",
     "watch": "vite build --watch",

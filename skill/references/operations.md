@@ -1,19 +1,19 @@
 # Operations: daemon lifecycle and recovery
 
-Read this only when a tool call can't reach the daemon, or the user explicitly asks to install / start / troubleshoot cdp-bridge.
+Read this only when a tool call can't reach the daemon, or the user explicitly asks to install / start / troubleshoot CSI.
 
 ## The daemon
 
-The `cdp-bridge` binary lives at `~/.cdp-bridge/bin/cdp-bridge` (Windows: `%USERPROFILE%\.cdp-bridge\bin\cdp-bridge.exe`) and serves a local HTTP + WebSocket daemon on `127.0.0.1:10088`. The port can be overridden with the `CDP_BRIDGE_PORT` environment variable (the extension's popup must then point at the same port).
+The `csi` binary lives at `~/.csi/bin/csi` (Windows: `%USERPROFILE%\.csi\bin\csi.exe`) and serves a local HTTP + WebSocket daemon on `127.0.0.1:10088`. The port can be overridden with the `CSI_PORT` environment variable (the extension's popup must then point at the same port).
 
-Directory layout under `~/.cdp-bridge/`:
+Directory layout under `~/.csi/`:
 
 ```
-~/.cdp-bridge/
+~/.csi/
 ├── bin/
-│   └── cdp-bridge        # daemon binary
-├── cdp-bridge.pid        # PID of the running daemon
-└── cdp-bridge.log        # daemon log (stdout/stderr when started in background)
+│   └── csi               # daemon binary
+├── csi.pid        # PID of the running daemon
+└── csi.log        # daemon log (stdout/stderr when started in background)
 ```
 
 The daemon binds `127.0.0.1` only — it is never reachable from other machines. There is no authentication in v1; loopback binding is the isolation boundary.
@@ -21,20 +21,20 @@ The daemon binds `127.0.0.1` only — it is never reachable from other machines.
 ## Recovery — what to do when a tool call fails
 
 1. **Daemon not reachable (connection refused)** → start it yourself, don't ask the user. `start` is idempotent: it no-ops if the daemon is already up, and concurrent starts converge to a single daemon (the OS lets only one process bind port 10088).
-   - macOS / Linux: `~/.cdp-bridge/bin/cdp-bridge start`
-   - Windows: `& "$env:USERPROFILE\.cdp-bridge\bin\cdp-bridge.exe" start`
+   - macOS / Linux: `~/.csi/bin/csi start`
+   - Windows: `& "$env:USERPROFILE\.csi\bin\csi.exe" start`
 
    Then retry the tool call.
 2. **`command not found` / binary missing** → not installed. Ask the user to run the installer from the project checkout: `bash scripts/install.sh`, then load the built extension in Chrome.
 3. **Daemon up but `extension not connected`** → the browser side is missing. Ask the user to:
-   - Open `chrome://extensions` and verify the cdp-bridge extension is installed and enabled.
-   - Open the extension's popup and confirm it shows "connected" (and the correct port if `CDP_BRIDGE_PORT` is used).
+   - Open `chrome://extensions` and verify the CSI extension is installed and enabled.
+   - Open the extension's popup and confirm it shows "connected" (and the correct port if `CSI_PORT` is used).
    - If Chrome was restarted recently, give the service worker a few seconds — the extension reconnects automatically via its reconcile alarm (every 30s).
-4. **Anything still broken after a `start` + retry** → don't deep-troubleshoot in-session. Check `~/.cdp-bridge/cdp-bridge.log` for obvious errors and report them to the user.
+4. **Anything still broken after a `start` + retry** → don't deep-troubleshoot in-session. Check `~/.csi/csi.log` for obvious errors and report them to the user.
 
 ## Do NOT do automatically
 
-Never run `stop` / `restart` / `uninstall` on your own. They kill the running daemon and any in-flight work by the user or other agent sessions. If a hard restart is genuinely needed, ask the user to run `cdp-bridge restart` by hand.
+Never run `stop` / `restart` / `uninstall` on your own. They kill the running daemon and any in-flight work by the user or other agent sessions. If a hard restart is genuinely needed, ask the user to run `csi restart` by hand.
 
 Also do not "fix" version mismatches yourself. If `/status` shows the extension is connected but tool calls fail with `unknown tool`, the daemon and extension builds are out of sync — tell the user to rebuild and reload both.
 

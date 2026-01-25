@@ -1,12 +1,12 @@
 ---
-name: cdp-bridge
+name: csi
 description: |
-  cdp-bridge lets AI control the user's real Chrome browser — navigate, click, type, read, screenshot, save as PDF, and interact with any website using the user's actual login sessions. Use this skill whenever the user wants to interact with websites, automate browser tasks, scrape web content, or perform any action requiring a real browser. Also use when the user mentions "browser", "webpage", "open URL", "screenshot", or asks to read/interact with any website. Use even for simple-sounding browser requests — the daemon handles all complexity.
+  CSI lets AI control the user's real Chrome browser — navigate, click, type, read, screenshot, save as PDF, and interact with any website using the user's actual login sessions. Use this skill whenever the user wants to interact with websites, automate browser tasks, scrape web content, or perform any action requiring a real browser. Also use when the user mentions "browser", "webpage", "open URL", "screenshot", or asks to read/interact with any website. Use even for simple-sounding browser requests — the daemon handles all complexity.
 metadata:
   version: "0.1.0"
 ---
 
-# cdp-bridge
+# CSI
 
 Control the user's real Chrome browser (with their login sessions) via a local daemon at `http://127.0.0.1:10088`.
 
@@ -64,11 +64,11 @@ Success and failure both come back as HTTP 200 with a JSON body: `{ "success": t
 
 **Windows (PowerShell / cmd)** — the shell corrupts non-ASCII characters (Chinese etc.) carried inline in command arguments or pipes; they reach the daemon as `?` and the text is unrecoverable. Send **every** request as a file body instead:
 
-1. Write the JSON body to a **uniquely-named** temp file with your own file-write tool — never with shell `echo`/heredoc, which corrupts non-ASCII the same way. Give **every** request its own filename with a random suffix (e.g. `cdp-bridge-req-<random>.json`) so concurrent requests never share a file and overwrite each other.
+1. Write the JSON body to a **uniquely-named** temp file with your own file-write tool — never with shell `echo`/heredoc, which corrupts non-ASCII the same way. Give **every** request its own filename with a random suffix (e.g. `csi-req-<random>.json`) so concurrent requests never share a file and overwrite each other.
 2. POST the file with `curl.exe` — always `curl.exe`, never bare `curl`, which Windows PowerShell aliases to `Invoke-WebRequest`:
 
 ```powershell
-curl.exe -s -X POST http://127.0.0.1:10088/command -H "Content-Type: application/json" --data-binary "@$env:TEMP\cdp-bridge-req-<random>.json"
+curl.exe -s -X POST http://127.0.0.1:10088/command -H "Content-Type: application/json" --data-binary "@$env:TEMP\csi-req-<random>.json"
 ```
 
 3. Delete the temp file as soon as the request returns — don't leave request bodies on disk.
@@ -179,15 +179,15 @@ Decoded PDF cap is 100 MB. Above that the daemon refuses; reduce `scale` or spli
 **macOS / Linux:**
 
 ```bash
-~/.cdp-bridge/bin/cdp-bridge start
+~/.csi/bin/csi start
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-& "$env:USERPROFILE\.cdp-bridge\bin\cdp-bridge.exe" start
+& "$env:USERPROFILE\.csi\bin\csi.exe" start
 ```
 
-Then retry the tool call. If it still fails — or the browser extension won't connect — check `references/operations.md` for recovery steps, and ask the user to verify the cdp-bridge extension is installed and enabled in Chrome (`chrome://extensions`) and shows "connected" in its popup.
+Then retry the tool call. If it still fails — or the browser extension won't connect — check `references/operations.md` for recovery steps, and ask the user to verify the CSI extension is installed and enabled in Chrome (`chrome://extensions`) and shows "connected" in its popup.
 
 Never run `stop` / `restart` / `uninstall` automatically — those kill a running daemon. See `references/operations.md` for anything deeper.
