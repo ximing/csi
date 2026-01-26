@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -115,12 +114,4 @@ func RemovePID(dir string) {
 	}
 }
 
-// PIDAlive 检查进程是否存活。
-func PIDAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// unix 上 signal 0 仅做存活探测
-	return proc.Signal(syscall.Signal(0)) == nil
-}
+// PIDAlive 按平台实现，见 alive_unix.go / alive_windows.go。

@@ -1,0 +1,108 @@
+name: release
+
+# 打 tag（v*）即发版：交叉编译 daemon、构建扩展、打包 skill，全部传到 Release。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  daemon:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: daemon/go.mod
+
+      - name: Build daemon
+        working-directory: daemon
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build -trimpath -ldflags="-s -w" -o out/ ./cmd/csi
+
+      - name: Package (tar.gz)
+        if: matrix.goos != 'windows'
+        run: |
+          mkdir -p assets
+          tar -C daemon/out -czf "assets/csi-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" csi
+
+      - name: Package (zip)
+        if: matrix.goos == 'windows'
+        run: |
+          mkdir -p assets
+          cd daemon/out && zip "$OLDPWD/assets/csi-windows-amd64.zip" csi.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: daemon-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: assets/
+          if-no-files-found: error
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Build extension
+        working-directory: extension
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Package extension and skill
+        run: |
+          mkdir -p assets
+          cd extension/dist && zip -qr "$OLDPWD/assets/csi-extension.zip" . && cd "$OLDPWD"
+          tar -czf assets/csi-skill.tar.gz skill
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-assets
+          path: assets/
+          if-no-files-found: error
+
+  release:
+    needs: [daemon, extension]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*'
+          path: assets
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: assets
+        run: sha256sum *.tar.gz *.zip > checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+          generate_release_notes: true

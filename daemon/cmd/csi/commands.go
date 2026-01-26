@@ -98,8 +98,8 @@ func cmdStart() error {
 	cmd.Env = os.Environ()
 	cmd.Stdout = logf
 	cmd.Stderr = logf
-	// 脱离父进程会话，父进程退出后 daemon 继续运行
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// 脱离父进程会话，父进程退出后 daemon 继续运行（平台相关，见 sysproc_*.go）
+	detachProc(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func cmdStop() error {
 	if err != nil {
 		return err
 	}
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	if err := terminate(proc); err != nil {
 		return err
 	}
 	// 等待退出（最多 5s）

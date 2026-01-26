@@ -30,23 +30,34 @@ The full wire contract is in [docs/protocol.md](docs/protocol.md).
 
 ## Quick start
 
-Prerequisites: Go, Node.js + npm, Chrome.
+Prerequisites: Chrome. Everything else is downloaded prebuilt from [GitHub Releases](https://github.com/ximing/csi/releases) — no Go/Node needed.
+
+**1. Install** — daemon → `~/.csi/bin`, extension → `~/.csi/extension`, Claude Code skill → `~/.claude/skills/csi`; the daemon is started at the end:
 
 ```bash
-# 1. Build and install (daemon → ~/.csi/bin, extension → extension/dist)
-bash scripts/install.sh
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.sh | bash
+```
 
-# 2. Load the extension in Chrome:
-#    chrome://extensions → Developer mode → Load unpacked → select extension/dist
+```powershell
+# Windows (PowerShell 5.1+)
+irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
+```
 
-# 3. Start the daemon (idempotent — safe to run anytime)
-~/.csi/bin/csi start
+Both installers accept the same flags: `--no-start` / `-NoStart` (don't start the daemon), `--no-skill` / `-NoSkill` (don't touch `~/.claude/skills`), `-y` / `-Yes` (don't prompt before overwriting an existing skill install). Pin a specific release with `CSI_VERSION=v0.1.0`.
 
-# 4. Check everything is wired up
+**2. Load the extension in Chrome** (manual step): `chrome://extensions` → Developer mode → Load unpacked → select `~/.csi/extension`. Open the extension popup and confirm it shows "connected".
+
+**3. Check everything is wired up** (the installer already started the daemon; `csi start` is idempotent — safe to run anytime):
+
+```bash
 curl -s http://127.0.0.1:10088/status
 # → {"running":true,"extension_connected":true,...}
+```
 
-# 5. Drive the browser
+**4. Drive the browser:**
+
+```bash
 curl -s -X POST http://127.0.0.1:10088/command \
   -H 'Content-Type: application/json' \
   -d '{"action":"navigate","args":{"url":"https://example.com","newTab":true,"group_title":"Demo"},"session":"demo"}'
@@ -88,7 +99,8 @@ csi/
 ├── extension/              # Chrome MV3 extension (TypeScript, service worker)
 │   └── dist/               # build output — load this in chrome://extensions
 ├── skill/                  # Claude Code skill (SKILL.md + references/)
-└── scripts/install.sh      # build + install script
+├── scripts/                # installers: install.sh (macOS/Linux), install.ps1 (Windows)
+└── .github/workflows/      # release.yml — tag v* → cross-build daemon + extension → GitHub Release
 ```
 
 ## Development
@@ -103,6 +115,9 @@ go build -o ~/.csi/bin/csi ./cmd/csi
 cd extension
 npm install
 npm run build        # outputs extension/dist — reload in chrome://extensions
+
+# release (pushes a tag → workflow cross-builds everything and drafts a Release)
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 Protocol changes: edit `docs/protocol.md` first, then update both sides. The protocol file is the contract; implementations must follow it.
