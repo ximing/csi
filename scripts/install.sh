@@ -20,6 +20,7 @@ BIN_DIR="$INSTALL_DIR/bin"
 BIN_PATH="$BIN_DIR/csi"
 EXT_DIR="$INSTALL_DIR/extension"
 SKILL_DIR="$HOME/.claude/skills/csi"
+E2E_SKILL_DIR="$HOME/.claude/skills/csi-e2e"
 
 # ---------- output ----------
 
@@ -55,7 +56,7 @@ Environment:
 What it does:
   1. Download the prebuilt daemon  → $BIN_PATH
   2. Download the built extension  → $EXT_DIR  (load this in chrome://extensions)
-  3. Install the Claude Code skill → $SKILL_DIR
+  3. Install the Claude Code skills → $SKILL_DIR + $E2E_SKILL_DIR
   4. Start the daemon (idempotent)
 EOF
 }
@@ -140,30 +141,35 @@ mkdir -p "$EXT_DIR"
 unzip -q "$TMP_DIR/extension.zip" -d "$EXT_DIR"
 ok "extension: $EXT_DIR"
 
-# ---------- 3. Claude Code skill ----------
+# ---------- 3. Claude Code skills ----------
+
+install_skill() { # tar-name dest-dir
+  download "$DL/$1" "$TMP_DIR/$1"
+  rm -rf "$2"
+  mkdir -p "$(dirname "$2")"
+  tar -xzf "$TMP_DIR/$1" -C "$(dirname "$2")"
+  ok "skill: $2"
+}
 
 if [ "$NO_SKILL" -eq 1 ]; then
-  step "[3/4] Claude Code skill — skipped (--no-skill)"
+  step "[3/4] Claude Code skills — skipped (--no-skill)"
 else
-  step "[3/4] Claude Code skill"
+  step "[3/4] Claude Code skills"
 
   do_install=1
-  if [ -d "$SKILL_DIR" ] && [ "$ASSUME_YES" -eq 0 ]; then
+  if { [ -d "$SKILL_DIR" ] || [ -d "$E2E_SKILL_DIR" ]; } && [ "$ASSUME_YES" -eq 0 ]; then
     # 通过管道运行（curl | bash）时 stdin 被脚本占用，从 /dev/tty 读回答
     if [ -t 0 ]; then
-      read -r -p "    skill already present at $SKILL_DIR — overwrite? [y/N] " answer
+      read -r -p "    skills already present under ~/.claude/skills — overwrite? [y/N] " answer
     else
-      read -r -p "    skill already present at $SKILL_DIR — overwrite? [y/N] " answer < /dev/tty || answer=""
+      read -r -p "    skills already present under ~/.claude/skills — overwrite? [y/N] " answer < /dev/tty || answer=""
     fi
     case "$answer" in y|Y|yes|YES) ;; *) do_install=0 ;; esac
   fi
 
   if [ "$do_install" -eq 1 ]; then
-    download "$DL/csi-skill.tar.gz" "$TMP_DIR/skill.tar.gz"
-    rm -rf "$SKILL_DIR"
-    mkdir -p "$(dirname "$SKILL_DIR")"
-    tar -xzf "$TMP_DIR/skill.tar.gz" -C "$(dirname "$SKILL_DIR")"
-    ok "skill: $SKILL_DIR"
+    install_skill csi-skill.tar.gz "$SKILL_DIR"
+    install_skill csi-e2e-skill.tar.gz "$E2E_SKILL_DIR"
   else
     info "skipped (kept existing)"
   fi
