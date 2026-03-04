@@ -34,6 +34,7 @@ $BinDir     = Join-Path $InstallDir 'bin'
 $BinPath    = Join-Path $BinDir 'csi.exe'
 $ExtDir     = Join-Path $InstallDir 'extension'
 $SkillDir   = Join-Path $env:USERPROFILE '.claude\skills\csi'
+$E2ESkillDir = Join-Path $env:USERPROFILE '.claude\skills\csi-e2e'
 
 # ---------- output helpers ----------
 
@@ -65,7 +66,7 @@ Environment:
 What it does:
   1. Download the prebuilt daemon  -> $BinPath
   2. Download the built extension  -> $ExtDir  (load this in chrome://extensions)
-  3. Install the Claude Code skill -> $SkillDir
+  3. Install the Claude Code skills -> $SkillDir + $E2ESkillDir
   4. Start the daemon (idempotent)
 "@
     exit 0
@@ -121,28 +122,33 @@ try {
     Expand-Archive $extZip -DestinationPath $ExtDir
     Ok "extension: $ExtDir"
 
-    # ---------- 3. Claude Code skill ----------
+    # ---------- 3. Claude Code skills ----------
+
+    function Install-Skill ([string]$TarName, [string]$DestDir) {
+        $tar = Join-Path $TmpDir $TarName
+        Download "$DL/$TarName" $tar
+        if (Test-Path $DestDir) { Remove-Item $DestDir -Recurse -Force }
+        New-Item -ItemType Directory -Path (Split-Path -Parent $DestDir) -Force | Out-Null
+        # Windows 10+ 自带 bsdtar，可直接解 tar.gz
+        & tar -xzf $tar -C (Split-Path -Parent $DestDir)
+        if ($LASTEXITCODE -ne 0) { Die "failed to extract $TarName" }
+        Ok "skill: $DestDir"
+    }
 
     if ($NoSkill) {
-        Step '[3/4] Claude Code skill - skipped (-NoSkill)'
+        Step '[3/4] Claude Code skills - skipped (-NoSkill)'
     } else {
-        Step '[3/4] Claude Code skill'
+        Step '[3/4] Claude Code skills'
 
         $doInstall = $true
-        if ((Test-Path $SkillDir) -and -not $Yes) {
-            $answer = Read-Host "    skill already present at $SkillDir - overwrite? [y/N]"
+        if (((Test-Path $SkillDir) -or (Test-Path $E2ESkillDir)) -and -not $Yes) {
+            $answer = Read-Host '    skills already present under ~/.claude/skills - overwrite? [y/N]'
             $doInstall = ($answer -match '^(y|yes)$')
         }
 
         if ($doInstall) {
-            $skillTar = Join-Path $TmpDir 'skill.tar.gz'
-            Download "$DL/csi-skill.tar.gz" $skillTar
-            if (Test-Path $SkillDir) { Remove-Item $SkillDir -Recurse -Force }
-            New-Item -ItemType Directory -Path (Split-Path -Parent $SkillDir) -Force | Out-Null
-            # Windows 10+ 自带 bsdtar，可直接解 tar.gz
-            & tar -xzf $skillTar -C (Split-Path -Parent $SkillDir)
-            if ($LASTEXITCODE -ne 0) { Die 'failed to extract skill package' }
-            Ok "skill: $SkillDir"
+            Install-Skill 'csi-skill.tar.gz' $SkillDir
+            Install-Skill 'csi-e2e-skill.tar.gz' $E2ESkillDir
         } else {
             Info 'skipped (kept existing)'
         }

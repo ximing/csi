@@ -76,11 +76,15 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
 
-      - name: Package extension and skill
+      - name: Package extension and skills
         run: |
-          mkdir -p assets
+          mkdir -p assets pkg
           cd extension/dist && zip -qr "$OLDPWD/assets/csi-extension.zip" . && cd "$OLDPWD"
-          tar -czf assets/csi-skill.tar.gz skill
+          # 经暂存目录打包，保证归档根名与安装目标（~/.claude/skills/<name>）一致
+          cp -r skill pkg/csi
+          cp -r skill-e2e pkg/csi-e2e
+          tar -C pkg -czf assets/csi-skill.tar.gz csi
+          tar -C pkg -czf assets/csi-e2e-skill.tar.gz csi-e2e
 
       - uses: actions/upload-artifact@v4
         with:
