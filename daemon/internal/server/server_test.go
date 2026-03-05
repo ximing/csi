@@ -340,7 +340,7 @@ func TestHelloAckAndStatus(t *testing.T) {
 	}
 	var p map[string]any
 	_ = json.Unmarshal(ack.Payload, &p)
-	if p["daemonVersion"] != "0.1.0" {
+	if p["daemonVersion"] != "0.2.0" {
 		t.Fatalf("daemonVersion = %v", p["daemonVersion"])
 	}
 	waitFor(t, srv.Hub.Connected, "extension connected")
@@ -353,7 +353,7 @@ func TestHelloAckAndStatus(t *testing.T) {
 	defer resp.Body.Close()
 	var st map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&st)
-	if st["running"] != true || st["version"] != "0.1.0" {
+	if st["running"] != true || st["version"] != "0.2.0" {
 		t.Fatalf("status = %v", st)
 	}
 	if st["extension_connected"] != true || st["extension_version"] != "9.9.9" {
