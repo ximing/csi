@@ -1,5 +1,5 @@
 // Package daemon 提供运行目录（~/.csi）相关能力：
-// 目录初始化、pid 文件、identity.json、日志文件。
+// 目录初始化、pid 文件、identity.json、按天滚动的日志（见 logrotate.go）。
 package daemon
 
 import (
@@ -48,12 +48,6 @@ func EnsureRunDir() (string, error) {
 		return "", err
 	}
 	return dir, nil
-}
-
-// OpenLog 以追加方式打开 logs/daemon.log。
-func OpenLog(dir string) (*os.File, error) {
-	return os.OpenFile(filepath.Join(dir, "logs", "daemon.log"),
-		os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 }
 
 // identity identity.json 内容：首次启动生成的随机 id。

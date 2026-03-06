@@ -29,13 +29,13 @@ func cmdServe() error {
 	if err != nil {
 		return err
 	}
-	logf, err := daemon.OpenLog(dir)
+	daily, err := daemon.OpenDailyLog(dir)
 	if err != nil {
 		return err
 	}
-	defer logf.Close()
+	defer daily.Close()
 
-	logger := log.New(io.MultiWriter(os.Stdout, logf), "", log.LstdFlags)
+	logger := log.New(io.MultiWriter(os.Stdout, daily), "", log.LstdFlags)
 	port := daemon.Port()
 
 	if err := daemon.WritePID(dir, os.Getpid()); err != nil {
@@ -84,7 +84,7 @@ func cmdStart() error {
 	}
 	daemon.RemovePID(dir) // 清理残留 pid 文件
 
-	logf, err := daemon.OpenLog(dir)
+	logf, err := daemon.OpenLogFile(dir)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func cmdStart() error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("daemon did not become ready within 5s, see %s/logs/daemon.log", dir)
+	return fmt.Errorf("daemon did not become ready within 5s, see logs under %s/logs", dir)
 }
 
 // cmdMCP 以 stdio 传输运行 MCP server，把 17 个浏览器工具暴露给 MCP 客户端，

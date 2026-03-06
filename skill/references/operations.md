@@ -11,10 +11,14 @@ Directory layout under `~/.csi/`:
 ```
 ~/.csi/
 ├── bin/
-│   └── csi               # daemon binary
-├── csi.pid        # PID of the running daemon
-└── csi.log        # daemon log (stdout/stderr when started in background)
+│   └── csi                      # daemon binary
+├── daemon.pid                   # PID of the running daemon
+└── logs/
+    ├── daemon-2026-03-06.log    # one log file per day (local date)
+    └── daemon-2026-03-05.log    # daily rolling — only the last 3 days are kept
 ```
+
+Logs roll by day and are pruned automatically (3-day retention) — that's where to look when identifying anomalies from earlier runs.
 
 The daemon binds `127.0.0.1` only — it is never reachable from other machines. There is no authentication in v1; loopback binding is the isolation boundary.
 
@@ -30,7 +34,7 @@ The daemon binds `127.0.0.1` only — it is never reachable from other machines.
    - Open `chrome://extensions` and verify the CSI extension is installed and enabled.
    - Open the extension's popup and confirm it shows "connected" (and the correct port if `CSI_PORT` is used).
    - If Chrome was restarted recently, give the service worker a few seconds — the extension reconnects automatically via its reconcile alarm (every 30s).
-4. **Anything still broken after a `start` + retry** → don't deep-troubleshoot in-session. Check `~/.csi/csi.log` for obvious errors and report them to the user.
+4. **Anything still broken after a `start` + retry** → don't deep-troubleshoot in-session. Check today's log under `~/.csi/logs/` (`daemon-YYYY-MM-DD.log`, previous days kept for 3 days) for obvious errors and report them to the user.
 
 ## Do NOT do automatically
 
