@@ -356,6 +356,10 @@ func TestHelloAckAndStatus(t *testing.T) {
 	if st["running"] != true || st["version"] != "0.2.0" {
 		t.Fatalf("status = %v", st)
 	}
+	// 测试 server 与用例同进程，pid 应等于当前进程
+	if st["pid"].(float64) != float64(os.Getpid()) {
+		t.Fatalf("pid = %v (want %d)", st["pid"], os.Getpid())
+	}
 	if st["extension_connected"] != true || st["extension_version"] != "9.9.9" {
 		t.Fatalf("status ext fields = %v", st)
 	}

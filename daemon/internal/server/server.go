@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"csi/daemon/internal/backend"
@@ -91,6 +92,7 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 // statusResponse /status 响应（协议 §2.2）。
 type statusResponse struct {
 	Running            bool     `json:"running"`
+	PID                int      `json:"pid"` // 供 stop/start 做身份校验，防 PID 复用误杀
 	Version            string   `json:"version"`
 	ExtensionConnected bool     `json:"extension_connected"`
 	ExtensionVersion   string   `json:"extension_version"`
@@ -102,6 +104,7 @@ type statusResponse struct {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, statusResponse{
 		Running:            true,
+		PID:                os.Getpid(),
 		Version:            version.Version,
 		ExtensionConnected: s.Hub.Connected(),
 		ExtensionVersion:   s.Hub.ExtensionVersion(),

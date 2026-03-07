@@ -4,7 +4,8 @@
 //
 //	serve    前台运行 daemon
 //	start    后台守护（幂等：已在运行则 no-op）
-//	stop     停止后台 daemon
+//	stop     停止后台 daemon（--force 跳过身份校验）
+//	restart  重启后台 daemon
 //	status   查询运行状态
 //	version  打印版本
 //	mcp      stdio MCP server（17 个浏览器工具，转发到本机 daemon）
@@ -30,6 +31,8 @@ func main() {
 		err = cmdStart()
 	case "stop":
 		err = cmdStop()
+	case "restart":
+		err = cmdRestart()
 	case "status":
 		err = cmdStatus()
 	case "version":
@@ -53,12 +56,13 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: csi <command>
 
 commands:
-  serve    run daemon in foreground
-  start    start daemon in background (no-op if already running)
-  stop     stop background daemon
-  status   show daemon status
-  version  print version
-  mcp      run MCP server over stdio (forwards to the local daemon)
+  serve           run daemon in foreground
+  start           start daemon in background (no-op if already running)
+  stop [--force]  stop background daemon
+  restart         restart background daemon
+  status          show daemon status
+  version         print version
+  mcp             run MCP server over stdio (forwards to the local daemon)
 
 environment:
   CSI_PORT  listen port (default 10088)

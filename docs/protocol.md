@@ -64,6 +64,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 ```json
 {
   "running": true,
+  "pid": 12345,
   "version": "0.1.0",
   "extension_connected": true,
   "extension_version": "0.1.0",
@@ -72,6 +73,8 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
   "port": 10088
 }
 ```
+
+`pid` 供 `csi stop` / `csi start` 做身份校验（防 PID 复用误杀）。
 
 ### 2.3 `GET /healthz`
 

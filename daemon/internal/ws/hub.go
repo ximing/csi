@@ -31,6 +31,9 @@ const (
 // ErrNotConnected 扩展未连接。
 var ErrNotConnected = errors.New("extension not connected")
 
+// ErrShuttingDown daemon 正在关闭（Close 唤醒在途调用时使用）。
+var ErrShuttingDown = errors.New("daemon shutting down")
+
 // Message 顶层消息结构（协议 §3.2）。
 type Message struct {
 	Type                string          `json:"type"`
@@ -45,6 +48,13 @@ type toolResultPayload struct {
 	Error string          `json:"error"`
 }
 
+// pendingCall 在途的 tool_call，带连接代数：
+// 旧连接被踢退出时只能唤醒属于自己代数的调用，避免误杀新连接的在途调用。
+type pendingCall struct {
+	gen uint64
+	ch  chan toolResultPayload
+}
+
 // Hub 管理唯一的扩展 WS 连接及 tool_call 请求/响应关联。
 type Hub struct {
 	Version      string        // hello_ack 中告知扩展的 daemon 版本
@@ -54,8 +64,9 @@ type Hub struct {
 
 	mu         sync.Mutex
 	conn       *websocket.Conn
+	gen        uint64 // 连接代数，setConn 时递增
 	extVersion string
-	pending    map[string]chan toolResultPayload
+	pending    map[string]pendingCall
 
 	writeMu sync.Mutex // 写帧串行化（ping 与 tool_call 并发写）
 	counter atomic.Uint64
@@ -71,7 +82,7 @@ func New(daemonVersion string, logger *log.Logger) *Hub {
 		ToolTimeout:  120 * time.Second,
 		PingInterval: 30 * time.Second,
 		Logger:       logger,
-		pending:      make(map[string]chan toolResultPayload),
+		pending:      make(map[string]pendingCall),
 	}
 }
 
@@ -101,42 +112,34 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		h.Logger.Printf("ws upgrade failed: %v", err)
 		return
 	}
-	h.setConn(conn)
+	gen := h.setConn(conn)
 	go h.pingLoop(conn)
-	h.readLoop(conn) // 阻塞直至连接断开
+	h.readLoop(conn, gen) // 阻塞直至连接断开
 }
 
-func (h *Hub) setConn(conn *websocket.Conn) {
+// setConn 换绑新连接并递增代数，返回新连接的代数。
+func (h *Hub) setConn(conn *websocket.Conn) uint64 {
 	h.mu.Lock()
+	h.gen++
+	gen := h.gen
 	old := h.conn
 	h.conn = conn
 	h.extVersion = ""
 	h.mu.Unlock()
 	if old != nil && old != conn {
 		h.Logger.Printf("new extension connected, kicking old connection")
-		old.Close() // 旧连接的 readLoop 会自行清理 pending
+		old.Close() // 旧连接的 readLoop 会按代数清理自己的 pending
 	}
+	return gen
 }
 
 // readLoop 读循环：hello / pong / tool_result。
-func (h *Hub) readLoop(conn *websocket.Conn) {
+func (h *Hub) readLoop(conn *websocket.Conn, gen uint64) {
+	// 清理 defer 先注册、recover 后注册：panic 时 recover 先执行，清理仍会执行。
+	defer h.connDone(conn, gen)
 	defer func() {
-		h.mu.Lock()
-		same := h.conn == conn
-		if same {
-			h.conn = nil
-			h.extVersion = ""
-		}
-		pending := h.pending
-		h.pending = make(map[string]chan toolResultPayload)
-		h.mu.Unlock()
-		// 连接断开，唤醒所有等待中的调用
-		for _, ch := range pending {
-			ch <- toolResultPayload{Error: ErrNotConnected.Error()}
-		}
-		conn.Close()
-		if same {
-			h.Logger.Printf("extension disconnected")
+		if r := recover(); r != nil {
+			h.Logger.Printf("ws: panic in readLoop: %v", r)
 		}
 	}()
 
@@ -168,7 +171,7 @@ func (h *Hub) readLoop(conn *websocket.Conn) {
 			// 心跳应答，无需处理
 		case MsgToolResult:
 			h.mu.Lock()
-			ch, ok := h.pending[msg.ResponseToRequestID]
+			pc, ok := h.pending[msg.ResponseToRequestID]
 			if ok {
 				delete(h.pending, msg.ResponseToRequestID)
 			}
@@ -181,7 +184,7 @@ func (h *Hub) readLoop(conn *websocket.Conn) {
 			if err := json.Unmarshal(msg.Payload, &p); err != nil {
 				p = toolResultPayload{Error: "bad tool_result payload: " + err.Error()}
 			}
-			ch <- p
+			pc.ch <- p
 		default:
 			// 未知类型忽略（协议 §3.3）
 			h.Logger.Printf("ws: ignore unknown message type %q", msg.Type)
@@ -189,8 +192,63 @@ func (h *Hub) readLoop(conn *websocket.Conn) {
 	}
 }
 
+// connDone 连接退出清理：仅唤醒属于本连接代数的 pending，
+// 避免被踢的旧连接退出时误杀新连接已注册的在途调用。
+func (h *Hub) connDone(conn *websocket.Conn, gen uint64) {
+	h.mu.Lock()
+	same := h.conn == conn
+	if same {
+		h.conn = nil
+		h.extVersion = ""
+	}
+	h.mu.Unlock()
+	h.sweepPending(gen, ErrNotConnected.Error())
+	conn.Close()
+	if same {
+		h.Logger.Printf("extension disconnected")
+	}
+}
+
+// sweepPending 唤醒并移除指定代数的所有在途调用。
+func (h *Hub) sweepPending(gen uint64, errMsg string) {
+	h.mu.Lock()
+	var chans []chan toolResultPayload
+	for id, pc := range h.pending {
+		if pc.gen == gen {
+			chans = append(chans, pc.ch)
+			delete(h.pending, id)
+		}
+	}
+	h.mu.Unlock()
+	for _, ch := range chans {
+		ch <- toolResultPayload{Error: errMsg}
+	}
+}
+
+// Close 关闭当前扩展连接并唤醒所有在途调用（报 "daemon shutting down"）。幂等。
+func (h *Hub) Close() {
+	h.mu.Lock()
+	conn := h.conn
+	h.conn = nil
+	h.extVersion = ""
+	pending := h.pending
+	h.pending = make(map[string]pendingCall)
+	h.mu.Unlock()
+	for _, pc := range pending {
+		pc.ch <- toolResultPayload{Error: ErrShuttingDown.Error()}
+	}
+	if conn != nil {
+		conn.Close()
+	}
+}
+
 // pingLoop 每 PingInterval 发送应用层 ping。
 func (h *Hub) pingLoop(conn *websocket.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.Logger.Printf("ws: panic in pingLoop: %v", r)
+		}
+	}()
 	t := time.NewTicker(h.PingInterval)
 	defer t.Stop()
 	for range t.C {
@@ -228,7 +286,7 @@ func (h *Hub) CallTool(ctx context.Context, name string, args map[string]any) (j
 	}
 	id := newRequestID(h.counter.Add(1))
 	ch := make(chan toolResultPayload, 1)
-	h.pending[id] = ch
+	h.pending[id] = pendingCall{gen: h.gen, ch: ch}
 	h.mu.Unlock()
 
 	payload, _ := json.Marshal(map[string]any{"name": name, "args": args})
