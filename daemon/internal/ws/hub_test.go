@@ -35,6 +35,25 @@ func dial(t *testing.T, wsURL string) *websocket.Conn {
 	return conn
 }
 
+// dialHello 拨号并完成 hello 握手（发 hello、读 hello_ack）。
+// 新连接须先完成握手才会被 Hub 接纳（顶替旧连接）。
+func dialHello(t *testing.T, wsURL string) *websocket.Conn {
+	t.Helper()
+	conn := dial(t, wsURL)
+	hello, _ := json.Marshal(map[string]any{"extensionVersion": "0.0.1"})
+	if err := conn.WriteJSON(Message{Type: MsgHello, Payload: hello}); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+	var ack Message
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatalf("read hello_ack: %v", err)
+	}
+	if ack.Type != MsgHelloAck {
+		t.Fatalf("ack type = %q, want %q", ack.Type, MsgHelloAck)
+	}
+	return conn
+}
+
 func waitFor(t *testing.T, cond func() bool, what string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -102,7 +121,7 @@ func TestKickThenCallOnNewConn(t *testing.T) {
 	t.Parallel()
 	h, wsURL := newTestHub(t)
 
-	dial(t, wsURL) // 旧连接
+	dialHello(t, wsURL) // 旧连接
 	waitFor(t, h.Connected, "first connection")
 
 	// 在旧连接上发起不应答的调用 → pending 属于 gen1
@@ -113,8 +132,8 @@ func TestKickThenCallOnNewConn(t *testing.T) {
 	}()
 	waitFor(t, func() bool { return h.pendingLen() == 1 }, "pending registered on old conn")
 
-	// 新连接踢掉旧连接
-	c2 := dial(t, wsURL)
+	// 新连接 hello 握手通过后踢掉旧连接
+	c2 := dialHello(t, wsURL)
 	waitFor(t, func() bool { return h.currentGen() == 2 }, "second connection registered")
 
 	// 旧连接上的调用应被唤醒报 extension not connected
@@ -159,7 +178,7 @@ func TestHubClose(t *testing.T) {
 	t.Parallel()
 	h, wsURL := newTestHub(t)
 
-	dial(t, wsURL)
+	dialHello(t, wsURL)
 	waitFor(t, h.Connected, "connection")
 
 	callErr := make(chan error, 1)
@@ -190,4 +209,82 @@ func TestHubClose(t *testing.T) {
 	if _, err := h.CallTool(context.Background(), "snapshot", nil); !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("call after Close err = %v, want ErrNotConnected", err)
 	}
+}
+
+// 未发 hello 的连接不能顶替在位连接：首条消息非 hello 被直接关闭，
+// 在位连接仍 Connected、代数不变。
+func TestNoHelloCannotKick(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+
+	dialHello(t, wsURL)
+	waitFor(t, h.Connected, "first connection")
+
+	c2 := dial(t, wsURL)
+	// 首条消息不是 hello → 服务端直接关闭，不影响在位连接
+	if err := c2.WriteJSON(Message{Type: MsgPing}); err != nil {
+		t.Fatalf("send non-hello: %v", err)
+	}
+	_ = c2.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := c2.ReadMessage(); err == nil {
+		t.Fatal("non-hello connection should have been closed")
+	}
+	if !h.Connected() {
+		t.Fatal("incumbent connection must survive non-hello dial")
+	}
+	if got := h.currentGen(); got != 1 {
+		t.Fatalf("gen = %d, want 1 (no kick)", got)
+	}
+}
+
+// 握手超时：一直不发 hello 的连接在 HandshakeTimeout 后被关闭，且从不被接纳。
+func TestHandshakeTimeout(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	h.HandshakeTimeout = 100 * time.Millisecond
+
+	c := dial(t, wsURL)
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := c.ReadMessage(); err == nil {
+		t.Fatal("idle handshake connection should have been closed after timeout")
+	}
+	if h.Connected() {
+		t.Fatal("hub must not register connection that never says hello")
+	}
+}
+
+// hello 握手通过后新连接正常顶替旧连接。
+func TestHelloThenKick(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+
+	c1 := dialHello(t, wsURL)
+	waitFor(t, h.Connected, "first connection")
+	if got := h.ExtensionVersion(); got != "0.0.1" {
+		t.Fatalf("extVersion = %q, want 0.0.1", got)
+	}
+
+	dialHello(t, wsURL)
+	waitFor(t, func() bool { return h.currentGen() == 2 }, "second connection registered")
+
+	_ = c1.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := c1.ReadMessage(); err == nil {
+		t.Fatal("old connection should have been kicked")
+	}
+	if !h.Connected() {
+		t.Fatal("hub should be connected via new connection")
+	}
+}
+
+// pong 看门狗：客户端不再回任何消息（模拟休眠半死），
+// 读超时后 daemon 主动断开，Connected 变 false。
+func TestPongWatchdog(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	h.PingInterval = 50 * time.Millisecond // pongWait = 100ms
+
+	dialHello(t, wsURL)
+	waitFor(t, h.Connected, "connection")
+	// 客户端此后不读不写，ping 堆积在 TCP 缓冲，daemon 读超时兜底
+	waitFor(t, func() bool { return !h.Connected() }, "watchdog closes half-dead connection")
 }

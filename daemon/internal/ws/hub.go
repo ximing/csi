@@ -1,5 +1,5 @@
 // Package ws 实现与 Chrome 扩展之间的 WebSocket 通道（协议 §3）。
-// 同一时间只接受一个扩展连接，新连接到来时踢掉旧连接。
+// 同一时间只接受一个扩展连接，新连接完成 hello 握手后踢掉旧连接。
 package ws
 
 import (
@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -57,10 +58,11 @@ type pendingCall struct {
 
 // Hub 管理唯一的扩展 WS 连接及 tool_call 请求/响应关联。
 type Hub struct {
-	Version      string        // hello_ack 中告知扩展的 daemon 版本
-	ToolTimeout  time.Duration // 工具调用超时，默认 120s（协议 §3.3）
-	PingInterval time.Duration // 应用层 ping 间隔，默认 30s
-	Logger       *log.Logger
+	Version          string        // hello_ack 中告知扩展的 daemon 版本
+	ToolTimeout      time.Duration // 工具调用超时，默认 120s（协议 §3.3）
+	PingInterval     time.Duration // 应用层 ping 间隔，默认 30s
+	HandshakeTimeout time.Duration // hello 握手超时，默认 5s
+	Logger           *log.Logger
 
 	mu         sync.Mutex
 	conn       *websocket.Conn
@@ -78,11 +80,12 @@ func New(daemonVersion string, logger *log.Logger) *Hub {
 		logger = log.Default()
 	}
 	return &Hub{
-		Version:      daemonVersion,
-		ToolTimeout:  120 * time.Second,
-		PingInterval: 30 * time.Second,
-		Logger:       logger,
-		pending:      make(map[string]pendingCall),
+		Version:          daemonVersion,
+		ToolTimeout:      120 * time.Second,
+		PingInterval:     30 * time.Second,
+		HandshakeTimeout: 5 * time.Second,
+		Logger:           logger,
+		pending:          make(map[string]pendingCall),
 	}
 }
 
@@ -105,26 +108,70 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// HandleWS 处理 /ws 端点。新连接踢掉旧连接。
+// HandleWS 处理 /ws 端点。首条消息必须是 hello，握手通过后才顶替旧连接。
 func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.Logger.Printf("ws upgrade failed: %v", err)
 		return
 	}
-	gen := h.setConn(conn)
+	extVersion, ok := h.handshake(conn)
+	if !ok {
+		conn.Close() // 未通过 hello 校验，不动在位连接
+		return
+	}
+	gen := h.setConn(conn, extVersion)
+	h.Logger.Printf("extension hello, version=%q", extVersion)
+	// 握手完成，转入 pong 看门狗：每读到一条消息续期读超时
+	_ = conn.SetReadDeadline(time.Now().Add(h.pongWait()))
+	ack, _ := json.Marshal(map[string]any{"daemonVersion": h.Version})
+	if err := h.writeJSON(conn, Message{Type: MsgHelloAck, Payload: ack}); err != nil {
+		h.connDone(conn, gen)
+		return
+	}
 	go h.pingLoop(conn)
 	h.readLoop(conn, gen) // 阻塞直至连接断开
 }
 
-// setConn 换绑新连接并递增代数，返回新连接的代数。
-func (h *Hub) setConn(conn *websocket.Conn) uint64 {
+// handshake 握手阶段（协议 §3.3）：首条消息必须是 hello，返回扩展版本。
+// 任何失败（非 hello、读超时）都返回 false，由调用方直接关闭连接、
+// 不顶替在位连接——防止端口扫描、误连把真扩展挤下线。
+func (h *Hub) handshake(conn *websocket.Conn) (string, bool) {
+	timeout := h.HandshakeTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		h.Logger.Printf("ws: handshake read failed (expect hello): %v", err)
+		return "", false
+	}
+	var msg Message
+	if err := json.Unmarshal(data, &msg); err != nil || msg.Type != MsgHello {
+		h.Logger.Printf("ws: first message is not hello, closing")
+		return "", false
+	}
+	var p struct {
+		ExtensionVersion string `json:"extensionVersion"`
+	}
+	_ = json.Unmarshal(msg.Payload, &p)
+	return p.ExtensionVersion, true
+}
+
+// pongWait 读超时阈值：2 倍 ping 间隔。pong 及其它消息都算活跃证据。
+func (h *Hub) pongWait() time.Duration {
+	return 2 * h.PingInterval
+}
+
+// setConn 握手通过后换绑新连接并递增代数，返回新连接的代数。
+func (h *Hub) setConn(conn *websocket.Conn, extVersion string) uint64 {
 	h.mu.Lock()
 	h.gen++
 	gen := h.gen
 	old := h.conn
 	h.conn = conn
-	h.extVersion = ""
+	h.extVersion = extVersion
 	h.mu.Unlock()
 	if old != nil && old != conn {
 		h.Logger.Printf("new extension connected, kicking old connection")
@@ -133,7 +180,7 @@ func (h *Hub) setConn(conn *websocket.Conn) uint64 {
 	return gen
 }
 
-// readLoop 读循环：hello / pong / tool_result。
+// readLoop 读循环：pong / tool_result。首条 hello 已在握手阶段处理。
 func (h *Hub) readLoop(conn *websocket.Conn, gen uint64) {
 	// 清理 defer 先注册、recover 后注册：panic 时 recover 先执行，清理仍会执行。
 	defer h.connDone(conn, gen)
@@ -146,8 +193,15 @@ func (h *Hub) readLoop(conn *websocket.Conn, gen uint64) {
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				// pong 看门狗：半死连接主动断开，扩展侧 reconcile 会重连
+				h.Logger.Printf("extension read timeout, closing")
+			}
 			return
 		}
+		// 每读到一条消息都算活跃证据，续期读超时
+		_ = conn.SetReadDeadline(time.Now().Add(h.pongWait()))
 		var msg Message
 		if err := json.Unmarshal(data, &msg); err != nil {
 			h.Logger.Printf("ws: bad message: %v", err)
@@ -155,18 +209,8 @@ func (h *Hub) readLoop(conn *websocket.Conn, gen uint64) {
 		}
 		switch msg.Type {
 		case MsgHello:
-			var p struct {
-				ExtensionVersion string `json:"extensionVersion"`
-			}
-			_ = json.Unmarshal(msg.Payload, &p)
-			h.mu.Lock()
-			h.extVersion = p.ExtensionVersion
-			h.mu.Unlock()
-			h.Logger.Printf("extension hello, version=%q", p.ExtensionVersion)
-			ack, _ := json.Marshal(map[string]any{"daemonVersion": h.Version})
-			if err := h.writeJSON(conn, Message{Type: MsgHelloAck, Payload: ack}); err != nil {
-				return
-			}
+			// 重复 hello 忽略（握手已完成）
+			h.Logger.Printf("ws: duplicate hello ignored")
 		case MsgPong:
 			// 心跳应答，无需处理
 		case MsgToolResult:

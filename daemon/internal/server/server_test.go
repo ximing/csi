@@ -379,6 +379,23 @@ func TestHelloAckAndStatus(t *testing.T) {
 	}
 }
 
+// sendHello 发送 hello 并读 hello_ack。
+// 新连接须先完成 hello 握手才会顶替旧连接（协议 §3.1）。
+func sendHello(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	hello, _ := json.Marshal(map[string]any{"extensionVersion": "0.1.0"})
+	if err := conn.WriteJSON(ws.Message{Type: ws.MsgHello, Payload: hello}); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+	var ack ws.Message
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatalf("read hello_ack: %v", err)
+	}
+	if ack.Type != ws.MsgHelloAck {
+		t.Fatalf("ack type = %q, want %q", ack.Type, ws.MsgHelloAck)
+	}
+}
+
 func TestNewConnectionKicksOld(t *testing.T) {
 	t.Parallel()
 	srv, ts := newTestServer(t)
@@ -389,6 +406,7 @@ func TestNewConnectionKicksOld(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn1.Close()
+	sendHello(t, conn1)
 	waitFor(t, srv.Hub.Connected, "first connection")
 
 	conn2, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -396,6 +414,7 @@ func TestNewConnectionKicksOld(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn2.Close()
+	sendHello(t, conn2)
 
 	// 旧连接应被踢掉
 	_ = conn1.SetReadDeadline(time.Now().Add(2 * time.Second))

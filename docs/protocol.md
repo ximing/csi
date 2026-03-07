@@ -86,8 +86,8 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 
 - 扩展连接 `ws://127.0.0.1:<port>/ws`。
 - 扩展在 `chrome.storage.local` 持久化连接意愿（`ws_should_connect`、`local_url`），service worker 被挂起后通过 `chrome.alarms`（周期 0.5 分钟，名 `csi-reconcile`）做 reconcile：意愿为连接且当前未连接则重连。
-- daemon 侧同一时间**只接受一个扩展连接**；新连接到来时踢掉旧连接。
-- daemon 每 30s 发 `ping`，扩展回 `pong`（应用层，非 WS 控制帧）。
+- daemon 侧同一时间**只接受一个扩展连接**：新连接须在 5 秒内发送 `hello` 完成握手，握手通过后才踢掉旧连接；首条消息非 `hello` 或超时直接关闭，不影响在位连接。
+- daemon 每 30s 发 `ping`，扩展回 `pong`（应用层，非 WS 控制帧）。daemon 对连接设读看门狗：2 倍 ping 间隔内未收到任何消息（`pong` 或其它消息均算活跃）即判定半死、主动断连，由扩展 reconcile 重连。
 
 ### 3.2 消息格式
 
