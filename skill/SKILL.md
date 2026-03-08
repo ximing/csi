@@ -176,6 +176,8 @@ Decoded PDF cap is 100 MB. Above that the daemon refuses; reduce `scale` or spli
 
 **If a tool call can't reach the daemon (connection refused), start it yourself — don't ask the user. This is safe to run anytime: it no-ops if the daemon is already up.**
 
+This is also the expected state after a computer reboot: the installer does not register any login autostart, so the daemon stays down until something starts it. Just start it and move on — no need to tell the user anything is wrong.
+
 **macOS / Linux:**
 
 ```bash

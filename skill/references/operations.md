@@ -24,11 +24,11 @@ The daemon binds `127.0.0.1` only — it is never reachable from other machines.
 
 ## Recovery — what to do when a tool call fails
 
-1. **Daemon not reachable (connection refused)** → start it yourself, don't ask the user. `start` is idempotent: it no-ops if the daemon is already up, and concurrent starts converge to a single daemon (the OS lets only one process bind port 10088).
+1. **Daemon not reachable (connection refused)** → start it yourself, don't ask the user. `start` is idempotent: it no-ops if the daemon is already up, and concurrent starts converge to a single daemon (the OS lets only one process bind port 10088). Note this is the expected state after a computer reboot — there is no login autostart, so the daemon waits for something to start it.
    - macOS / Linux: `~/.csi/bin/csi start`
    - Windows: `& "$env:USERPROFILE\.csi\bin\csi.exe" start`
 
-   Then retry the tool call.
+   Then retry the tool call. If `start` answers `found live process <pid> not responding as csi`, the PID in the stale pid file was recycled by another process — don't kill it yourself, ask the user to run `csi restart`.
 2. **`command not found` / binary missing** → not installed. Ask the user to run the installer from the project checkout: `bash scripts/install.sh`, then load the built extension in Chrome.
 3. **Daemon up but `extension not connected`** → the browser side is missing. Ask the user to:
    - Open `chrome://extensions` and verify the CSI extension is installed and enabled.
