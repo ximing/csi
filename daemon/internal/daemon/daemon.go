@@ -19,18 +19,21 @@ import (
 // DefaultPort 默认监听端口（协议 §1）。
 const DefaultPort = 10088
 
-// Port 返回监听端口：环境变量 CSI_PORT 覆盖默认值。
+// Port 返回监听端口：CSI_PORT 环境变量 > config.json > 默认值。
 func Port() int {
-	if v := os.Getenv("CSI_PORT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n < 65536 {
-			return n
+	if dir, err := RunDir(); err == nil {
+		if rc, err := LoadConfig(dir); err == nil {
+			return rc.Values.Port
 		}
 	}
 	return DefaultPort
 }
 
-// RunDir 返回运行目录 ~/.csi。
+// RunDir 返回运行目录 ~/.csi；CSI_HOME 环境变量可覆盖（测试用）。
 func RunDir() (string, error) {
+	if v := os.Getenv("CSI_HOME"); v != "" {
+		return v, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
