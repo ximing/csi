@@ -1,4 +1,4 @@
-// 日志滚动：logs/daemon-2006-01-02.log 按本地日期滚动，最多保留 3 天，
+// 日志滚动：logs/daemon-2006-01-02.log 按本地日期滚动，保留天数可配置（默认 3 天），
 // 用于事后排查异常（跨天运行也不会把单个日志文件撑大）。
 package daemon
 
@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	logPrefix  = "daemon-"
-	logExt     = ".log"
-	logKeepDay = 3 // 保留今天及前 2 天
+	logPrefix = "daemon-"
+	logExt    = ".log"
 )
 
 // logPath 某一天的日志文件路径（dir 为 logs 目录）。
@@ -30,8 +29,9 @@ func OpenLogFile(dir string) (*os.File, error) {
 
 // DailyLog 按天滚动的日志 writer：每次写入检查日期，跨天自动切到新文件并清理旧文件。
 type DailyLog struct {
-	dir string
-	now func() time.Time // 可注入，便于测试
+	dir      string
+	now      func() time.Time // 可注入，便于测试
+	keepDays int
 
 	mu  sync.Mutex
 	day string
@@ -39,12 +39,26 @@ type DailyLog struct {
 }
 
 // OpenDailyLog 打开今天的日志文件并立即做一次旧文件清理。
-func OpenDailyLog(dir string) (*DailyLog, error) {
-	l := &DailyLog{dir: filepath.Join(dir, "logs"), now: time.Now}
+// keepDays 为保留天数（含今天），非法值按 3 处理。
+func OpenDailyLog(dir string, keepDays int) (*DailyLog, error) {
+	if keepDays < MinKeepDays || keepDays > MaxKeepDays {
+		keepDays = DefaultKeepDays
+	}
+	l := &DailyLog{dir: filepath.Join(dir, "logs"), now: time.Now, keepDays: keepDays}
 	if err := l.rotateLocked(); err != nil {
 		return nil, err
 	}
 	return l, nil
+}
+
+// SetKeepDays 更新保留天数（POST /config 即时生效）；下次 rotate 清理按新值。
+func (l *DailyLog) SetKeepDays(days int) {
+	if days < MinKeepDays || days > MaxKeepDays {
+		return
+	}
+	l.mu.Lock()
+	l.keepDays = days
+	l.mu.Unlock()
 }
 
 // Write 实现 io.Writer。
@@ -95,7 +109,7 @@ func (l *DailyLog) cleanupLocked() {
 	if err != nil {
 		return
 	}
-	cutoff := l.now().AddDate(0, 0, -(logKeepDay - 1)).Format("2006-01-02")
+	cutoff := l.now().AddDate(0, 0, -(l.keepDays - 1)).Format("2006-01-02")
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasPrefix(name, logPrefix) || !strings.HasSuffix(name, logExt) {

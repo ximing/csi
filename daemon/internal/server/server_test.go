@@ -17,6 +17,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"csi/daemon/internal/daemon"
 	"csi/daemon/internal/server"
 	"csi/daemon/internal/ws"
 )
@@ -24,7 +25,11 @@ import (
 // newTestServer 起随机端口的真实 HTTP server（不占 10088）。
 func newTestServer(t *testing.T) (*server.Server, *httptest.Server) {
 	t.Helper()
-	srv := server.New(0, nil)
+	cfg, err := daemon.LoadConfig(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := server.New(cfg, t.TempDir(), nil)
 	srv.Hub.PingInterval = time.Hour // 测试里不打心跳
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"csi/daemon/internal/backend"
+	"csi/daemon/internal/daemon"
 	"csi/daemon/internal/session"
 	"csi/daemon/internal/tools"
 	"csi/daemon/internal/version"
@@ -21,23 +22,27 @@ type Server struct {
 	Executor *tools.Executor
 	Sessions *session.Manager
 	Port     int
+	dir      string
 	started  time.Time
 	logger   *log.Logger
 }
 
-// New 组装 daemon 服务。port 仅用于 /status 展示。
-func New(port int, logger *log.Logger) *Server {
+// New 组装 daemon 服务。cfg 为生效配置（端口仅用于 /status 展示；
+// 工具超时灌进 Hub）。
+func New(cfg *daemon.ResolvedConfig, dir string, logger *log.Logger) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
 	hub := ws.New(version.Version, logger)
+	hub.ToolTimeout = time.Duration(cfg.Values.ToolTimeoutSeconds) * time.Second
 	sessions := session.NewManager()
 	be := backend.NewExtensionBackend(hub)
 	return &Server{
 		Hub:      hub,
 		Executor: tools.NewExecutor(be, sessions),
 		Sessions: sessions,
-		Port:     port,
+		Port:     cfg.Values.Port,
+		dir:      dir,
 		started:  time.Now(),
 		logger:   logger,
 	}

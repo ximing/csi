@@ -30,21 +30,25 @@ func cmdServe() error {
 	if err != nil {
 		return err
 	}
-	daily, err := daemon.OpenDailyLog(dir)
+	cfg, err := daemon.LoadConfig(dir)
+	if err != nil {
+		return err
+	}
+	daily, err := daemon.OpenDailyLog(dir, cfg.Values.LogRetentionDays)
 	if err != nil {
 		return err
 	}
 	defer daily.Close()
 
 	logger := log.New(io.MultiWriter(os.Stdout, daily), "", log.LstdFlags)
-	port := daemon.Port()
+	port := cfg.Values.Port
 
 	if err := daemon.WritePID(dir, os.Getpid()); err != nil {
 		return err
 	}
 	defer daemon.RemovePID(dir)
 
-	srv := server.New(port, logger)
+	srv := server.New(cfg, dir, logger)
 	httpSrv := &http.Server{
 		Addr:              fmt.Sprintf("127.0.0.1:%d", port), // 协议 §7：仅监听回环
 		Handler:           srv.Handler(),
