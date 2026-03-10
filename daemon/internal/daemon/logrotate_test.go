@@ -51,7 +51,7 @@ func hasFile(names []string, name string) bool {
 func TestDailyLogRotation(t *testing.T) {
 	dir := logDir(t)
 	now := at("2026-03-05")
-	l, err := OpenDailyLog(dir)
+	l, err := OpenDailyLog(dir, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestDailyLogCleanupKeepsThreeDays(t *testing.T) {
 		}
 	}
 
-	l := &DailyLog{dir: filepath.Join(dir, "logs"), now: func() time.Time { return at("2026-03-05") }}
+	l := &DailyLog{dir: filepath.Join(dir, "logs"), now: func() time.Time { return at("2026-03-05") }, keepDays: 3}
 	if err := l.rotateLocked(); err != nil {
 		t.Fatal(err)
 	}
@@ -123,5 +123,39 @@ func TestOpenLogFileUsesToday(t *testing.T) {
 	want := logPrefix + time.Now().Format("2006-01-02") + logExt
 	if filepath.Base(f.Name()) != want {
 		t.Fatalf("文件名 = %s, want %s", filepath.Base(f.Name()), want)
+	}
+}
+
+// SetKeepDays 即时生效：调小后下一次 rotate 清理按新值。
+func TestDailyLogSetKeepDays(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	logs := filepath.Join(dir, "logs")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 造一个 5 天前的日志文件
+	old := time.Now().AddDate(0, 0, -5)
+	f, err := os.Create(logPath(logs, old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	l, err := OpenDailyLog(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if _, err := os.Stat(logPath(logs, old)); err != nil {
+		t.Fatal("keepDays=30 should keep 5-day-old log")
+	}
+	l.SetKeepDays(2)
+	l.now = func() time.Time { return time.Now().AddDate(0, 0, 1) } // 触发 rotate
+	if _, err := l.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(logPath(logs, old)); !os.IsNotExist(err) {
+		t.Fatal("keepDays=2 should remove 5-day-old log")
 	}
 }
