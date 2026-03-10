@@ -49,6 +49,7 @@ func cmdServe() error {
 	defer daemon.RemovePID(dir)
 
 	srv := server.New(cfg, dir, logger)
+	srv.OnConfigApplied = func(c daemon.Config) { daily.SetKeepDays(c.LogRetentionDays) }
 	httpSrv := &http.Server{
 		Addr:              fmt.Sprintf("127.0.0.1:%d", port), // 协议 §7：仅监听回环
 		Handler:           srv.Handler(),

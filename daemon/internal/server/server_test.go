@@ -401,6 +401,85 @@ func sendHello(t *testing.T, conn *websocket.Conn) {
 	}
 }
 
+// GET /config：返回值与来源。
+func TestGetConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+	req := httptest.NewRequest("GET", "/config", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var body map[string]map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if body["port"]["value"].(float64) != 10088 || body["port"]["source"] != "default" {
+		t.Fatalf("port entry = %+v", body["port"])
+	}
+}
+
+// POST /config：改超时即时生效（Hub.ToolTimeout 变化），改端口要求重启。
+func TestPostConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	post := func(payload string) map[string]any {
+		req := httptest.NewRequest("POST", "/config", strings.NewReader(payload))
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return body
+	}
+
+	bad := post(`{"port": 0}`)
+	if bad["success"].(bool) {
+		t.Fatal("port=0 should be rejected")
+	}
+
+	ok := post(`{"tool_timeout_seconds": 60, "log_retention_days": 7, "port": 10090}`)
+	if !ok["success"].(bool) {
+		t.Fatalf("post failed: %v", ok)
+	}
+	if ok["data"].(map[string]any)["restart_required"].(bool) != true {
+		t.Fatal("port change should require restart")
+	}
+	if srv.Hub.ToolTimeout != 60*time.Second {
+		t.Fatalf("ToolTimeout = %v, want 60s", srv.Hub.ToolTimeout)
+	}
+	// 落盘可回读
+	back, err := daemon.LoadConfig(dir)
+	if err != nil || back.Values.Port != 10090 || back.Values.LogRetentionDays != 7 {
+		t.Fatalf("reload = %+v, err %v", back, err)
+	}
+	// 不含端口的修改不要求重启
+	ok2 := post(`{"tool_timeout_seconds": 90}`)
+	if ok2["data"].(map[string]any)["restart_required"].(bool) != false {
+		t.Fatal("non-port change should not require restart")
+	}
+}
+
+// 端口被 CSI_PORT 覆盖时拒绝修改端口。
+func TestPostConfigPortLockedByEnv(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CSI_PORT", "20000")
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+	req := httptest.NewRequest("POST", "/config", strings.NewReader(`{"port": 10090}`))
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var body map[string]any
+	json.Unmarshal(w.Body.Bytes(), &body)
+	if body["success"].(bool) || !strings.Contains(body["error"].(string), "CSI_PORT") {
+		t.Fatalf("env-locked port should be rejected with CSI_PORT hint, got %v", body)
+	}
+}
+
 func TestNewConnectionKicksOld(t *testing.T) {
 	t.Parallel()
 	srv, ts := newTestServer(t)

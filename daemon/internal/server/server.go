@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"csi/daemon/internal/backend"
@@ -25,6 +26,12 @@ type Server struct {
 	dir      string
 	started  time.Time
 	logger   *log.Logger
+
+	// OnConfigApplied POST /config 保存成功后回调（如更新日志保留天数）；可为 nil。
+	OnConfigApplied func(daemon.Config)
+
+	cfgMu sync.RWMutex
+	cfg   *daemon.ResolvedConfig
 }
 
 // New 组装 daemon 服务。cfg 为生效配置（端口仅用于 /status 展示；
@@ -45,6 +52,7 @@ func New(cfg *daemon.ResolvedConfig, dir string, logger *log.Logger) *Server {
 		dir:      dir,
 		started:  time.Now(),
 		logger:   logger,
+		cfg:      cfg,
 	}
 }
 
@@ -54,6 +62,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /command", s.handleCommand)
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /config", s.handleGetConfig)
+	mux.HandleFunc("POST /config", s.handlePostConfig)
+	mux.HandleFunc("POST /restart", s.handleRestart) // 占位实现见下，Task 5 补全
 	mux.HandleFunc("/ws", s.Hub.HandleWS)
 	return mux
 }
@@ -123,6 +134,95 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+// configEntry GET /config 单个配置项。
+type configEntry struct {
+	Value  int           `json:"value"`
+	Source daemon.Source `json:"source"`
+}
+
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	writeJSON(w, map[string]configEntry{
+		"port":                 {s.cfg.Values.Port, s.cfg.Sources["port"]},
+		"log_retention_days":   {s.cfg.Values.LogRetentionDays, s.cfg.Sources["log_retention_days"]},
+		"tool_timeout_seconds": {s.cfg.Values.ToolTimeoutSeconds, s.cfg.Sources["tool_timeout_seconds"]},
+	})
+}
+
+// configPatch POST /config 请求体：字段均可选，nil 表示不改。
+type configPatch struct {
+	Port               *int `json:"port"`
+	LogRetentionDays   *int `json:"log_retention_days"`
+	ToolTimeoutSeconds *int `json:"tool_timeout_seconds"`
+}
+
+func (s *Server) handlePostConfig(w http.ResponseWriter, r *http.Request) {
+	var patch configPatch
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		writeJSON(w, commandResponse{Success: false, Error: "bad request body: " + err.Error()})
+		return
+	}
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+
+	next := s.cfg.Values
+	if patch.Port != nil {
+		if s.cfg.Sources["port"] == daemon.SourceEnv {
+			writeJSON(w, commandResponse{Success: false, Error: "port 被 CSI_PORT 环境变量覆盖，无法在此修改"})
+			return
+		}
+		if err := daemon.ValidateField("port", *patch.Port); err != nil {
+			writeJSON(w, commandResponse{Success: false, Error: err.Error()})
+			return
+		}
+		next.Port = *patch.Port
+	}
+	if patch.LogRetentionDays != nil {
+		if err := daemon.ValidateField("log_retention_days", *patch.LogRetentionDays); err != nil {
+			writeJSON(w, commandResponse{Success: false, Error: err.Error()})
+			return
+		}
+		next.LogRetentionDays = *patch.LogRetentionDays
+	}
+	if patch.ToolTimeoutSeconds != nil {
+		if err := daemon.ValidateField("tool_timeout_seconds", *patch.ToolTimeoutSeconds); err != nil {
+			writeJSON(w, commandResponse{Success: false, Error: err.Error()})
+			return
+		}
+		next.ToolTimeoutSeconds = *patch.ToolTimeoutSeconds
+	}
+
+	if err := daemon.SaveConfig(s.dir, next); err != nil {
+		writeJSON(w, commandResponse{Success: false, Error: "save config: " + err.Error()})
+		return
+	}
+	restartRequired := patch.Port != nil && *patch.Port != s.cfg.Values.Port
+	s.cfg.Values = next
+	if patch.Port != nil {
+		s.cfg.Sources["port"] = daemon.SourceConfig
+	}
+	if patch.LogRetentionDays != nil {
+		s.cfg.Sources["log_retention_days"] = daemon.SourceConfig
+	}
+	if patch.ToolTimeoutSeconds != nil {
+		s.cfg.Sources["tool_timeout_seconds"] = daemon.SourceConfig
+	}
+
+	// 即时生效：工具超时直接改 Hub；保留天数经回调给 cmdServe 的 DailyLog。
+	s.Hub.ToolTimeout = time.Duration(next.ToolTimeoutSeconds) * time.Second
+	if s.OnConfigApplied != nil {
+		s.OnConfigApplied(next)
+	}
+	writeJSON(w, commandResponse{Success: true, Data: map[string]any{"restart_required": restartRequired}})
+}
+
+// handleRestart 占位：Restarter 机制在 Task 5 接入。
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, commandResponse{Success: false, Error: "restart not supported"})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
