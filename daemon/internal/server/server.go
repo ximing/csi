@@ -41,7 +41,7 @@ func New(cfg *daemon.ResolvedConfig, dir string, logger *log.Logger) *Server {
 		logger = log.Default()
 	}
 	hub := ws.New(version.Version, logger)
-	hub.ToolTimeout = time.Duration(cfg.Values.ToolTimeoutSeconds) * time.Second
+	hub.SetToolTimeout(time.Duration(cfg.Values.ToolTimeoutSeconds) * time.Second)
 	sessions := session.NewManager()
 	be := backend.NewExtensionBackend(hub)
 	return &Server{
@@ -213,7 +213,7 @@ func (s *Server) handlePostConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 即时生效：工具超时直接改 Hub；保留天数经回调给 cmdServe 的 DailyLog。
-	s.Hub.ToolTimeout = time.Duration(next.ToolTimeoutSeconds) * time.Second
+	s.Hub.SetToolTimeout(time.Duration(next.ToolTimeoutSeconds) * time.Second)
 	if s.OnConfigApplied != nil {
 		s.OnConfigApplied(next)
 	}

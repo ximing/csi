@@ -212,7 +212,7 @@ func TestToolCallError(t *testing.T) {
 func TestToolCallTimeout(t *testing.T) {
 	t.Parallel()
 	srv, ts := newTestServer(t)
-	srv.Hub.ToolTimeout = 300 * time.Millisecond
+	srv.Hub.SetToolTimeout(300 * time.Millisecond)
 	connectExt(t, ts, nil) // 不应答
 	waitFor(t, srv.Hub.Connected, "extension connected")
 
@@ -449,8 +449,8 @@ func TestPostConfig(t *testing.T) {
 	if ok["data"].(map[string]any)["restart_required"].(bool) != true {
 		t.Fatal("port change should require restart")
 	}
-	if srv.Hub.ToolTimeout != 60*time.Second {
-		t.Fatalf("ToolTimeout = %v, want 60s", srv.Hub.ToolTimeout)
+	if srv.Hub.ToolTimeoutDuration() != 60*time.Second {
+		t.Fatalf("ToolTimeout = %v, want 60s", srv.Hub.ToolTimeoutDuration())
 	}
 	// 落盘可回读
 	back, err := daemon.LoadConfig(dir)
