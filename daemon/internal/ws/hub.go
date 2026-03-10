@@ -89,6 +89,20 @@ func New(daemonVersion string, logger *log.Logger) *Hub {
 	}
 }
 
+// SetToolTimeout 更新工具调用超时（持锁，POST /config 运行期即时生效）。
+func (h *Hub) SetToolTimeout(d time.Duration) {
+	h.mu.Lock()
+	h.ToolTimeout = d
+	h.mu.Unlock()
+}
+
+// ToolTimeoutDuration 返回当前工具调用超时（持锁，供测试/外部观察）。
+func (h *Hub) ToolTimeoutDuration() time.Duration {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.ToolTimeout
+}
+
 // Connected 扩展当前是否已连接。
 func (h *Hub) Connected() bool {
 	h.mu.Lock()
@@ -339,7 +353,7 @@ func (h *Hub) CallTool(ctx context.Context, name string, args map[string]any) (j
 		return nil, err
 	}
 
-	timeout := h.ToolTimeout
+	timeout := h.ToolTimeoutDuration()
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
