@@ -509,3 +509,31 @@ func TestNewConnectionKicksOld(t *testing.T) {
 		t.Fatal("hub should still be connected via new connection")
 	}
 }
+
+// POST /restart：Restarter 被调用；未设置时返回明确错误。
+func TestRestartEndpoint(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	// 未设置 Restarter
+	req := httptest.NewRequest("POST", "/restart", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var body map[string]any
+	json.Unmarshal(w.Body.Bytes(), &body)
+	if body["success"].(bool) {
+		t.Fatal("restart without Restarter should fail")
+	}
+
+	// 设置后被调用
+	called := false
+	srv.Restarter = func() error { called = true; return nil }
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, httptest.NewRequest("POST", "/restart", nil))
+	json.Unmarshal(w2.Body.Bytes(), &body)
+	if !body["success"].(bool) || !called {
+		t.Fatalf("restart should call Restarter and succeed, got %v called=%v", body, called)
+	}
+}

@@ -30,6 +30,9 @@ type Server struct {
 	// OnConfigApplied POST /config 保存成功后回调（如更新日志保留天数）；可为 nil。
 	OnConfigApplied func(daemon.Config)
 
+	// Restarter POST /restart 触发：拉起替代进程并安排本进程退出；nil 表示不支持。
+	Restarter func() error
+
 	cfgMu sync.RWMutex
 	cfg   *daemon.ResolvedConfig
 }
@@ -64,7 +67,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /config", s.handleGetConfig)
 	mux.HandleFunc("POST /config", s.handlePostConfig)
-	mux.HandleFunc("POST /restart", s.handleRestart) // 占位实现见下，Task 5 补全
+	mux.HandleFunc("POST /restart", s.handleRestart)
 	mux.HandleFunc("/ws", s.Hub.HandleWS)
 	return mux
 }
@@ -220,9 +223,18 @@ func (s *Server) handlePostConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, commandResponse{Success: true, Data: map[string]any{"restart_required": restartRequired}})
 }
 
-// handleRestart 占位：Restarter 机制在 Task 5 接入。
+// handleRestart 触发自重启：Restarter 拉起替代进程并安排本进程退出。
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, commandResponse{Success: false, Error: "restart not supported"})
+	if s.Restarter == nil {
+		writeJSON(w, commandResponse{Success: false, Error: "restart not supported"})
+		return
+	}
+	if err := s.Restarter(); err != nil {
+		s.logger.Printf("restart failed: %v", err)
+		writeJSON(w, commandResponse{Success: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, commandResponse{Success: true})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
