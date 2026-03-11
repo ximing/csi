@@ -1,5 +1,10 @@
 package main
 
+// 隐式不变量：本包（cmd/csi）其他测试必须保持 t.Parallel()。
+// TestRestartIntegration 拉起的替代进程是同一个测试二进制，会以 serve 参数
+// 跑全量 suite；parallel 测试会在 park 处停住永不执行，而非 parallel 测试
+// 会在替代 daemon 进程内真实运行，吃掉端口接管窗口。
+
 import (
 	"encoding/json"
 	"fmt"
