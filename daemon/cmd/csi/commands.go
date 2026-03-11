@@ -68,6 +68,15 @@ func cmdServe() error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	restartCh := make(chan struct{}, 1)
+	srv.Restarter = func() error {
+		if err := spawnReplacement(dir); err != nil {
+			return err
+		}
+		restartCh <- struct{}{}
+		return nil
+	}
+
 	logger.Printf("csi %s serving on 127.0.0.1:%d (pid %d, id %s)",
 		version.Version, port, os.Getpid(), id)
 
@@ -75,6 +84,17 @@ func cmdServe() error {
 	case sig := <-sigCh:
 		logger.Printf("received %v, shutting down", sig)
 		srv.Hub.Close() // 先唤醒所有在途工具调用，让 /command 尽快返回
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(ctx); err != nil {
+			logger.Printf("http shutdown: %v", err)
+		}
+		return nil
+	case <-restartCh:
+		// 替代进程已拉起（bind 重试等本进程释放端口）；优雅退出。
+		// HTTP 响应已随 handler 返回发出（Shutdown 等在途 handler 结束）。
+		logger.Printf("restarted via /restart, shutting down")
+		srv.Hub.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := httpSrv.Shutdown(ctx); err != nil {
@@ -104,6 +124,26 @@ func listenWithRetry(addr string, retryFor time.Duration, logger *log.Logger) (n
 		logger.Printf("listen %s: port busy, retrying", addr)
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// spawnReplacement 拉起新的 serve 进程接管（配置可能已变，端口可能不同）。
+// 与 startDaemon 不同：不做 already-running 检查——存活进程就是自己。
+func spawnReplacement(dir string) error {
+	logf, err := daemon.OpenLogFile(dir)
+	if err != nil {
+		return err
+	}
+	defer logf.Close()
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(self, "serve")
+	cmd.Env = os.Environ()
+	cmd.Stdout = logf
+	cmd.Stderr = logf
+	detachProc(cmd)
+	return cmd.Start()
 }
 
 // cmdStart 后台启动 daemon，幂等：已在运行则 no-op。
