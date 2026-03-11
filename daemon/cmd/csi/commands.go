@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -43,6 +44,11 @@ func cmdServe() error {
 	logger := log.New(io.MultiWriter(os.Stdout, daily), "", log.LstdFlags)
 	port := cfg.Values.Port
 
+	ln, err := listenWithRetry(fmt.Sprintf("127.0.0.1:%d", port), 10*time.Second, logger) // 协议 §7：仅监听回环
+	if err != nil {
+		return fmt.Errorf("listen 127.0.0.1:%d: %w", port, err)
+	}
+
 	if err := daemon.WritePID(dir, os.Getpid()); err != nil {
 		return err
 	}
@@ -51,14 +57,13 @@ func cmdServe() error {
 	srv := server.New(cfg, dir, logger)
 	srv.OnConfigApplied = func(c daemon.Config) { daily.SetKeepDays(c.LogRetentionDays) }
 	httpSrv := &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", port), // 协议 §7：仅监听回环
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          logger, // handler panic 堆栈进滚动日志
 	}
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- httpSrv.ListenAndServe() }()
+	go func() { errCh <- httpSrv.Serve(ln) }()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -81,6 +86,23 @@ func cmdServe() error {
 			return nil
 		}
 		return err
+	}
+}
+
+// listenWithRetry 监听 addr；EADDRINUSE 时按 200ms 退避重试至 retryFor
+// （自重启场景：新进程等旧进程释放端口）。
+func listenWithRetry(addr string, retryFor time.Duration, logger *log.Logger) (net.Listener, error) {
+	deadline := time.Now().Add(retryFor)
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln, nil
+		}
+		if !errors.Is(err, syscall.EADDRINUSE) || time.Now().After(deadline) {
+			return nil, err
+		}
+		logger.Printf("listen %s: port busy, retrying", addr)
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
