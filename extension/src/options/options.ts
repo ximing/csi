@@ -101,8 +101,12 @@ function updateSettingsAvailability(): void {
   if (!form) return;
   const disabled = lastStatus === null;
   form.querySelectorAll('input, button').forEach((el) => {
+    // env 端口锁不被 3s 轮询冲掉，循环后单独处理
+    if (el.id === 'cfg-port' && portEnvLocked) return;
     (el as HTMLInputElement | HTMLButtonElement).disabled = disabled;
   });
+  // env 锁以标志位为准；离线时 cfgPort 仍然禁用
+  cfgPort.disabled = portEnvLocked || disabled;
 }
 
 void refreshStatus();
@@ -127,6 +131,9 @@ const restartButton = document.getElementById('btn-restart') as HTMLButtonElemen
 const configResult = document.getElementById('config-result')!;
 const configUnsupported = document.getElementById('config-unsupported')!;
 
+// env 锁端口标志（CSI_PORT 锁定时不被 updateSettingsAvailability 轮询冲掉）
+let portEnvLocked = false;
+
 function showConfigResult(key: string, ok: boolean, subs?: string | string[]): void {
   configResult.className = ok ? 'result ok' : 'result fail';
   configResult.textContent = i18n(key, subs);
@@ -142,6 +149,7 @@ async function loadConfig(): Promise<void> {
     cfgLogDays.value = String(cfg.log_retention_days.value);
     cfgToolTimeout.value = String(cfg.tool_timeout_seconds.value);
     if (cfg.port.source === 'env') {
+      portEnvLocked = true;
       cfgPort.disabled = true;
       portNote.hidden = false;
       portNote.textContent = i18n('configPortEnvNote');
@@ -179,7 +187,7 @@ saveConfigButton.addEventListener('click', async () => {
       log_retention_days: Number(cfgLogDays.value),
       tool_timeout_seconds: Number(cfgToolTimeout.value),
     };
-    if (!cfgPort.disabled) patch.port = Number(cfgPort.value);
+    if (!portEnvLocked) patch.port = Number(cfgPort.value);
     const resp = await fetch(`${await currentDaemonBase()}/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
