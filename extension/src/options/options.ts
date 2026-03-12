@@ -107,3 +107,140 @@ function updateSettingsAvailability(): void {
 
 void refreshStatus();
 setInterval(() => void refreshStatus(), 3000);
+
+// ---------- daemon 设置区块 ----------
+
+type ConfigSource = 'env' | 'config' | 'default';
+
+interface ConfigResponse {
+  port: { value: number; source: ConfigSource };
+  log_retention_days: { value: number; source: ConfigSource };
+  tool_timeout_seconds: { value: number; source: ConfigSource };
+}
+
+const cfgPort = document.getElementById('cfg-port') as HTMLInputElement;
+const cfgLogDays = document.getElementById('cfg-log-days') as HTMLInputElement;
+const cfgToolTimeout = document.getElementById('cfg-tool-timeout') as HTMLInputElement;
+const portNote = document.getElementById('port-note')!;
+const saveConfigButton = document.getElementById('btn-save-config') as HTMLButtonElement;
+const restartButton = document.getElementById('btn-restart') as HTMLButtonElement;
+const configResult = document.getElementById('config-result')!;
+const configUnsupported = document.getElementById('config-unsupported')!;
+
+function showConfigResult(key: string, ok: boolean, subs?: string | string[]): void {
+  configResult.className = ok ? 'result ok' : 'result fail';
+  configResult.textContent = i18n(key, subs);
+}
+
+async function loadConfig(): Promise<void> {
+  try {
+    const resp = await fetch(`${await currentDaemonBase()}/config`, { signal: AbortSignal.timeout(2000) });
+    if (resp.status === 404) throw new Error('unsupported');
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const cfg = (await resp.json()) as ConfigResponse;
+    cfgPort.value = String(cfg.port.value);
+    cfgLogDays.value = String(cfg.log_retention_days.value);
+    cfgToolTimeout.value = String(cfg.tool_timeout_seconds.value);
+    if (cfg.port.source === 'env') {
+      cfgPort.disabled = true;
+      portNote.hidden = false;
+      portNote.textContent = i18n('configPortEnvNote');
+    }
+  } catch {
+    // 404（旧 daemon）或不可达：隐藏表单，提示不支持（不可达时状态区块已禁用控件）
+    configUnsupported.hidden = false;
+    configUnsupported.textContent = i18n('configUnsupported');
+    document.getElementById('config-form')!.style.display = 'none';
+  }
+}
+
+// 前端校验与 daemon 一致（daemon 仍是权威校验）。
+function validateInputs(): string | null {
+  const port = Number(cfgPort.value);
+  const days = Number(cfgLogDays.value);
+  const timeout = Number(cfgToolTimeout.value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return 'port must be 1-65535';
+  if (!Number.isInteger(days) || days < 1 || days > 30) return 'log_retention_days must be 1-30';
+  if (!Number.isInteger(timeout) || timeout < 5 || timeout > 600) return 'tool_timeout_seconds must be 5-600';
+  return null;
+}
+
+let pendingRestartPort: number | null = null;
+
+saveConfigButton.addEventListener('click', async () => {
+  const invalid = validateInputs();
+  if (invalid) {
+    showConfigResult('configInvalid', false, invalid);
+    return;
+  }
+  saveConfigButton.disabled = true;
+  try {
+    const patch: Record<string, number> = {
+      log_retention_days: Number(cfgLogDays.value),
+      tool_timeout_seconds: Number(cfgToolTimeout.value),
+    };
+    if (!cfgPort.disabled) patch.port = Number(cfgPort.value);
+    const resp = await fetch(`${await currentDaemonBase()}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+      signal: AbortSignal.timeout(3000),
+    });
+    const body = (await resp.json()) as { success: boolean; error?: string; data?: { restart_required: boolean } };
+    if (!body.success) {
+      showConfigResult('configSaveFailed', false, body.error || 'unknown');
+      return;
+    }
+    showConfigResult('configSaved', true);
+    const portChanged = patch.port !== undefined && patch.port !== lastStatus?.port;
+    pendingRestartPort = body.data?.restart_required && portChanged ? patch.port! : null;
+    restartButton.hidden = pendingRestartPort === null;
+  } catch (err) {
+    showConfigResult('configSaveFailed', false, (err as Error).message);
+  } finally {
+    saveConfigButton.disabled = false;
+  }
+});
+
+async function pollHealthz(base: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const resp = await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(1000) });
+      if (resp.ok) return true;
+    } catch {
+      // 还没起来，继续等
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+restartButton.addEventListener('click', async () => {
+  if (pendingRestartPort === null) return;
+  const newPort = pendingRestartPort;
+  const oldBase = await currentDaemonBase();
+  restartButton.disabled = true;
+  showConfigResult('restartInProgress', true);
+  try {
+    await fetch(`${oldBase}/restart`, { method: 'POST', signal: AbortSignal.timeout(3000) });
+  } catch {
+    // 旧进程可能已经退出，不影响后续轮询
+  }
+  const newBase = `http://127.0.0.1:${newPort}`;
+  if (await pollHealthz(newBase, 10_000)) {
+    // 切换 WS URL 并让 background 重连（CONNECT 会落 storage）
+    await chrome.runtime.sendMessage({ type: 'CONNECT', url: `ws://127.0.0.1:${newPort}/ws` });
+    pendingRestartPort = null;
+    restartButton.hidden = true;
+    showConfigResult('restartOk', true, String(newPort));
+    void refreshStatus();
+  } else if (await pollHealthz(oldBase, 2_000)) {
+    showConfigResult('restartFailedOldAlive', false);
+  } else {
+    showConfigResult('restartFailedDown', false);
+  }
+  restartButton.disabled = false;
+});
+
+void loadConfig();
