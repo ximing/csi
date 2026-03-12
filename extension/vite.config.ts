@@ -29,6 +29,7 @@ export default defineConfig({
       input: {
         background: r('src/background/index.ts'),
         popup: r('popup.html'),
+        options: r('options.html'),
       },
       output: {
         // manifest.json references background.js by fixed name — no hashes.

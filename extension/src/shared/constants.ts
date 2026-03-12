@@ -7,6 +7,9 @@ export const RECONCILE_ALARM = 'csi-reconcile';
 /** Reconcile period in minutes (protocol §3.1). */
 export const RECONCILE_PERIOD_MINUTES = 0.5;
 
+/** Default reconcile period in seconds (protocol §3.1). Chrome alarms floor is 30s. */
+export const DEFAULT_RECONCILE_PERIOD_SECONDS = 30;
+
 /** Give up on a half-open WebSocket after this long. */
 export const CONNECT_TIMEOUT_MS = 10_000;
 
@@ -14,4 +17,6 @@ export const CONNECT_TIMEOUT_MS = 10_000;
 export const STORAGE_KEYS = {
   SHOULD_CONNECT: 'ws_should_connect',
   URL: 'local_url',
+  /** Reconcile period setting (seconds; 0 = auto-reconnect off). */
+  RECONCILE_PERIOD: 'reconcile_period_seconds',
 } as const;
