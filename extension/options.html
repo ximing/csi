@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSI Settings</title>
+</head>
+<body>
+  <main id="options">
+    <h1 id="title">CSI</h1>
+
+    <section>
+      <h2 id="status-heading">Daemon Status</h2>
+      <div id="status-online" hidden>
+        <dl id="status-grid">
+          <dt id="dt-state"></dt><dd id="status-state"></dd>
+          <dt id="dt-pid"></dt><dd id="status-pid"></dd>
+          <dt id="dt-version"></dt><dd id="status-version"></dd>
+          <dt id="dt-uptime"></dt><dd id="status-uptime"></dd>
+          <dt id="dt-port"></dt><dd id="status-port"></dd>
+          <dt id="dt-ext"></dt><dd id="status-ext"></dd>
+          <dt id="dt-sessions"></dt><dd id="status-sessions"></dd>
+        </dl>
+      </div>
+      <p id="status-offline" class="notice" hidden></p>
+    </section>
+
+    <section id="daemon-settings">
+      <h2 id="daemon-settings-heading">Daemon Settings</h2>
+      <p id="config-unsupported" class="notice" hidden></p>
+      <div id="config-form">
+        <label id="port-label" for="cfg-port"></label>
+        <input id="cfg-port" type="number" min="1" max="65535" spellcheck="false">
+        <p id="port-note" class="field-note" hidden></p>
+
+        <label id="log-days-label" for="cfg-log-days"></label>
+        <input id="cfg-log-days" type="number" min="1" max="30">
+
+        <label id="tool-timeout-label" for="cfg-tool-timeout"></label>
+        <input id="cfg-tool-timeout" type="number" min="5" max="600">
+
+        <div class="button-row">
+          <button id="btn-save-config" type="button"></button>
+          <button id="btn-restart" type="button" hidden></button>
+        </div>
+        <p id="config-result" class="result"></p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="ext-settings-heading">Extension Settings</h2>
+      <label id="reconcile-label" for="reconcile-period"></label>
+      <select id="reconcile-period">
+        <option value="30" id="reconcile-30"></option>
+        <option value="60" id="reconcile-60"></option>
+        <option value="0" id="reconcile-off"></option>
+      </select>
+      <p id="ext-result" class="result"></p>
+    </section>
+
+    <footer id="version-footer"></footer>
+  </main>
+  <script type="module" src="/src/options/options.ts"></script>
+</body>
+</html>

@@ -26,6 +26,7 @@ function applyStaticTexts(): void {
   testButton.textContent = i18n('testButton');
   const version = chrome.runtime.getManifest().version;
   document.getElementById('version-footer')!.textContent = i18n('versionFooter', version);
+  document.getElementById('settings-link')!.textContent = i18n('settingsLink');
 }
 
 function sendMessage<T>(message: RuntimeRequest): Promise<T> {
@@ -73,3 +74,8 @@ testButton.addEventListener('click', async () => {
 
 applyStaticTexts();
 void refreshStatus();
+
+document.getElementById('settings-link')!.addEventListener('click', (e) => {
+  e.preventDefault();
+  void chrome.runtime.openOptionsPage();
+});
