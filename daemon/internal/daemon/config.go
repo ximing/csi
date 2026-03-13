@@ -114,6 +114,21 @@ func LoadConfig(dir string) (*ResolvedConfig, error) {
 	return rc, nil
 }
 
+// DiskPort 返回 config.json 中落盘的端口（不叠加 CSI_PORT 覆盖）；
+// 文件缺失 / 解析失败 / 值非法时返回默认端口。用于 env 锁定端口时
+// 保存配置，不把临时的 env 覆盖固化进文件。
+func DiskPort(dir string) int {
+	data, err := os.ReadFile(configPath(dir))
+	if err != nil {
+		return DefaultPort
+	}
+	var file Config
+	if json.Unmarshal(data, &file) != nil || ValidateField("port", file.Port) != nil {
+		return DefaultPort
+	}
+	return file.Port
+}
+
 // SaveConfig 全量写 config.json。
 func SaveConfig(dir string, cfg Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")

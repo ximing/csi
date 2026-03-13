@@ -111,6 +111,8 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 { "success": true, "data": { "restart_required": true } }
 ```
 
+**pending-restart 窗口**：端口已落盘但 daemon 尚未重启期间，CLI 按 config 读到的是新端口，而 daemon 仍监听旧端口——`csi status` 会误报未运行，`csi stop` 会因身份校验拒绝（提示用 `--force`）。用 options 页的重启按钮或 `csi restart`（身份不确认时自动转 force）可正常完成重启。
+
 ### 2.6 `POST /restart`
 
 daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true }` 并优雅退出。新进程从 config.json 读取配置监听（同端口靠 bind 退避重试接管，200ms × 最多 10s）。调用方轮询 `/healthz` 确认新进程就绪。

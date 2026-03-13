@@ -104,8 +104,17 @@ func ReadPID(dir string) (int, error) {
 	return pid, nil
 }
 
-// RemovePID 删除 pid 文件（不存在时忽略）。
-func RemovePID(dir string) {
+// RemovePID 删除 pid 文件。pid > 0 时仅当文件内容等于 pid 才删——
+// 自重启时序下（新进程已 WritePID、旧进程 defer 清理在后）旧进程
+// 不会误删新进程的 pid 文件；读不到 / 不匹配则不删。
+// pid <= 0 表示无条件清理（确认进程已死后的残留清理场景）。
+func RemovePID(dir string, pid int) {
+	if pid > 0 {
+		cur, err := ReadPID(dir)
+		if err != nil || cur != pid {
+			return
+		}
+	}
 	if err := os.Remove(pidFile(dir)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		fmt.Fprintf(os.Stderr, "remove pid file: %v\n", err)
 	}
