@@ -11,7 +11,8 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 ```
 
 - daemon 是 **HTTP server** 兼 **WebSocket server**；扩展作为 WS **客户端**主动连 daemon。
-- 默认端口 `10088`，环境变量 `CSI_PORT` 可覆盖。扩展默认连接 `ws://127.0.0.1:10088/ws`，popup 中可改。
+- 默认端口 `10088`；优先级：环境变量 `CSI_PORT` > `~/.csi/config.json` > 默认值。扩展默认连接 `ws://127.0.0.1:10088/ws`，popup/options 页中可改。
+- daemon 持久化配置存于 `~/.csi/config.json`：`{"port":10088,"log_retention_days":3,"tool_timeout_seconds":120}`（日志保留天数与工具超时不接受 env 覆盖）。
 - daemon 只绑定 `127.0.0.1`。
 
 ## 2. HTTP API
@@ -80,12 +81,46 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 
 返回 `200 OK`，body `ok`。仅用于存活探测。
 
+### 2.4 `GET /config`
+
+返回当前生效配置及每项来源（`env` / `config` / `default`）：
+
+```json
+{
+  "port": { "value": 10088, "source": "default" },
+  "log_retention_days": { "value": 3, "source": "config" },
+  "tool_timeout_seconds": { "value": 120, "source": "default" }
+}
+```
+
+### 2.5 `POST /config`
+
+请求体为要修改的字段子集（均可选）：
+
+```json
+{ "port": 10090, "log_retention_days": 7, "tool_timeout_seconds": 60 }
+```
+
+- 校验：端口 1–65535；保留天数 1–30；超时 5–600。非法返回 `{ "success": false, "error": "..." }`。
+- 端口被 `CSI_PORT` 覆盖时拒绝修改端口字段。
+- `log_retention_days` / `tool_timeout_seconds` 保存后即时生效；`port` 仅落盘，响应 `data.restart_required: true`，需 `POST /restart` 生效。
+
+成功响应：
+
+```json
+{ "success": true, "data": { "restart_required": true } }
+```
+
+### 2.6 `POST /restart`
+
+daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true }` 并优雅退出。新进程从 config.json 读取配置监听（同端口靠 bind 退避重试接管，200ms × 最多 10s）。调用方轮询 `/healthz` 确认新进程就绪。
+
 ## 3. WebSocket 协议（`/ws`）
 
 ### 3.1 连接与重连
 
 - 扩展连接 `ws://127.0.0.1:<port>/ws`。
-- 扩展在 `chrome.storage.local` 持久化连接意愿（`ws_should_connect`、`local_url`），service worker 被挂起后通过 `chrome.alarms`（周期 0.5 分钟，名 `csi-reconcile`）做 reconcile：意愿为连接且当前未连接则重连。
+- 扩展在 `chrome.storage.local` 持久化连接意愿（`ws_should_connect`、`local_url`），service worker 被挂起后通过 `chrome.alarms`（周期 0.5 分钟（可在 options 页改为 30s/60s/关闭），名 `csi-reconcile`）做 reconcile：意愿为连接且当前未连接则重连。
 - daemon 侧同一时间**只接受一个扩展连接**：新连接须在 5 秒内发送 `hello` 完成握手，握手通过后才踢掉旧连接；首条消息非 `hello` 或超时直接关闭，不影响在位连接。
 - daemon 每 30s 发 `ping`，扩展回 `pong`（应用层，非 WS 控制帧）。daemon 对连接设读看门狗：2 倍 ping 间隔内未收到任何消息（`pong` 或其它消息均算活跃）即判定半死、主动断连，由扩展 reconcile 重连。
 
@@ -128,7 +163,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 { "type": "tool_result", "responseToRequestId": "req-abc-1", "payload": { "error": "click: element not found: #x" } }
 ```
 
-- 工具默认超时 **120s**（navigate 内部页面加载超时 30s 由扩展自行处理）。
+- 工具默认超时 **120s**（可用 `POST /config` 修改 `tool_timeout_seconds`，5–600；navigate 内部页面加载超时 30s 由扩展自行处理）。
 - 扩展收到未知 `type` 时忽略并打日志。
 
 ### 3.4 daemon 注入的 session 内部字段
