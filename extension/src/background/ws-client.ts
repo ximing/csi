@@ -8,9 +8,9 @@
  */
 import {
   CONNECT_TIMEOUT_MS,
+  DEFAULT_RECONCILE_PERIOD_SECONDS,
   DEFAULT_WS_URL,
   RECONCILE_ALARM,
-  RECONCILE_PERIOD_MINUTES,
   STORAGE_KEYS,
 } from '../shared/constants';
 import type {
@@ -63,8 +63,25 @@ export class WsClient {
   }
 
   async start(): Promise<void> {
-    await chrome.alarms.create(RECONCILE_ALARM, { periodInMinutes: RECONCILE_PERIOD_MINUTES });
+    await this.applyReconcilePeriod();
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes[STORAGE_KEYS.RECONCILE_PERIOD]) {
+        void this.applyReconcilePeriod();
+      }
+    });
     await this.reconcile();
+  }
+
+  /** 按 storage 里的周期重建 reconcile alarm；0 = 关闭自动重连。 */
+  private async applyReconcilePeriod(): Promise<void> {
+    const stored = await chrome.storage.local.get(STORAGE_KEYS.RECONCILE_PERIOD);
+    const seconds =
+      (stored[STORAGE_KEYS.RECONCILE_PERIOD] as number | undefined) ?? DEFAULT_RECONCILE_PERIOD_SECONDS;
+    await chrome.alarms.clear(RECONCILE_ALARM);
+    if (seconds > 0) {
+      // chrome.alarms 周期下限 30s
+      await chrome.alarms.create(RECONCILE_ALARM, { periodInMinutes: Math.max(seconds, 30) / 60 });
+    }
   }
 
   async connect(url: string): Promise<void> {
