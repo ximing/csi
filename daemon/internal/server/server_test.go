@@ -464,6 +464,78 @@ func TestPostConfig(t *testing.T) {
 	}
 }
 
+// 二次保存：第一次改端口后 restart_required=true；第二次保存无关字段
+// （请求仍带新端口）时 restart_required 仍应为 true——判定应对齐实际
+// 监听端口 s.Port，而非内存中已被上一次保存覆盖的 config 值。
+func TestPostConfigRestartRequiredSticky(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	post := func(payload string) map[string]any {
+		req := httptest.NewRequest("POST", "/config", strings.NewReader(payload))
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if !body["success"].(bool) {
+			t.Fatalf("post %s failed: %v", payload, body)
+		}
+		return body
+	}
+
+	first := post(`{"port": 10090}`)
+	if first["data"].(map[string]any)["restart_required"].(bool) != true {
+		t.Fatal("first port change should require restart")
+	}
+	second := post(`{"log_retention_days": 7, "port": 10090}`)
+	if second["data"].(map[string]any)["restart_required"].(bool) != true {
+		t.Fatal("second save with pending port change should still report restart_required")
+	}
+}
+
+// env 覆盖端口时保存无关字段：落盘的 config.json 不应把 env 端口固化进去，
+// 内存生效值仍为 env 值。
+func TestPostConfigEnvPortNotPersisted(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CSI_PORT", "20000")
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	req := httptest.NewRequest("POST", "/config", strings.NewReader(`{"tool_timeout_seconds": 60}`))
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !body["success"].(bool) {
+		t.Fatalf("post failed: %v", body)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatalf("read config.json: %v", err)
+	}
+	var file daemon.Config
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatalf("parse config.json: %v", err)
+	}
+	if file.Port != daemon.DefaultPort {
+		t.Fatalf("disk port = %d, want default %d (env override must not be persisted)", file.Port, daemon.DefaultPort)
+	}
+	if file.ToolTimeoutSeconds != 60 {
+		t.Fatalf("disk tool_timeout_seconds = %d, want 60", file.ToolTimeoutSeconds)
+	}
+	// 内存生效值保持 env 覆盖
+	if srv.Port != 20000 {
+		t.Fatalf("effective port = %d, want env override 20000", srv.Port)
+	}
+}
+
 // 端口被 CSI_PORT 覆盖时拒绝修改端口。
 func TestPostConfigPortLockedByEnv(t *testing.T) {
 	dir := t.TempDir()

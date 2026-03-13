@@ -52,7 +52,7 @@ func cmdServe() error {
 	if err := daemon.WritePID(dir, os.Getpid()); err != nil {
 		return err
 	}
-	defer daemon.RemovePID(dir)
+	defer daemon.RemovePID(dir, os.Getpid()) // 只删自己的：自重启时新进程的 pid 文件不能被误删
 
 	srv := server.New(cfg, dir, logger)
 	srv.OnConfigApplied = func(c daemon.Config) { daily.SetKeepDays(c.LogRetentionDays) }
@@ -168,7 +168,7 @@ func startDaemon() error {
 			return fmt.Errorf("found live process %d not responding as csi; run csi restart or csi stop --force", pid)
 		}
 	}
-	daemon.RemovePID(dir) // 清理残留 pid 文件
+	daemon.RemovePID(dir, -1) // 清理残留 pid 文件（无条件）
 
 	logf, err := daemon.OpenLogFile(dir)
 	if err != nil {
@@ -260,7 +260,7 @@ func (e *notCSIError) Error() string {
 func stopDaemon(dir string, force bool) error {
 	pid, err := daemon.ReadPID(dir)
 	if err != nil {
-		daemon.RemovePID(dir)
+		daemon.RemovePID(dir, -1) // 文件缺失/损坏：无条件清理
 		fmt.Println("csi not running")
 		return nil
 	}
@@ -268,7 +268,7 @@ func stopDaemon(dir string, force bool) error {
 		st, _ := fetchStatus(daemon.Port()) // 不可达时 st 为 nil，按活态继续判定
 		switch decideStop(pid, st, daemon.PIDAlive(pid)) {
 		case stopNotRunning:
-			daemon.RemovePID(dir)
+			daemon.RemovePID(dir, pid) // 进程已死：只删它的残留文件
 			fmt.Println("csi not running")
 			return nil
 		case stopRefuseForeign:
@@ -276,7 +276,7 @@ func stopDaemon(dir string, force bool) error {
 		}
 	}
 	if !daemon.PIDAlive(pid) { // force 模式或身份确认后进程刚好退出
-		daemon.RemovePID(dir)
+		daemon.RemovePID(dir, pid)
 		fmt.Println("csi not running")
 		return nil
 	}

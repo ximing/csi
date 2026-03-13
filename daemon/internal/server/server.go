@@ -199,11 +199,19 @@ func (s *Server) handlePostConfig(w http.ResponseWriter, r *http.Request) {
 		next.ToolTimeoutSeconds = *patch.ToolTimeoutSeconds
 	}
 
-	if err := daemon.SaveConfig(s.dir, next); err != nil {
+	// env 锁定端口（CSI_PORT 覆盖）时，落盘保留磁盘原值：
+	// 内存生效值（next / s.cfg.Values）不动，避免把临时的 env 覆盖固化进 config.json。
+	save := next
+	if s.cfg.Sources["port"] == daemon.SourceEnv {
+		save.Port = daemon.DiskPort(s.dir)
+	}
+	if err := daemon.SaveConfig(s.dir, save); err != nil {
 		writeJSON(w, commandResponse{Success: false, Error: "save config: " + err.Error()})
 		return
 	}
-	restartRequired := patch.Port != nil && *patch.Port != s.cfg.Values.Port
+	// 与实际监听端口比较：内存值可能已被上一次保存覆盖，
+	// 二次保存（请求仍带新端口）时 restart_required 不能丢。
+	restartRequired := patch.Port != nil && *patch.Port != s.Port
 	s.cfg.Values = next
 	if patch.Port != nil {
 		s.cfg.Sources["port"] = daemon.SourceConfig
