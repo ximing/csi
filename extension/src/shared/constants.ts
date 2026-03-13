@@ -4,9 +4,6 @@ export const DEFAULT_WS_URL = 'ws://127.0.0.1:10088/ws';
 /** chrome.alarms name used to reconcile desired vs actual WS state (protocol §3.1). */
 export const RECONCILE_ALARM = 'csi-reconcile';
 
-/** Reconcile period in minutes (protocol §3.1). */
-export const RECONCILE_PERIOD_MINUTES = 0.5;
-
 /** Default reconcile period in seconds (protocol §3.1). Chrome alarms floor is 30s. */
 export const DEFAULT_RECONCILE_PERIOD_SECONDS = 30;
 

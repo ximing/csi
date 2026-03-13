@@ -1,5 +1,5 @@
 import './options.css';
-import { DEFAULT_WS_URL, STORAGE_KEYS } from '../shared/constants';
+import { DEFAULT_RECONCILE_PERIOD_SECONDS, DEFAULT_WS_URL, STORAGE_KEYS } from '../shared/constants';
 
 const i18n = (key: string, subs?: string | string[]): string => chrome.i18n.getMessage(key, subs) || key;
 
@@ -252,3 +252,23 @@ restartButton.addEventListener('click', async () => {
 });
 
 void loadConfig();
+
+// ---------- 插件设置区块 ----------
+
+const reconcileSelect = document.getElementById('reconcile-period') as HTMLSelectElement;
+const extResult = document.getElementById('ext-result')!;
+
+async function loadExtSettings(): Promise<void> {
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.RECONCILE_PERIOD);
+  const seconds =
+    (stored[STORAGE_KEYS.RECONCILE_PERIOD] as number | undefined) ?? DEFAULT_RECONCILE_PERIOD_SECONDS;
+  reconcileSelect.value = String(seconds);
+}
+
+reconcileSelect.addEventListener('change', async () => {
+  await chrome.storage.local.set({ [STORAGE_KEYS.RECONCILE_PERIOD]: Number(reconcileSelect.value) });
+  extResult.className = 'result ok';
+  extResult.textContent = i18n('extSaved');
+});
+
+void loadExtSettings();
