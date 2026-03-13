@@ -134,7 +134,7 @@ git tag v0.1.0 && git push origin v0.1.0
 
 Protocol changes: edit `docs/protocol.md` first, then update both sides. The protocol file is the contract; implementations must follow it.
 
-Port: default `10088`, override with the `CSI_PORT` environment variable (set the same port in the extension popup).
+Port: default `10088`, override with the `CSI_PORT` environment variable (set the same port in the extension popup). Click the extension icon → Settings to open the options page: view daemon status, change the port / log retention days / tool timeout, and adjust the auto-reconnect interval.
 
 ## Security notes
 
