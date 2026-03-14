@@ -94,7 +94,7 @@ The installer also drops a second skill, `csi-e2e`, into `~/.claude/skills/`. It
 3. **Solidify** — what passed gets translated into `e2e/suites/<name>.mjs` (plain Node scripts talking to the daemon over HTTP).
 4. **Replay** — `node e2e/run.mjs [suite...]`, no model involved.
 
-Ask Claude Code to "write an e2e test for X" in any web project and the skill kicks in. See [skill-e2e/SKILL.md](skill-e2e/SKILL.md) for the full workflow.
+Ask Claude Code to "write an e2e test for X" in any web project and the skill kicks in. See [skills/csi-e2e/SKILL.md](skills/csi-e2e/SKILL.md) for the full workflow.
 
 ## Tools
 
@@ -109,8 +109,8 @@ csi/
 │   └── cmd/csi/
 ├── extension/              # Chrome MV3 extension (TypeScript, service worker)
 │   └── dist/               # build output — load this in chrome://extensions
-├── skill/                  # Claude Code skill: browser control (SKILL.md + references/)
-├── skill-e2e/              # Claude Code skill: describe→verify→solidify→replay e2e suites
+├── skills/csi/             # Claude Code skill: browser control (SKILL.md + references/)
+├── skills/csi-e2e/         # Claude Code skill: describe→verify→solidify→replay e2e suites
 ├── scripts/                # installers: install.sh (macOS/Linux), install.ps1 (Windows)
 └── .github/workflows/      # release.yml — tag v* → cross-build daemon + extension → GitHub Release
 ```
