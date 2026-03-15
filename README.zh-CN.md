@@ -1,0 +1,148 @@
+# CSI
+
+[English](README.md) | **简体中文**
+
+**CSI** — Ctrl+Shift+I，每个程序员都按过的 DevTools 快捷键；也是 Crime Scene Investigation——AI 勘查浏览器案发现场。
+
+让 AI（Claude Code 及其它 agent）控制你**真实的 Chrome 浏览器**——导航、点击、输入、读取页面、截图、保存 PDF——使用你实际的登录态。不需要带自动化标记的浏览器，也不需要单独的 profile：agent 直接驱动你正在用的那台 Chrome。
+
+## 架构
+
+```
+AI 客户端 (Claude Code skill)
+        │  HTTP POST /command  (JSON)
+        ▼
+┌─────────────────────────────┐
+│  daemon (Go)                │  127.0.0.1:10088
+│  HTTP server + WS server    │  仅回环，无鉴权 (v1)
+└─────────────────────────────┘
+        ▲  WebSocket /ws  (扩展作为 WS 客户端，自动重连)
+        │
+┌─────────────────────────────┐
+│  Chrome 扩展 (MV3 SW)        │  跑在你真实的 Chrome 里
+│  通过 CDP 执行工具           │  对你的标签页调用 debugger API
+└─────────────────────────────┘
+```
+
+- daemon 既是 AI 客户端的 HTTP server，也是扩展的 WebSocket server。扩展主动连向 daemon；同一时刻只保留一个扩展连接。
+- 每条命令都带一个 `session` 名；每个 session 的标签页会被收进一个 Chrome 标签组（`agent:<session>`），一眼就能看出 agent 在干什么。
+- 截图和 PDF 由 daemon 写到磁盘，返回文件路径。
+
+完整的线上协议契约见 [docs/protocol.md](docs/protocol.md)。
+
+## 快速开始
+
+前置条件：Chrome。其它一切从 [GitHub Releases](https://github.com/ximing/csi/releases) 下载预编译产物——不需要 Go/Node。
+
+**1. 安装** —— daemon → `~/.csi/bin`，扩展 → `~/.csi/extension`，Claude Code 技能 → `~/.claude/skills/csi` + `~/.claude/skills/csi-e2e`；安装末尾会启动 daemon：
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell 5.1+)
+irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
+```
+
+两个安装器接受相同的旗标：`--no-start` / `-NoStart`（不启动 daemon），`--no-skill` / `-NoSkill`（不动 `~/.claude/skills`），`-y` / `-Yes`（覆盖已存在的技能安装前不再询问）。用 `CSI_VERSION=v0.1.0` 固定某个 release。
+
+**2. 在 Chrome 中加载扩展**（手动步骤）：`chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选择 `~/.csi/extension`。打开扩展弹窗，确认显示"已连接"。
+
+**3. 检查一切就绪**（安装器已经启动了 daemon；`csi start` 是幂等的——随时可安全运行）：
+
+```bash
+curl -s http://127.0.0.1:10088/status
+# → {"running":true,"extension_connected":true,...}
+```
+
+**4. 驱动浏览器：**
+
+```bash
+curl -s -X POST http://127.0.0.1:10088/command \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"navigate","args":{"url":"https://example.com","newTab":true,"group_title":"Demo"},"session":"demo"}'
+
+curl -s -X POST http://127.0.0.1:10088/command \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"snapshot","args":{},"session":"demo"}'
+
+curl -s -X POST http://127.0.0.1:10088/command \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"screenshot","args":{},"session":"demo"}'
+```
+
+安装器还会把两个 Claude Code 技能复制到 `~/.claude/skills/`：`csi`（浏览器控制——你让 Claude Code 与网站交互时会自动启用）和 `csi-e2e`（e2e 测试套件——见下文）。
+
+## MCP server
+
+`csi mcp` 跑一个 stdio MCP server，暴露全部 17 个浏览器工具。它是一个薄代理：每次工具调用都转发给本地 daemon 的 `POST /command`（同一个 `CSI_PORT`，默认 10088），所以 daemon 必须在运行（`csi start`）。
+
+在 Claude Code 中挂载：
+
+```bash
+claude mcp add csi -- ~/.csi/bin/csi mcp
+```
+
+每个工具还接受一个可选的顶层 `session` 参数（默认 `"default"`），映射到 daemon 的 session 字段。`screenshot`/`save_as_pdf` 返回文件路径——用 Read 工具查看。
+
+## E2E 测试技能
+
+安装器还会把第二个技能 `csi-e2e` 放进 `~/.claude/skills/`。它把自然语言描述的浏览器场景变成可重放的 e2e 回归套件——由同一个 daemon 驱动，不需要测试框架，除了 Node ≥ 18 没有别的依赖：
+
+1. **描述** —— 模型在你的项目里写 `e2e/cases/<name>.md`：一个声明被测 URL 和如何启动应用的头部，然后是带机器可校验【预期】的编号步骤。
+2. **验证** —— 它通过 daemon 在你真实的 Chrome 里现场执行用例，反复迭代直到每个预期都成立。
+3. **固化** —— 通过的部分被翻译成 `e2e/suites/<name>.mjs`（通过 HTTP 与 daemon 通信的纯 Node 脚本）。
+4. **重放** —— `node e2e/run.mjs [suite...]`，不涉及模型。
+
+在任何 web 项目里让 Claude Code"给 X 写个 e2e 测试"，技能就会启动。完整工作流见 [skills/csi-e2e/SKILL.md](skills/csi-e2e/SKILL.md)。
+
+## 工具
+
+17 个工具：`navigate`、`find_tab`、`snapshot`（带 `@e` 引用的无障碍树）、`click`、`fill`（输入框 + contenteditable）、`evaluate`、`network`、`mouse_click`（可信的坐标级点击）、`key_type`、`send_keys`、`cdp`（原始透传）、`screenshot`、`save_as_pdf`、`upload`、`list_tabs`、`close_tab`、`close_session`。精确契约见 [docs/protocol.md](docs/protocol.md) §4。
+
+## 目录结构
+
+```
+csi/
+├── docs/protocol.md        # 线上协议的唯一事实来源
+├── daemon/                 # Go daemon（HTTP + WS server，session 状态）
+│   └── cmd/csi/
+├── extension/              # Chrome MV3 扩展（TypeScript，service worker）
+│   └── dist/               # 构建产物——在 chrome://extensions 里加载这个
+├── skills/csi/             # Claude Code 技能：浏览器控制（SKILL.md + references/）
+├── skills/csi-e2e/         # Claude Code 技能：描述→验证→固化→重放 e2e 套件
+├── scripts/                # 安装器：install.sh（macOS/Linux）、install.ps1（Windows）
+└── .github/workflows/      # release.yml——打 v* tag → 交叉编译 daemon + 扩展 → GitHub Release
+```
+
+## 开发
+
+```bash
+# daemon
+cd daemon
+go test ./...
+go build -o ~/.csi/bin/csi ./cmd/csi
+
+# 扩展
+cd extension
+npm install
+npm run build        # 产出 extension/dist——在 chrome://extensions 里 reload
+
+# 发版（推一个 tag → workflow 交叉编译一切并起草 Release）
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+协议变更：先改 `docs/protocol.md`，再改两侧实现。协议文件就是契约；实现必须服从它。
+
+端口：默认 `10088`，用 `CSI_PORT` 环境变量覆盖（在扩展弹窗里设置相同端口）。点扩展图标 → Settings 打开设置页：查看 daemon 状态、改端口 / 日志保留天数 / 工具超时，以及调整自动重连间隔。
+
+## 安全说明
+
+- daemon 只绑 `127.0.0.1`；v1 没有鉴权——回环就是隔离边界。任何以你的用户身份运行的进程都能驱动你的浏览器。
+- `evaluate` 和 `cdp` 是页面内的任意代码执行通道。这是设计能力，不是 bug——据此对待技能提示。
+
+## 路线图
+
+- **DirectCDPBackend**：连接 [obscura](https://github.com/h4ckf0r0day/obscura)——一个带内置 CDP server 的 Rust 无头浏览器。daemon 会直接和它的 CDP WebSocket 对话，不需要 Chrome 扩展，在当前真实 Chrome 模式之外提供完全无头的自动化。
