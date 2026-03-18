@@ -1,0 +1,79 @@
+export const zh = {
+  nav: {
+    caseId: '案件 #CSI-10088',
+    github: 'GitHub',
+  },
+  hero: {
+    title: 'AI 勘查浏览器案发现场',
+    subtitle: '让 AI 用你真实的登录态，操控你正在用的那台 Chrome——导航、点击、输入、截图、读页面。',
+    ctaStart: '快速开始',
+    ctaTools: '查看 17 件工具',
+  },
+  heroDemo: {
+    prompt: 'curl -X POST 127.0.0.1:10088/command',
+    cmd1: 'navigate → example.com',
+    cmd2: 'click → @e-login',
+    cmd3: 'screenshot',
+    opening: '正在打开 example.com…',
+    clicking: '点击登录按钮…',
+    captured: '截图已取证',
+    evidence: '证据 #001',
+  },
+  features: {
+    title: '为什么是 CSI',
+    items: [
+      { title: '真实登录态', desc: '驱动你正在用的 Chrome，带着你所有的登录会话，无需任何自动化 profile。' },
+      { title: '17 件工具', desc: '导航、点击、填充、截图、PDF、网络监听、CDP 透传——覆盖浏览器交互全链路。' },
+      { title: '无自动化标记', desc: '不是带 webdriver 标记的浏览器，就是你日常用的那个 Chrome。' },
+      { title: '技能自动启用', desc: '装好的 Claude Code 技能在你让 AI 与网站交互时自动接管，无需手动调用。' },
+    ],
+  },
+  arch: {
+    title: '架构',
+    desc: 'daemon 是 AI 客户端的 HTTP server，也是扩展的 WebSocket server。扩展跑在你真实的 Chrome 里，通过 CDP 执行工具。',
+    aiClient: 'AI 客户端',
+    daemon: 'daemon (Go)',
+    extension: 'Chrome 扩展 (MV3)',
+    httpLabel: 'HTTP POST /command',
+    wsLabel: 'WebSocket /ws',
+    note: '仅绑 127.0.0.1 · 无鉴权 (v1)',
+  },
+  tools: {
+    title: '17 件勘查工具',
+    subtitle: '覆盖浏览器交互全链路，精确契约见 protocol.md §4',
+  },
+  quickstart: {
+    title: '快速开始',
+    mac: 'macOS / Linux',
+    windows: 'Windows',
+    copy: '复制',
+    copied: '已复制',
+    step1: '1. 安装 —— daemon、扩展、技能一步到位，末尾启动 daemon：',
+    step2: '2. 在 Chrome 加载扩展：chrome://extensions → 开发者模式 → 加载已解压 → 选 ~/.csi/extension',
+    step3: '3. 检查就绪：',
+  },
+  e2e: {
+    title: 'E2E 回归套件',
+    subtitle: '把自然语言场景变成可重放的 e2e 测试，由同一个 daemon 驱动',
+    steps: [
+      { title: '描述', desc: '模型写 e2e/cases/<name>.md：被测 URL + 带机器可校验预期的编号步骤。' },
+      { title: '验证', desc: '通过 daemon 在真实 Chrome 里现场执行，迭代直到每个预期成立。' },
+      { title: '固化', desc: '通过的部分翻译成 e2e/suites/<name>.mjs，纯 Node 脚本走 HTTP。' },
+      { title: '重放', desc: 'node e2e/run.mjs，不涉及模型，随时回归。' },
+    ],
+  },
+  security: {
+    title: '安全说明',
+    items: [
+      { title: '回环即边界', desc: 'daemon 只绑 127.0.0.1，v1 无鉴权——回环就是隔离边界。任何以你用户身份运行的进程都能驱动你的浏览器。' },
+      { title: '设计能力', desc: 'evaluate 与 cdp 是页面内的任意代码执行通道。这是设计能力，不是 bug——据此对待技能提示。' },
+    ],
+  },
+  footer: {
+    github: 'GitHub',
+    readme: 'README',
+    protocol: 'protocol.md',
+    version: 'v0.3.0',
+    tagline: 'Ctrl+Shift+I · AI 勘查浏览器案发现场',
+  },
+}
