@@ -1,0 +1,7 @@
+.lang-toggle { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 13px; }
+.lang-toggle button {
+  background: transparent; border: none; color: var(--text-dim);
+  cursor: pointer; padding: 2px 4px; border-radius: 4px; font: inherit;
+}
+.lang-toggle button.active { color: var(--accent); }
+.lang-toggle .sep { color: var(--text-dim); }

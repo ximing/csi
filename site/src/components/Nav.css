@@ -1,0 +1,13 @@
+.nav {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(10, 13, 15, 0.85); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.case-id { font-family: var(--mono); font-size: 13px; color: var(--warn); letter-spacing: 1px; }
+.nav-right { display: flex; align-items: center; gap: 16px; }
+.nav-link {
+  font-family: var(--mono); font-size: 13px; color: var(--text-dim);
+  text-decoration: none; border: 1px solid var(--border); padding: 4px 10px; border-radius: 4px;
+}
+.nav-link:hover { border-color: var(--accent); color: var(--accent); }
