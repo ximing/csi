@@ -1,0 +1,79 @@
+export const en = {
+  nav: {
+    caseId: 'CASE #CSI-10088',
+    github: 'GitHub',
+  },
+  hero: {
+    title: 'AI investigates the browser crime scene',
+    subtitle: 'Let AI drive the Chrome you already use — with your real login sessions — to navigate, click, type, screenshot, and read pages.',
+    ctaStart: 'Quick start',
+    ctaTools: 'See the 17 tools',
+  },
+  heroDemo: {
+    prompt: 'curl -X POST 127.0.0.1:10088/command',
+    cmd1: 'navigate → example.com',
+    cmd2: 'click → @e-login',
+    cmd3: 'screenshot',
+    opening: 'opening example.com…',
+    clicking: 'clicking the login button…',
+    captured: 'screenshot captured',
+    evidence: 'EVIDENCE #001',
+  },
+  features: {
+    title: 'Why CSI',
+    items: [
+      { title: 'Real login sessions', desc: 'Drives the Chrome you already use, with all your login sessions. No automation profile.' },
+      { title: '17 tools', desc: 'Navigate, click, fill, screenshot, PDF, network capture, CDP passthrough — the full browser interaction chain.' },
+      { title: 'No automation flag', desc: 'Not a webdriver-flagged browser. Just the Chrome you use every day.' },
+      { title: 'Skill auto-engages', desc: 'The installed Claude Code skill takes over whenever you ask AI to interact with a site — no manual invocation.' },
+    ],
+  },
+  arch: {
+    title: 'Architecture',
+    desc: 'The daemon is an HTTP server for AI clients and a WebSocket server for the extension. The extension runs in your real Chrome and executes tools via CDP.',
+    aiClient: 'AI client',
+    daemon: 'daemon (Go)',
+    extension: 'Chrome extension (MV3)',
+    httpLabel: 'HTTP POST /command',
+    wsLabel: 'WebSocket /ws',
+    note: '127.0.0.1 only · no auth (v1)',
+  },
+  tools: {
+    title: '17 investigation tools',
+    subtitle: 'Covering the full browser interaction chain — exact contract in protocol.md §4',
+  },
+  quickstart: {
+    title: 'Quick start',
+    mac: 'macOS / Linux',
+    windows: 'Windows',
+    copy: 'Copy',
+    copied: 'Copied',
+    step1: '1. Install — daemon, extension, and skills in one step; daemon starts at the end:',
+    step2: '2. Load the extension in Chrome: chrome://extensions → Developer mode → Load unpacked → pick ~/.csi/extension',
+    step3: '3. Check it’s ready:',
+  },
+  e2e: {
+    title: 'E2E regression suites',
+    subtitle: 'Turn natural-language scenarios into replayable e2e tests, driven by the same daemon',
+    steps: [
+      { title: 'Describe', desc: 'The model writes e2e/cases/<name>.md: the URL under test + numbered steps with machine-checkable expectations.' },
+      { title: 'Verify', desc: 'It executes live in your real Chrome via the daemon, iterating until every expectation holds.' },
+      { title: 'Solidify', desc: 'What passed becomes e2e/suites/<name>.mjs — plain Node scripts over HTTP.' },
+      { title: 'Replay', desc: 'node e2e/run.mjs — no model involved, replay anytime.' },
+    ],
+  },
+  security: {
+    title: 'Security notes',
+    items: [
+      { title: 'Loopback is the boundary', desc: 'The daemon binds 127.0.0.1 only; v1 has no auth — loopback is the isolation boundary. Anything running as your user can drive your browser.' },
+      { title: 'Designed capability', desc: 'evaluate and cdp are arbitrary code execution channels in the page. That is a designed capability, not a bug — treat skill prompts accordingly.' },
+    ],
+  },
+  footer: {
+    github: 'GitHub',
+    readme: 'README',
+    protocol: 'protocol.md',
+    version: 'v0.3.0',
+    tagline: 'Ctrl+Shift+I · AI investigates the browser crime scene',
+  },
+}
