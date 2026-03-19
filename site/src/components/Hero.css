@@ -1,0 +1,10 @@
+.hero { padding: 80px 0 64px; }
+.hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+.hero-tape { margin-bottom: 20px; }
+.hero-title { font-size: 44px; font-weight: 800; line-height: 1.15; letter-spacing: -0.5px; }
+.hero-subtitle { color: var(--text-dim); font-size: 16px; margin: 20px 0 28px; max-width: 460px; }
+.hero-cta { display: flex; gap: 12px; }
+@media (max-width: 860px) {
+  .hero-grid { grid-template-columns: 1fr; }
+  .hero-title { font-size: 32px; }
+}
