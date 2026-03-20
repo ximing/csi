@@ -1,0 +1,10 @@
+.tools-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.tool-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px; display: flex; flex-direction: column; gap: 6px; transition: border-color .15s;
+}
+.tool-card:hover { border-color: var(--accent-dim); }
+.tool-name { font-family: var(--mono); font-size: 14px; color: var(--accent); }
+.tool-desc { color: var(--text-dim); font-size: 13px; }
+@media (max-width: 860px) { .tools-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .tools-grid { grid-template-columns: 1fr; } }
