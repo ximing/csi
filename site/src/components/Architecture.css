@@ -1,0 +1,9 @@
+.arch-svg { width: 100%; max-width: 760px; height: auto; display: block; }
+.arch-box { fill: var(--panel); stroke: var(--border); stroke-width: 1; }
+.arch-daemon { fill: var(--panel-2); stroke: var(--accent-dim); }
+.arch-label { fill: var(--text); font-size: 15px; font-family: var(--sans); font-weight: 600; }
+.arch-mono { fill: var(--accent); font-size: 12px; font-family: var(--mono); }
+.arch-note { fill: var(--text-dim); font-size: 11px; font-family: var(--mono); }
+.arch-edge { fill: var(--warn); font-size: 11px; font-family: var(--mono); }
+.arch-arrow { stroke: var(--accent); stroke-width: 1.5; }
+.arch-arrowhead { fill: var(--accent); }
