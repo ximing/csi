@@ -1,0 +1,11 @@
+.e2e-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.e2e-step { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+.e2e-index {
+  width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #06120b;
+  font-family: var(--mono); font-weight: 700; font-size: 14px;
+  display: flex; align-items: center; justify-content: center; margin-bottom: 12px;
+}
+.e2e-step h3 { font-size: 16px; margin-bottom: 6px; }
+.e2e-step p { color: var(--text-dim); font-size: 13px; }
+@media (max-width: 860px) { .e2e-flow { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .e2e-flow { grid-template-columns: 1fr; } }
