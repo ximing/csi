@@ -4,6 +4,7 @@ import Features from './components/Features'
 import Architecture from './components/Architecture'
 import Tools from './components/Tools'
 import QuickStart from './components/QuickStart'
+import E2E from './components/E2E'
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
       <Architecture />
       <Tools />
       <QuickStart />
+      <E2E />
     </>
   )
 }
