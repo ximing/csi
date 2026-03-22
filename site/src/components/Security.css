@@ -1,0 +1,6 @@
+.security-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.security-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 24px; }
+.security-card .tape { margin-bottom: 12px; }
+.security-card h3 { font-size: 16px; margin-bottom: 8px; }
+.security-card p { color: var(--text-dim); font-size: 14px; }
+@media (max-width: 720px) { .security-grid { grid-template-columns: 1fr; } }
