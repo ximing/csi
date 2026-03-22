@@ -12,13 +12,15 @@ export default function App() {
   return (
     <>
       <Nav />
-      <Hero />
-      <Features />
-      <Architecture />
-      <Tools />
-      <QuickStart />
-      <E2E />
-      <Security />
+      <main>
+        <Hero />
+        <Features />
+        <Architecture />
+        <Tools />
+        <QuickStart />
+        <E2E />
+        <Security />
+      </main>
       <Footer />
     </>
   )
