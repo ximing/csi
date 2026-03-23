@@ -10,7 +10,7 @@ export default function Security() {
         <div className="security-grid">
           {t.security.items.map((item, i) => (
             <div className="security-card" key={i}>
-              <span className="tape">{i === 0 ? '⚠ 警示' : '⚡ 能力'}</span>
+              <span className="tape">{i === 0 ? t.security.tapeWarn : t.security.tapePower}</span>
               <h3>{item.title}</h3>
               <p>{item.desc}</p>
             </div>

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { zh } from './zh'
 import { en } from './en'
 
@@ -17,6 +17,9 @@ const Ctx = createContext<LangCtx>(null!)
 
 export function LangProvider({ children }: { children: ReactNode }) {
   const [lang, setLang] = useState<Lang>('zh')
+  useEffect(() => {
+    document.documentElement.lang = lang
+  }, [lang])
   return <Ctx.Provider value={{ lang, t: dicts[lang], setLang }}>{children}</Ctx.Provider>
 }
 
