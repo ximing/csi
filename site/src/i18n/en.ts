@@ -64,6 +64,8 @@ export const en = {
   },
   security: {
     title: 'Security notes',
+    tapeWarn: '⚠ Warning',
+    tapePower: '⚡ Capability',
     items: [
       { title: 'Loopback is the boundary', desc: 'The daemon binds 127.0.0.1 only; v1 has no auth — loopback is the isolation boundary. Anything running as your user can drive your browser.' },
       { title: 'Designed capability', desc: 'evaluate and cdp are arbitrary code execution channels in the page. That is a designed capability, not a bug — treat skill prompts accordingly.' },

@@ -42,3 +42,9 @@
 }
 @keyframes flash { from { opacity: 0; } to { opacity: 1; } }
 .screenshot .tape { transform: rotate(-3deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .screenshot { animation: none; }
+  .term-line.typing::after { animation: none; }
+  .fake-btn.highlight { animation: none; }
+}
