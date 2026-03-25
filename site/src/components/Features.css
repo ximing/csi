@@ -1,9 +1,0 @@
-.features-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-.feature-card {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-  padding: 24px; transition: border-color .15s;
-}
-.feature-card:hover { border-color: var(--accent-dim); }
-.feature-card h3 { font-size: 17px; margin-bottom: 8px; }
-.feature-card p { color: var(--text-dim); font-size: 14px; }
-@media (max-width: 720px) { .features-grid { grid-template-columns: 1fr; } }
