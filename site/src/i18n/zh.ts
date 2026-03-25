@@ -1,6 +1,7 @@
 export const zh = {
   nav: {
     caseId: '案件 #CSI-10088',
+    anchors: { start: '上手', scenarios: '场景', internals: '原理' },
     github: 'GitHub',
   },
   hero: {
@@ -19,15 +20,6 @@ export const zh = {
     captured: '截图已取证',
     evidence: '证据 #001',
   },
-  features: {
-    title: '为什么是 CSI',
-    items: [
-      { title: '真实登录态', desc: '驱动你正在用的 Chrome，带着你所有的登录会话，无需任何自动化 profile。' },
-      { title: '17 件工具', desc: '导航、点击、填充、截图、PDF、网络监听、CDP 透传——覆盖浏览器交互全链路。' },
-      { title: '无自动化标记', desc: '不是带 webdriver 标记的浏览器，就是你日常用的那个 Chrome。' },
-      { title: '技能自动启用', desc: '装好的 Claude Code 技能在你让 AI 与网站交互时自动接管，无需手动调用。' },
-    ],
-  },
   arch: {
     title: '架构',
     desc: 'daemon 是 AI 客户端的 HTTP server，也是扩展的 WebSocket server。扩展跑在你真实的 Chrome 里，通过 CDP 执行工具。',
@@ -40,16 +32,45 @@ export const zh = {
   },
   scenarios: {
     title: '场景',
-    subtitle: '不只是截图取证——CSI 让 AI 直接读懂网页、搜索提取、回答问题',
-    prompt: 'curl -X POST 127.0.0.1:10088/command',
-    cmd1: 'snapshot → 取无障碍树',
-    cmd2: 'evaluate → 搜 "价格"',
-    cmd3: 'fill → @e17 "Pro"',
-    reading: '正在读取页面结构…',
-    searching: '搜索命中 3 处…',
-    answer: 'AI: Pro 版 $29/月，含 17 工具 + e2e 套件',
-    pageUrl: 'acme.example.com/pricing',
-    priceLabel: 'Pro · $29/月',
+    subtitle: '三个典型场景——AI 用同一套工具，干不同的事',
+    s1Title: 'Agent 查看浏览器',
+    s1Desc: '读取页面结构、搜索提取、回答问题',
+    s2Title: 'Agent 调试 Web 页面',
+    s2Desc: '读控制台、抓网络请求、定位 bug 根因',
+    s3Title: 'E2E 回归套件',
+    s3Desc: '把自然语言场景变成可重放的测试',
+    read: {
+      prompt: 'curl -X POST 127.0.0.1:10088/command',
+      cmd1: 'snapshot → 取无障碍树',
+      cmd2: 'evaluate → 搜 "价格"',
+      cmd3: 'fill → @e17 "Pro"',
+      reading: '正在读取页面结构…',
+      searching: '搜索命中 3 处…',
+      answer: 'AI: Pro 版 $29/月，含 17 工具 + e2e 套件',
+      pageUrl: 'acme.example.com/pricing',
+      priceLabel: 'Pro · $29/月',
+    },
+    debug: {
+      prompt: 'curl -X POST 127.0.0.1:10088/command',
+      cmd1: 'evaluate → console.errors',
+      cmd2: 'network → detail',
+      cmd3: 'click → @e-submit',
+      console: 'console: /api/login 返回 500',
+      netInfo: 'POST /api/login → 500 · token missing',
+      answer: 'AI: /api/login 500 — 后端缺 token 校验，未捕获异常',
+      pageUrl: 'localhost:5173/login',
+      formTitle: 'Sign in',
+      submit: 'Sign in',
+      netRow: 'POST /api/login',
+    },
+    e2e: {
+      steps: [
+        { title: '描述', desc: '模型写 e2e/cases/<name>.md：被测 URL + 带机器可校验预期的编号步骤。' },
+        { title: '验证', desc: '通过 daemon 在真实 Chrome 里现场执行，迭代直到每个预期成立。' },
+        { title: '固化', desc: '通过的部分翻译成 e2e/suites/<name>.mjs，纯 Node 脚本走 HTTP。' },
+        { title: '重放', desc: 'node e2e/run.mjs，不涉及模型，随时回归。' },
+      ],
+    },
   },
   tools: {
     title: '17 件勘查工具',
@@ -64,16 +85,7 @@ export const zh = {
     step1: '1. 安装 —— daemon、扩展、技能一步到位，末尾启动 daemon：',
     step2: '2. 在 Chrome 加载扩展：chrome://extensions → 开发者模式 → 加载已解压 → 选 ~/.csi/extension',
     step3: '3. 检查就绪：',
-  },
-  e2e: {
-    title: 'E2E 回归套件',
-    subtitle: '把自然语言场景变成可重放的 e2e 测试，由同一个 daemon 驱动',
-    steps: [
-      { title: '描述', desc: '模型写 e2e/cases/<name>.md：被测 URL + 带机器可校验预期的编号步骤。' },
-      { title: '验证', desc: '通过 daemon 在真实 Chrome 里现场执行，迭代直到每个预期成立。' },
-      { title: '固化', desc: '通过的部分翻译成 e2e/suites/<name>.mjs，纯 Node 脚本走 HTTP。' },
-      { title: '重放', desc: 'node e2e/run.mjs，不涉及模型，随时回归。' },
-    ],
+    note: '装好后，让 AI 与网站交互时技能自动接管，无需手动调用。',
   },
   security: {
     title: '安全说明',

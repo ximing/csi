@@ -34,6 +34,7 @@ export default function QuickStart() {
         <p className="step-text">{t.quickstart.step2}</p>
         <p className="step-text">{t.quickstart.step3}</p>
         <pre className="cmd-code"><code>{STATUS_CMD}</code></pre>
+        <p className="qs-note">{t.quickstart.note}</p>
       </div>
     </section>
   )

@@ -9,3 +9,7 @@
 .copy-btn { margin-left: auto; }
 .copy-btn:hover { color: var(--accent); }
 .cmd-code { margin: 0; padding: 14px 16px; font-family: var(--mono); font-size: 13px; color: var(--text); overflow-x: auto; }
+.qs-note {
+  color: var(--text-dim); font-size: 13px; margin-top: 28px;
+  padding-left: 12px; border-left: 2px solid var(--accent-dim);
+}
