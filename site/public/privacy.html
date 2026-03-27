@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>隐私政策 · Privacy Policy — CSI</title>
+    <meta name="description" content="CSI 隐私政策：不收集、不存储、不传输任何数据。CSI Privacy Policy: no data collected, stored, or transmitted." />
+    <style>
+      :root {
+        --bg: #0a0d0f;
+        --bg-elev: #11161d;
+        --panel: #161c24;
+        --border: #283340;
+        --text: #d8dde3;
+        --text-dim: #7a8493;
+        --accent: #5dd99f;
+        --warn: #e8c547;
+        --mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        line-height: 1.7;
+        -webkit-font-smoothing: antialiased;
+        background-image:
+          linear-gradient(rgba(93, 217, 159, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(93, 217, 159, 0.025) 1px, transparent 1px);
+        background-size: 40px 40px;
+      }
+      .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+      a { color: var(--accent); }
+
+      .nav {
+        border-bottom: 1px solid var(--border);
+        padding: 16px 0;
+        position: sticky; top: 0;
+        background: rgba(10, 13, 15, 0.9);
+        backdrop-filter: blur(6px);
+      }
+      .nav-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+      .case-id { font-family: var(--mono); font-size: 12px; letter-spacing: 1px; color: var(--text-dim); }
+      .nav-back {
+        font-family: var(--mono); font-size: 13px; text-decoration: none;
+        border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px;
+        color: var(--text); transition: all .15s;
+      }
+      .nav-back:hover { border-color: var(--accent); color: var(--accent); }
+
+      .head { padding: 72px 0 32px; }
+      .tape {
+        font-family: var(--mono); font-size: 11px; font-weight: 700;
+        letter-spacing: 2px; color: #1a1a1a; background: var(--warn);
+        padding: 4px 10px; display: inline-block; text-transform: uppercase;
+        margin-bottom: 20px;
+      }
+      h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+      .updated { color: var(--text-dim); font-size: 14px; font-family: var(--mono); }
+
+      .tldr {
+        margin: 24px 0 8px;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        background: var(--bg-elev);
+        padding: 18px 20px;
+        font-size: 15px;
+      }
+      .tldr strong { color: var(--accent); }
+
+      .lang-block { padding: 32px 0 8px; }
+      .lang-block + .lang-block { border-top: 1px solid var(--border); margin-top: 24px; }
+      .lang-tag {
+        font-family: var(--mono); font-size: 12px; letter-spacing: 2px;
+        color: var(--text-dim); text-transform: uppercase; margin-bottom: 16px;
+      }
+      h2 { font-size: 17px; font-weight: 700; margin: 24px 0 8px; color: var(--text); }
+      h2 .num { font-family: var(--mono); color: var(--accent); margin-right: 8px; }
+      p, li { font-size: 15px; color: var(--text); }
+      p.dim, li.dim { color: var(--text-dim); }
+      ul { padding-left: 22px; margin: 8px 0; }
+      li { margin-bottom: 6px; }
+      code {
+        font-family: var(--mono); font-size: 13px;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 4px; padding: 1px 6px;
+      }
+      p { margin-bottom: 8px; }
+
+      .footer {
+        border-top: 1px solid var(--border);
+        margin-top: 64px;
+        padding: 24px 0 40px;
+      }
+      .footer-inner { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+      .footer span { color: var(--text-dim); font-size: 13px; }
+      .footer a { font-size: 13px; text-decoration: none; }
+      .footer a:hover { text-decoration: underline; }
+
+      @media (max-width: 600px) {
+        .head { padding: 48px 0 24px; }
+        h1 { font-size: 26px; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="nav">
+      <div class="container nav-inner">
+        <span class="case-id">CASE #CSI-10088 · PRIVACY</span>
+        <a class="nav-back" href="./">← CSI</a>
+      </div>
+    </nav>
+
+    <header class="head">
+      <div class="container">
+        <span class="tape">Evidence Handled Locally</span>
+        <h1>隐私政策 · Privacy Policy</h1>
+        <p class="updated">最后更新 / Last updated: 2026-03-27 · <a href="https://github.com/ximing/csi/blob/master/docs/privacy-policy.md">docs/privacy-policy.md</a></p>
+        <div class="tldr">
+          <strong>TL;DR</strong> — CSI 不收集、不存储、不传输你的任何数据：没有遥测、没有分析、没有远端服务器。一切发生在你的本机。<br />
+          CSI does not collect, store, or transmit any of your data: no telemetry, no analytics, no remote servers. Everything happens on your own machine.
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="lang-block">
+        <p class="lang-tag">中文</p>
+
+        <h2><span class="num">1</span>概述</h2>
+        <p>CSI 是一个开源项目（<a href="https://github.com/ximing/csi">github.com/ximing/csi</a>），由一个 Chrome 扩展和一个运行在你自己电脑上的本地 daemon 组成，让本机运行的 AI 客户端（如 Claude Code）通过回环连接操控你真实的 Chrome 浏览器。</p>
+
+        <h2><span class="num">2</span>我们不收集什么</h2>
+        <p>CSI 没有遥测、没有分析统计、没有崩溃上报、没有账号系统，也不运营任何远端服务器。扩展和 daemon 都不会向我们（或任何第三方）发送任何数据——我们甚至没有接收数据的服务器。</p>
+
+        <h2><span class="num">3</span>数据如何流动（全部在本机）</h2>
+        <ul>
+          <li>Chrome 扩展只通过 WebSocket 连接本机 daemon（默认 <code>ws://127.0.0.1:10088/ws</code>）。</li>
+          <li>daemon 只监听 <code>127.0.0.1</code>（回环地址），不接受来自本机以外的连接。</li>
+          <li>所有浏览器操作（导航、点击、输入、读取页面、截图、导出 PDF、标签页与标签组管理）都发生在你本机的 Chrome 里，使用你自己已登录的会话。</li>
+          <li>截图与 PDF 由 daemon 写入本机磁盘（默认为系统临时目录，或指令中指定的路径），不会上传。</li>
+          <li>扩展仅使用 <code>chrome.storage.local</code> 保存连接设置（daemon 地址、重连周期等），这些数据留在你的浏览器本地配置中。</li>
+          <li>daemon 在本机 <code>~/.csi/</code> 下写配置、PID 文件和运行日志；日志按天滚动，最多保留 3 天。</li>
+        </ul>
+
+        <h2><span class="num">4</span>第三方 AI 客户端</h2>
+        <p>向 daemon 发出指令的是你自己在本机运行的 AI 客户端（例如 Claude Code）。页面内容、截图路径等工具结果会返回给该客户端；<strong>该客户端可能会按其自身隐私政策把内容发送到它自己的云端服务</strong>。这属于 AI 客户端的行为，不在 CSI 的控制范围内——请同时阅读你所用 AI 客户端的隐私政策。</p>
+
+        <h2><span class="num">5</span>扩展权限说明</h2>
+        <ul>
+          <li><code>debugger</code>：通过 Chrome DevTools Protocol 在页面内执行工具（读取、点击、截图等）。</li>
+          <li><code>tabs</code> / <code>activeTab</code> / <code>tabGroups</code> / <code>windows</code>：标签页、标签组与窗口管理。</li>
+          <li><code>storage</code>：保存扩展的本地连接设置。</li>
+          <li><code>alarms</code>：断线重连的看门狗定时器。</li>
+          <li><code>host_permissions: &lt;all_urls&gt;</code>：只有在收到你的指令时才会操作对应页面；扩展不会主动访问任何网站。</li>
+        </ul>
+
+        <h2><span class="num">6</span>安全边界</h2>
+        <p>v1 的 daemon 无鉴权，回环地址就是唯一的隔离边界：任何以你的用户身份在本机运行的进程都可以向 daemon 发指令、驱动你的浏览器。请据此决定在本机运行哪些程序。</p>
+
+        <h2><span class="num">7</span>数据留存与删除</h2>
+        <p>我们不持有你的任何数据，因此无从删除。本机产物（截图、PDF、日志、配置）都在你自己的磁盘上，删除对应文件即可；卸载扩展会清除其 <code>chrome.storage.local</code> 中的设置。</p>
+
+        <h2><span class="num">8</span>政策变更与联系</h2>
+        <p>本政策随仓库更新，变更以 git 历史为准。问题与反馈请提交 <a href="https://github.com/ximing/csi/issues">GitHub Issue</a>。</p>
+      </section>
+
+      <section class="lang-block">
+        <p class="lang-tag">English</p>
+
+        <h2><span class="num">1</span>Overview</h2>
+        <p>CSI is an open-source project (<a href="https://github.com/ximing/csi">github.com/ximing/csi</a>) consisting of a Chrome extension and a local daemon running on your own machine. It lets AI clients running locally on your computer (such as Claude Code) drive your real Chrome browser over a loopback connection.</p>
+
+        <h2><span class="num">2</span>What we do not collect</h2>
+        <p>CSI has no telemetry, no analytics, no crash reporting, no accounts, and no remote servers. Neither the extension nor the daemon sends any data to us (or to any third party) — we do not even operate a server that could receive it.</p>
+
+        <h2><span class="num">3</span>How data flows (entirely on your machine)</h2>
+        <ul>
+          <li>The Chrome extension connects only to the local daemon over WebSocket (default <code>ws://127.0.0.1:10088/ws</code>).</li>
+          <li>The daemon listens on <code>127.0.0.1</code> (loopback) only and accepts no connections from outside your machine.</li>
+          <li>All browser actions (navigate, click, type, read pages, screenshots, save-as-PDF, tab and tab-group management) happen inside your own Chrome, using your own logged-in sessions.</li>
+          <li>Screenshots and PDFs are written to your local disk by the daemon (the system temp directory by default, or a path given in the command). They are never uploaded.</li>
+          <li>The extension stores only connection settings (daemon URL, reconnect interval, etc.) in <code>chrome.storage.local</code>, which stays inside your browser profile.</li>
+          <li>The daemon writes its config, PID file, and runtime logs under <code>~/.csi/</code> on your machine; logs rotate daily and are kept for at most 3 days.</li>
+        </ul>
+
+        <h2><span class="num">4</span>Third-party AI clients</h2>
+        <p>Commands are sent to the daemon by AI clients that you run locally (e.g., Claude Code). Tool results such as page content or screenshot file paths are returned to that client; <strong>the client may transmit this content to its own cloud service under its own privacy policy</strong>. That is the AI client's behavior and is outside CSI's control — please also read the privacy policy of the AI client you use.</p>
+
+        <h2><span class="num">5</span>Extension permissions</h2>
+        <ul>
+          <li><code>debugger</code>: executes tools inside pages via the Chrome DevTools Protocol (read, click, screenshot, etc.).</li>
+          <li><code>tabs</code> / <code>activeTab</code> / <code>tabGroups</code> / <code>windows</code>: tab, tab-group, and window management.</li>
+          <li><code>storage</code>: stores the extension's local connection settings.</li>
+          <li><code>alarms</code>: watchdog timer for reconnecting to the daemon.</li>
+          <li><code>host_permissions: &lt;all_urls&gt;</code>: pages are only ever acted upon when you (via your AI client) command it; the extension never visits any site on its own.</li>
+        </ul>
+
+        <h2><span class="num">6</span>Security boundary</h2>
+        <p>The v1 daemon has no authentication; the loopback address is the only isolation boundary. Any process running as your user on your machine can send commands to the daemon and drive your browser. Choose what you run locally accordingly.</p>
+
+        <h2><span class="num">7</span>Retention and deletion</h2>
+        <p>We hold none of your data, so there is nothing for us to delete. Local artifacts (screenshots, PDFs, logs, config) live on your own disk — delete the files to remove them. Uninstalling the extension clears its settings from <code>chrome.storage.local</code>.</p>
+
+        <h2><span class="num">8</span>Changes and contact</h2>
+        <p>This policy is maintained in the repository; see git history for changes. Questions and feedback: <a href="https://github.com/ximing/csi/issues">GitHub Issues</a>.</p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <span>Ctrl+Shift+I · AI 勘查浏览器案发现场</span>
+        <a href="https://github.com/ximing/csi" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
+    </footer>
+  </body>
+</html>

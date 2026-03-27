@@ -8,3 +8,6 @@ daemon/csi
 
 # OS / editor
 .DS_Store
+
+# 上架打包产物（scripts/package-extension.sh）
+release/

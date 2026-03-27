@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CSI screenshot 1 — flow</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 800px; overflow: hidden; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(150deg, #f3f6ff 0%, #e3ebfc 55%, #d7e3fa 100%);
+    position: relative;
+  }
+  .dots-bg {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(47,107,240,.10) 1.2px, transparent 1.2px);
+    background-size: 26px 26px;
+  }
+  .kicker {
+    position: absolute; top: 34px; left: 0; right: 0; text-align: center;
+    font-size: 21px; font-weight: 700; color: #16245c; letter-spacing: .2px;
+  }
+  .kicker .thin { font-weight: 500; color: #4a5f9e; }
+  .chip-label {
+    position: absolute; font-size: 12.5px; font-weight: 600; color: #2f4ea8;
+    background: #ffffff; border: 1px solid #c6d5f7; border-radius: 999px;
+    padding: 5px 12px; box-shadow: 0 2px 8px rgba(28,63,180,.10);
+  }
+  .win {
+    position: absolute; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 18px 50px rgba(20,40,110,.22), 0 2px 8px rgba(20,40,110,.12);
+  }
+  .win-bar { display: flex; align-items: center; gap: 8px; padding: 0 14px; }
+  .tl { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .tl.r { background: #ff5f57; } .tl.y { background: #febc2e; } .tl.g { background: #28c840; }
+
+  /* terminal */
+  #term { left: 40px; top: 150px; width: 520px; height: 492px; background: #14172a; }
+  #term .win-bar { height: 38px; background: #1d2138; }
+  #term .win-title { margin-left: 8px; font-size: 12px; color: #8b93b8; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  #term .body {
+    padding: 14px 16px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12.8px; line-height: 1.62; color: #d7dcf5; white-space: pre-wrap;
+  }
+  .p { color: #4ade80; }          /* prompt */
+  .c { color: #eef1ff; }          /* command */
+  .k { color: #7cc7ff; }          /* json key */
+  .s { color: #fbbf77; }          /* json string */
+  .ok { color: #5eead4; }
+  .dim { color: #6d76a3; }
+
+  /* middle column */
+  .arrow-pill {
+    position: absolute; left: 566px; width: 148px; text-align: center;
+    font-size: 11.5px; font-weight: 600; color: #1c3fb4;
+    background: #eaf1ff; border: 1px solid #b9cdf7; border-radius: 999px; padding: 4px 0;
+  }
+  .daemon-card {
+    position: absolute; left: 566px; top: 300px; width: 148px; height: 170px;
+    background: linear-gradient(160deg, #2f6bf0, #1c3fb4);
+    border-radius: 16px; box-shadow: 0 16px 38px rgba(28,63,180,.40);
+    color: #fff; text-align: center; padding: 14px 8px;
+  }
+  .daemon-card .nm { font-size: 15px; font-weight: 700; margin-top: 6px; }
+  .daemon-card .sub { font-size: 10.5px; opacity: .85; margin-top: 2px; }
+  .daemon-card .addr {
+    margin-top: 8px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10.5px; background: rgba(255,255,255,.16); border-radius: 6px; padding: 3px 4px;
+  }
+  .daemon-card .tag {
+    display: inline-block; margin-top: 7px; font-size: 9.5px; font-weight: 600;
+    background: rgba(255,255,255,.92); color: #1c3fb4; border-radius: 999px; padding: 2px 8px;
+  }
+
+  /* chrome window */
+  #chrome { left: 720px; top: 150px; width: 520px; height: 492px; background: #fff; }
+  #chrome .tabstrip { height: 40px; background: #dee1e6; display: flex; align-items: flex-end; padding: 6px 12px 0; gap: 6px; }
+  .tab {
+    height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 14px;
+    font-size: 12px; color: #3c4043; background: #fff; border-radius: 9px 9px 0 0;
+    border-bottom: 3px solid #2f6bf0;
+  }
+  .grp-pill {
+    align-self: center; height: 22px; padding: 0 10px; border-radius: 11px;
+    background: #2f6bf0; color: #fff; font-size: 11px; font-weight: 600;
+    display: flex; align-items: center;
+  }
+  #chrome .toolbar { height: 46px; background: #fff; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid #e4e6ea; }
+  .nav { color: #5f6368; font-size: 15px; }
+  .urlbar {
+    flex: 1; height: 30px; background: #f1f3f4; border-radius: 15px;
+    display: flex; align-items: center; gap: 7px; padding: 0 12px;
+    font-size: 12.5px; color: #3c4043;
+  }
+  .page { padding: 14px 16px; }
+  .gh-head { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: #1f2328; margin-bottom: 10px; }
+  .gh-mark { width: 22px; height: 22px; border-radius: 50%; background: #1f2328; color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+  .nrow {
+    display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+    border: 1px solid #e4e8ee; border-radius: 8px; margin-bottom: 7px; position: relative;
+  }
+  .nrow .repo { font-size: 11.5px; color: #656d76; width: 92px; font-family: ui-monospace, Menlo, monospace; }
+  .nrow .ttl { font-size: 12.5px; color: #1f2328; font-weight: 500; }
+  .nrow.hot { border: 2px solid #2f6bf0; box-shadow: 0 0 0 3px rgba(47,107,240,.18); }
+  .ref-tag {
+    position: absolute; right: 8px; top: -11px; font-size: 10.5px; font-weight: 700;
+    background: #2f6bf0; color: #fff; border-radius: 6px; padding: 2px 7px;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .cursor { position: absolute; right: 66px; top: 26px; }
+  .cdp-chip {
+    position: absolute; right: 12px; bottom: 12px; font-size: 11px; color: #4a5f9e;
+    background: #eaf1ff; border: 1px solid #c6d5f7; border-radius: 999px; padding: 4px 10px;
+  }
+
+  /* caption */
+  .caption {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 58px;
+    background: linear-gradient(90deg, #14245c, #1c3fb4);
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    color: #eaf1ff; font-size: 16.5px; font-weight: 500; letter-spacing: .2px;
+  }
+  .caption b { font-weight: 700; color: #fff; }
+</style>
+</head>
+<body>
+<div class="dots-bg"></div>
+<div class="kicker">One command, one real tab. <span class="thin">The AI drives the Chrome you are already logged into.</span></div>
+
+<span class="chip-label" style="left:40px; top:118px;">AI client — Claude Code skill / MCP</span>
+<span class="chip-label" style="left:720px; top:118px;">Your real Chrome — CSI extension (MV3 · CDP debugger)</span>
+
+<!-- terminal -->
+<div class="win" id="term">
+  <div class="win-bar">
+    <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+    <span class="win-title">zsh — AI client</span>
+  </div>
+  <div class="body"><span class="p">$</span> <span class="c">curl -s -X POST http://127.0.0.1:10088/command \</span>
+    <span class="c">-d '{<span class="k">"action"</span>:<span class="s">"navigate"</span>,</span>
+        <span class="k">"args"</span>:{<span class="k">"url"</span>:<span class="s">"https://github.com/notifications"</span>},</span>
+        <span class="k">"session"</span>:<span class="s">"demo"</span>}'</span>
+
+<span class="ok">{<span class="k">"ok"</span>:true, <span class="k">"result"</span>:{<span class="k">"tabId"</span>:341,
+  <span class="k">"group"</span>:<span class="s">"agent:demo"</span>}}</span>
+
+<span class="p">$</span> <span class="c">curl -s -X POST http://127.0.0.1:10088/command \</span>
+    <span class="c">-d '{<span class="k">"action"</span>:<span class="s">"snapshot"</span>, <span class="k">"session"</span>:<span class="s">"demo"</span>}'</span>
+
+<span class="ok">{<span class="k">"ok"</span>:true, <span class="k">"result"</span>:{<span class="k">"tree"</span>:
+  <span class="s">"- link \"Mark as done\" @e4 ..."</span>}}</span>
+
+<span class="dim"># click it — trusted, in your real tab:</span>
+<span class="p">$</span> <span class="c">curl -s -X POST http://127.0.0.1:10088/command \</span>
+    <span class="c">-d '{<span class="k">"action"</span>:<span class="s">"click"</span>, <span class="k">"args"</span>:{<span class="k">"ref"</span>:<span class="s">"@e4"</span>},</span>
+        <span class="k">"session"</span>:<span class="s">"demo"</span>}'</span></div>
+</div>
+
+<!-- middle: arrows + daemon -->
+<svg width="1280" height="800" style="position:absolute; inset:0; pointer-events:none;">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#2f6bf0"/>
+    </marker>
+  </defs>
+  <line x1="562" y1="228" x2="714" y2="228" stroke="#2f6bf0" stroke-width="3.5" marker-end="url(#ah)"/>
+  <line x1="718" y1="508" x2="566" y2="508" stroke="#2f6bf0" stroke-width="3.5" marker-end="url(#ah)"/>
+</svg>
+<span class="arrow-pill" style="top:192px;">POST /command · HTTP/JSON</span>
+<span class="arrow-pill" style="top:518px;">WebSocket /ws · dials out</span>
+
+<div class="daemon-card">
+  <svg width="34" height="34" viewBox="0 0 128 128">
+    <rect width="128" height="128" rx="28" fill="rgba(255,255,255,.14)"/>
+    <line x1="75" y1="76.5" x2="101" y2="102.5" stroke="#fff" stroke-width="12.5" stroke-linecap="round"/>
+    <circle cx="54" cy="54" r="27.5" fill="none" stroke="#fff" stroke-width="9.5"/>
+    <ellipse cx="54" cy="55" rx="16" ry="10.5" fill="#fff"/>
+    <circle cx="54" cy="55" r="6.2" fill="#2f6bf0"/>
+  </svg>
+  <div class="nm">csi daemon</div>
+  <div class="sub">Go · HTTP + WS server</div>
+  <div class="addr">127.0.0.1:10088</div>
+  <div class="tag">loopback only</div>
+</div>
+
+<!-- chrome window -->
+<div class="win" id="chrome">
+  <div class="tabstrip">
+    <span class="grp-pill">agent:demo</span>
+    <span class="tab">
+      <span style="width:14px;height:14px;border-radius:50%;background:#1f2328;"></span>
+      Notifications · GitHub
+    </span>
+  </div>
+  <div class="toolbar">
+    <span class="nav">‹ › ⟳</span>
+    <span class="urlbar">🔒 github.com/notifications</span>
+    <svg width="20" height="20" viewBox="0 0 128 128">
+      <rect width="128" height="128" rx="28" fill="#2f6bf0"/>
+      <line x1="75" y1="76.5" x2="101" y2="102.5" stroke="#fff" stroke-width="12.5" stroke-linecap="round"/>
+      <circle cx="54" cy="54" r="27.5" fill="none" stroke="#fff" stroke-width="9.5"/>
+      <ellipse cx="54" cy="55" rx="16" ry="10.5" fill="#fff"/>
+      <circle cx="54" cy="55" r="6.2" fill="#1c3fb4"/>
+    </svg>
+  </div>
+  <div class="page">
+    <div class="gh-head"><span class="gh-mark">GH</span> Notifications</div>
+    <div class="nrow"><span class="repo">ximing/csi</span><span class="ttl">Release v0.3.0 published</span></div>
+    <div class="nrow hot">
+      <span class="repo">ximing/csi</span><span class="ttl">Mark all as done</span>
+      <span class="ref-tag">click @e4</span>
+      <svg class="cursor" width="26" height="26" viewBox="0 0 24 24"><path d="M4 2 L20 12 L13 13.5 L16 21 L13.4 22 L10.4 14.3 L4 18 Z" fill="#1f2328" stroke="#fff" stroke-width="1.2"/></svg>
+    </div>
+    <div class="nrow"><span class="repo">anthropics/…</span><span class="ttl">New issue: MCP transport question</span></div>
+    <div class="nrow"><span class="repo">chromium/…</span><span class="ttl">PR #4821 approved</span></div>
+    <div class="nrow"><span class="repo">ximing/csi</span><span class="ttl">CI passed on master</span></div>
+  </div>
+  <span class="cdp-chip">executed via CDP debugger API</span>
+</div>
+
+<div class="caption">AI client <b>→</b> local daemon (<b>127.0.0.1 only</b>) <b>→</b> CSI extension <b>→</b> your real tabs, with your real login sessions</div>
+</body>
+</html>

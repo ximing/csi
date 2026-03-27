@@ -14,6 +14,7 @@ export default function Footer() {
           <a href="https://github.com/ximing/csi" target="_blank" rel="noreferrer">{t.footer.github}</a>
           <a href={lang === 'zh' ? 'https://github.com/ximing/csi/blob/master/README.zh-CN.md' : 'https://github.com/ximing/csi/blob/master/README.md'} target="_blank" rel="noreferrer">{t.footer.readme}</a>
           <a href="https://github.com/ximing/csi/blob/master/docs/protocol.md" target="_blank" rel="noreferrer">{t.footer.protocol}</a>
+          <a href={`${import.meta.env.BASE_URL}privacy.html`}>{t.footer.privacy}</a>
         </div>
       </div>
     </footer>
