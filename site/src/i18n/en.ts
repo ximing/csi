@@ -100,6 +100,7 @@ export const en = {
     github: 'GitHub',
     readme: 'README',
     protocol: 'protocol.md',
+    privacy: 'Privacy Policy',
     version: 'v0.3.0',
     tagline: 'Ctrl+Shift+I · AI investigates the browser crime scene',
   },

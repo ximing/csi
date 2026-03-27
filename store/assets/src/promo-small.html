@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CSI promo small 440x280</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 440px; height: 280px; overflow: hidden; }
+  body {
+    position: relative;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    background:
+      radial-gradient(120% 90% at 50% -20%, rgba(91,157,255,.34) 0%, rgba(47,107,240,.14) 42%, rgba(47,107,240,0) 70%),
+      radial-gradient(90% 70% at 85% 115%, rgba(28,63,180,.45) 0%, rgba(28,63,180,0) 60%),
+      linear-gradient(160deg, #0a1430 0%, #081026 55%, #060c1e 100%);
+    color: #fff;
+  }
+  /* 细网格，呼应“勘查现场” */
+  .grid {
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(0deg, rgba(140,180,255,.055) 0 1px, transparent 1px 28px),
+      repeating-linear-gradient(90deg, rgba(140,180,255,.055) 0 1px, transparent 1px 28px);
+    -webkit-mask-image: radial-gradient(75% 75% at 50% 45%, #000 30%, transparent 100%);
+  }
+  .stage {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 28px 32px;
+  }
+  .icon {
+    width: 88px; height: 88px;
+    filter: drop-shadow(0 10px 24px rgba(8,20,60,.6));
+    margin-bottom: 18px;
+  }
+  .wordmark {
+    font-size: 56px; font-weight: 800;
+    letter-spacing: .14em; text-indent: .14em;
+    line-height: 1;
+    background: linear-gradient(180deg, #ffffff 20%, #c9dcff 100%);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+  }
+  .tagline {
+    margin-top: 12px;
+    font-size: 15.5px; font-weight: 500;
+    letter-spacing: .02em;
+    color: #a9c4f5;
+  }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="stage">
+    <img class="icon" src="../../../extension/icons/icon.svg" alt="">
+    <div class="wordmark">CSI</div>
+    <div class="tagline">Let AI drive your real browser</div>
+  </div>
+</body>
+</html>
