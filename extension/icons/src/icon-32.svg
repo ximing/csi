@@ -1,22 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5b9dff"/>
-      <stop offset="1" stop-color="#1c3fb4"/>
-    </linearGradient>
-    <linearGradient id="ring" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#dce9ff"/>
+    <linearGradient id="f32" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b4a63"/>
+      <stop offset="1" stop-color="#16203a"/>
     </linearGradient>
   </defs>
-  <!-- 圆角底板 -->
-  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
-  <!-- 放大镜：更粗的镜圈与手柄 -->
-  <line x1="75" y1="76.5" x2="101" y2="102.5" stroke="url(#ring)" stroke-width="14.5" stroke-linecap="round"/>
-  <circle cx="54" cy="54" r="27" fill="#ffffff" fill-opacity="0.08" stroke="url(#ring)" stroke-width="12"/>
-  <!-- 放大的眼睛：虹膜占比加大，省去高光弧 -->
-  <ellipse cx="54" cy="55" rx="18" ry="12" fill="#ffffff"/>
-  <circle cx="54" cy="55" r="8" fill="#1d4ed8"/>
-  <circle cx="54" cy="55" r="3.6" fill="#12276b"/>
-  <circle cx="52" cy="52.8" r="1.8" fill="#ffffff" fill-opacity="0.9"/>
+  <rect width="32" height="32" rx="7" fill="#0b1220"/>
+  <rect x="4" y="3.5" width="24" height="23" rx="4.5" fill="url(#f32)"/>
+  <text x="16" y="19.5" font-family="Menlo, Consolas, monospace" font-size="11" font-weight="800" fill="#7dd3fc" text-anchor="middle">CSI</text>
 </svg>
