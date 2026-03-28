@@ -83,6 +83,9 @@ jobs:
           # 经暂存目录打包，保证归档根名与安装目标（~/.claude/skills/<name>）一致
           cp -r skills/csi pkg/csi
           cp -r skills/csi-e2e pkg/csi-e2e
+          # PolyForm Notices：技能副本必须随附许可条款
+          cp LICENSE pkg/csi/LICENSE
+          cp LICENSE pkg/csi-e2e/LICENSE
           tar -C pkg -czf assets/csi-skill.tar.gz csi
           tar -C pkg -czf assets/csi-e2e-skill.tar.gz csi-e2e
 

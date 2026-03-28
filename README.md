@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.s
 irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
 ```
 
-Both installers accept the same flags: `--no-start` / `-NoStart` (don't start the daemon), `--no-skill` / `-NoSkill` (don't touch `~/.claude/skills`), `-y` / `-Yes` (don't prompt before overwriting an existing skill install). Pin a specific release with `CSI_VERSION=v0.1.0`.
+Both installers accept the same flags: `--no-start` / `-NoStart` (don't start the daemon), `--no-skill` / `-NoSkill` (skip skills entirely), `--agents codex,cursor` / `-Agents codex,cursor` (pick skill targets — see [Coding Agent Skills](#coding-agent-skills)), `-y` / `-Yes` (don't prompt before overwriting an existing skill install). Pin a specific release with `CSI_VERSION=v0.1.0`.
 
 **2. Load the extension in Chrome** (manual step): `chrome://extensions` → Developer mode → Load unpacked → select `~/.csi/extension`. Open the extension popup and confirm it shows "connected".
 
@@ -165,7 +165,7 @@ pi install git:github.com/ximing/csi
 
 The package manifest in [`package.json`](package.json) declares the `skills/` directory for Pi's native skill discovery.
 
-> Note: the shell/PowerShell installers in [Quick start](#quick-start) copy the skills to `~/.claude/skills/` (Claude Code's location). For the tools above, use the per-tool install commands instead — the underlying skill files are identical. The daemon and Chrome extension from the installer are still required; skills only teach the agent how to talk to the daemon.
+> Note: the shell/PowerShell installers in [Quick start](#quick-start) can also drop the skills into other tools' directories directly — run them with `--agents codex,cursor,agents,opencode` (or `all`; PowerShell: `-Agents ...`). Default is `claude` only. Targets: `~/.codex/skills/` (Codex), `~/.cursor/skills/` (Cursor), `~/.agents/skills/` (the cross-tool standard dir, read by Cursor and OpenCode), `~/.config/opencode/skills/` (OpenCode). Kimi, Grok Build, and Pi use their own plugin install commands above — the installer doesn't cover them. The daemon and Chrome extension from the installer are still required either way; skills only teach the agent how to talk to the daemon.
 
 ## Tools
 
@@ -213,6 +213,10 @@ Port: default `10088`, override with the `CSI_PORT` environment variable (set th
 
 - The daemon binds `127.0.0.1` only; there is no authentication in v1 — loopback is the isolation boundary. Anything running as your user can drive your browser.
 - `evaluate` and `cdp` are arbitrary code execution channels in the page. That is a designed capability, not a bug — treat skill prompts accordingly.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE) — any noncommercial purpose is permitted (personal use, research, education, charities, government...); commercial use is not licensed. If you need a commercial license, open an issue.
 
 ## Roadmap
 
