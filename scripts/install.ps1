@@ -19,6 +19,7 @@ param(
     [switch]$Help,
     [switch]$NoStart,
     [switch]$NoSkill,
+    [string]$Agents,
     [switch]$Yes
 )
 
@@ -33,8 +34,23 @@ $InstallDir = Join-Path $env:USERPROFILE '.csi'
 $BinDir     = Join-Path $InstallDir 'bin'
 $BinPath    = Join-Path $BinDir 'csi.exe'
 $ExtDir     = Join-Path $InstallDir 'extension'
-$SkillDir   = Join-Path $env:USERPROFILE '.claude\skills\csi'
-$E2ESkillDir = Join-Path $env:USERPROFILE '.claude\skills\csi-e2e'
+
+# 与 install.sh --agents 对齐：claude(默认) codex cursor agents opencode all
+$Agents = if ($Agents) { $Agents } elseif ($env:CSI_AGENTS) { $env:CSI_AGENTS } else { 'claude' }
+
+function Get-SkillsBase ([string]$Agent) {
+    switch ($Agent) {
+        'claude'   { Join-Path $env:USERPROFILE '.claude\skills' }
+        'codex'    { Join-Path $env:USERPROFILE '.codex\skills' }
+        'cursor'   { Join-Path $env:USERPROFILE '.cursor\skills' }
+        'agents'   { Join-Path $env:USERPROFILE '.agents\skills' }
+        'opencode' {
+            $cfg = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $env:USERPROFILE '.config' }
+            Join-Path $cfg 'opencode\skills'
+        }
+        default { Die "unknown agent: $Agent (valid: claude, codex, cursor, agents, opencode, all)" }
+    }
+}
 
 # ---------- output helpers ----------
 
@@ -57,16 +73,27 @@ Usage:
 Options:
   -Help        Show this help.
   -NoStart     Install everything, but don't start the daemon.
-  -NoSkill     Skip installing the Claude Code skill.
+  -NoSkill     Skip installing the coding-agent skills entirely.
+  -Agents LIST Comma-separated skill targets: claude, codex, cursor,
+               agents (the ~\.agents standard dir), opencode, or all.
+               Default: claude. (Alias for `$env:CSI_AGENTS.)
   -Yes         Don't prompt before overwriting an existing skill install.
 
 Environment:
   `$env:CSI_VERSION   Pin to a specific release tag (e.g. v0.2.0; default: latest).
+  `$env:CSI_AGENTS    Same as -Agents (e.g. "codex,cursor").
+
+Skill target directories:
+  claude    ~\.claude\skills           (Claude Code)
+  codex     ~\.codex\skills            (Codex App / CLI)
+  cursor    ~\.cursor\skills           (Cursor)
+  agents    ~\.agents\skills           (cross-tool standard; Cursor & OpenCode read it)
+  opencode  ~\.config\opencode\skills  (OpenCode)
 
 What it does:
   1. Download the prebuilt daemon  -> $BinPath
   2. Download the built extension  -> $ExtDir  (load this in chrome://extensions)
-  3. Install the Claude Code skills -> $SkillDir + $E2ESkillDir
+  3. Install the skills            -> each target's skills dir (see above)
   4. Start the daemon (idempotent)
 "@
     exit 0
@@ -122,11 +149,12 @@ try {
     Expand-Archive $extZip -DestinationPath $ExtDir
     Ok "extension: $ExtDir"
 
-    # ---------- 3. Claude Code skills ----------
+    # ---------- 3. coding-agent skills ----------
 
     function Install-Skill ([string]$TarName, [string]$DestDir) {
         $tar = Join-Path $TmpDir $TarName
-        Download "$DL/$TarName" $tar
+        # tarball 只下载一次，多目标复用
+        if (-not (Test-Path $tar)) { Download "$DL/$TarName" $tar }
         if (Test-Path $DestDir) { Remove-Item $DestDir -Recurse -Force }
         New-Item -ItemType Directory -Path (Split-Path -Parent $DestDir) -Force | Out-Null
         # Windows 10+ 自带 bsdtar，可直接解 tar.gz
@@ -136,19 +164,31 @@ try {
     }
 
     if ($NoSkill) {
-        Step '[3/4] Claude Code skills - skipped (-NoSkill)'
+        Step '[3/4] Coding-agent skills - skipped (-NoSkill)'
     } else {
-        Step '[3/4] Claude Code skills'
+        Step '[3/4] Coding-agent skills'
+
+        if ($Agents -eq 'all') { $Agents = 'claude,codex,cursor,agents,opencode' }
+        # 先解析全部目标，任何一个不认识就整体失败，不装一半
+        $agentList = @($Agents -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        if ($agentList.Count -eq 0) { Die 'no skill targets given (-Agents)' }
+        $bases = @($agentList | ForEach-Object { ,@($_, (Get-SkillsBase $_)) })
 
         $doInstall = $true
-        if (((Test-Path $SkillDir) -or (Test-Path $E2ESkillDir)) -and -not $Yes) {
-            $answer = Read-Host '    skills already present under ~/.claude/skills - overwrite? [y/N]'
+        $existing = @($bases | Where-Object { (Test-Path (Join-Path $_[1] 'csi')) -or (Test-Path (Join-Path $_[1] 'csi-e2e')) } |
+            ForEach-Object { $_[1] })
+        if ($existing.Count -gt 0 -and -not $Yes) {
+            $answer = Read-Host "    skills already present under $($existing -join ', ') - overwrite? [y/N]"
             $doInstall = ($answer -match '^(y|yes)$')
         }
 
         if ($doInstall) {
-            Install-Skill 'csi-skill.tar.gz' $SkillDir
-            Install-Skill 'csi-e2e-skill.tar.gz' $E2ESkillDir
+            foreach ($pair in $bases) {
+                $agent = $pair[0]; $base = $pair[1]
+                Info "$agent -> $base"
+                Install-Skill 'csi-skill.tar.gz' (Join-Path $base 'csi')
+                Install-Skill 'csi-e2e-skill.tar.gz' (Join-Path $base 'csi-e2e')
+            }
         } else {
             Info 'skipped (kept existing)'
         }

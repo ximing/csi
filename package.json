@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "CSI — let AI control your real Chrome browser (daemon + extension + coding-agent skills)",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "main": ".opencode/plugins/csi.js",
   "keywords": [
     "pi-package",
