@@ -86,6 +86,9 @@ export const en = {
     step2: '2. Load the extension in Chrome: chrome://extensions → Developer mode → Load unpacked → pick ~/.csi/extension',
     step3: '3. Check it’s ready:',
     note: 'Once installed, the skill auto-engages whenever you ask AI to interact with a site — no manual invocation.',
+    skillsTitle: 'Skills for other coding agents',
+    skillsIntro: 'The installer covers Claude Code. The same skills ship as thin plugin manifests for other coding tools:',
+    skillsMore: 'Daemon and extension are still required — see the Coding Agent Skills section in the README.',
   },
   security: {
     title: 'Security notes',

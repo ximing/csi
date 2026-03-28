@@ -6,6 +6,16 @@ const MAC_CMD = 'curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/
 const WIN_CMD = 'irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex'
 const STATUS_CMD = 'curl -s http://127.0.0.1:10088/status'
 
+const AGENT_INSTALLS: Array<{ tool: string; cmd: string; hint?: string }> = [
+  { tool: 'Claude Code', cmd: '/plugin marketplace add ximing/csi\n/plugin install csi@csi' },
+  { tool: 'Codex App / CLI', cmd: 'codex plugin marketplace add ximing/csi\ncodex plugin add csi@csi' },
+  { tool: 'Cursor', cmd: '/add-plugin csi' },
+  { tool: 'Grok Build CLI', cmd: 'grok plugin install csi@xai-official --trust', hint: 'xAI 官方市场收录 PR 审核中 / xAI official marketplace listing in review' },
+  { tool: 'Kimi Code', cmd: '/plugins install https://github.com/ximing/csi' },
+  { tool: 'OpenCode', cmd: '"plugin": ["csi@git+https://github.com/ximing/csi.git"]  // opencode.json' },
+  { tool: 'Pi', cmd: 'pi install git:github.com/ximing/csi' },
+]
+
 export default function QuickStart() {
   const { t } = useLang()
   const [tab, setTab] = useState<'mac' | 'win'>('mac')
@@ -35,6 +45,18 @@ export default function QuickStart() {
         <p className="step-text">{t.quickstart.step3}</p>
         <pre className="cmd-code"><code>{STATUS_CMD}</code></pre>
         <p className="qs-note">{t.quickstart.note}</p>
+        <h3 className="qs-skills-title">{t.quickstart.skillsTitle}</h3>
+        <p className="step-text">{t.quickstart.skillsIntro}</p>
+        <div className="qs-skills">
+          {AGENT_INSTALLS.map(({ tool, cmd, hint }) => (
+            <div className="qs-skill-row" key={tool}>
+              <span className="qs-skill-tool">{tool}</span>
+              <code className="qs-skill-cmd">{cmd}</code>
+              {hint && <span className="qs-skill-hint">{hint}</span>}
+            </div>
+          ))}
+        </div>
+        <p className="qs-note">{t.quickstart.skillsMore}</p>
       </div>
     </section>
   )

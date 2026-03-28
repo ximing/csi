@@ -1,0 +1,17 @@
+{
+  "name": "csi",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "CSI — let AI control your real Chrome browser (daemon + extension + coding-agent skills)",
+  "main": ".opencode/plugins/csi.js",
+  "keywords": [
+    "pi-package",
+    "skills"
+  ],
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
+  }
+}
