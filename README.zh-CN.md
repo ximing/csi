@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.s
 irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
 ```
 
-两个安装器接受相同的旗标：`--no-start` / `-NoStart`（不启动 daemon），`--no-skill` / `-NoSkill`（不动 `~/.claude/skills`），`-y` / `-Yes`（覆盖已存在的技能安装前不再询问）。用 `CSI_VERSION=v0.1.0` 固定某个 release。
+两个安装器接受相同的旗标：`--no-start` / `-NoStart`（不启动 daemon），`--no-skill` / `-NoSkill`（完全跳过技能），`--agents codex,cursor` / `-Agents codex,cursor`（选择技能安装目标，见[编程 Agent Skills](#编程-agent-skills)），`-y` / `-Yes`（覆盖已存在的技能安装前不再询问）。用 `CSI_VERSION=v0.1.0` 固定某个 release。
 
 **2. 在 Chrome 中加载扩展**（手动步骤）：`chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选择 `~/.csi/extension`。打开扩展弹窗，确认显示"已连接"。
 
@@ -165,7 +165,7 @@ pi install git:github.com/ximing/csi
 
 [`package.json`](package.json) 里的包清单为 Pi 的原生技能发现声明了 `skills/` 目录。
 
-> 说明：[快速开始](#快速开始)里的 shell/PowerShell 安装器把技能拷到 `~/.claude/skills/`（Claude Code 的位置）。上面的工具请改用各自的安装命令 —— 技能文件本身完全相同。安装器装的 daemon 和 Chrome 扩展仍然必需；技能只是教 Agent 怎么与 daemon 对话。
+> 说明：[快速开始](#快速开始)里的 shell/PowerShell 安装器也可以直接把技能装进其他工具的目录 —— 加 `--agents codex,cursor,agents,opencode`（或 `all`；PowerShell 端 `-Agents ...`），默认只装 `claude`。目标：`~/.codex/skills/`（Codex）、`~/.cursor/skills/`（Cursor）、`~/.agents/skills/`（跨工具标准目录，Cursor 和 OpenCode 都读）、`~/.config/opencode/skills/`（OpenCode）。Kimi、Grok Build、Pi 用上面各自的插件安装命令，安装器不覆盖。无论哪种方式，安装器装的 daemon 和 Chrome 扩展仍然必需；技能只是教 Agent 怎么与 daemon 对话。
 
 ## 工具
 
@@ -213,6 +213,10 @@ git tag v0.1.0 && git push origin v0.1.0
 
 - daemon 只绑 `127.0.0.1`；v1 没有鉴权——回环就是隔离边界。任何以你的用户身份运行的进程都能驱动你的浏览器。
 - `evaluate` 和 `cdp` 是页面内的任意代码执行通道。这是设计能力，不是 bug——据此对待技能提示。
+
+## 许可
+
+[PolyForm Noncommercial 1.0.0](LICENSE)——任何非商用目的都被允许（个人使用、研究、教育、慈善、政府机构……）；商用未获许可。需要商用授权请开 issue。
 
 ## 路线图
 
