@@ -8,7 +8,8 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.sh | bash
 #   curl -fsSL ... | bash -s -- --no-start        # don't start the daemon
-#   curl -fsSL ... | bash -s -- --no-skill        # don't touch ~/.claude/skills
+#   curl -fsSL ... | bash -s -- --no-skill        # don't install any skills
+#   curl -fsSL ... | bash -s -- --agents codex,cursor  # pick skill targets (default: claude)
 #   CSI_VERSION=v0.2.0 curl -fsSL ... | bash      # pin a release (default: latest)
 
 set -euo pipefail
@@ -19,8 +20,7 @@ INSTALL_DIR="$HOME/.csi"
 BIN_DIR="$INSTALL_DIR/bin"
 BIN_PATH="$BIN_DIR/csi"
 EXT_DIR="$INSTALL_DIR/extension"
-SKILL_DIR="$HOME/.claude/skills/csi"
-E2E_SKILL_DIR="$HOME/.claude/skills/csi-e2e"
+AGENTS="${CSI_AGENTS:-claude}"
 
 # ---------- output ----------
 
@@ -47,16 +47,27 @@ Usage:
 Options:
   -h, --help       Show this help.
   --no-start       Install everything, but don't start the daemon.
-  --no-skill       Skip installing the Claude Code skill.
+  --no-skill       Skip installing the coding-agent skills entirely.
+  --agents LIST    Comma-separated skill targets: claude, codex, cursor,
+                   agents (the ~/.agents standard dir), opencode, or all.
+                   Default: claude. (Alias for CSI_AGENTS.)
   -y, --yes        Don't prompt before overwriting an existing skill install.
 
 Environment:
   CSI_VERSION      Pin to a specific release tag (e.g. v0.2.0; default: latest).
+  CSI_AGENTS       Same as --agents (e.g. "codex,cursor").
+
+Skill target directories:
+  claude    ~/.claude/skills           (Claude Code)
+  codex     ~/.codex/skills            (Codex App / CLI)
+  cursor    ~/.cursor/skills           (Cursor)
+  agents    ~/.agents/skills           (cross-tool standard; Cursor & OpenCode read it)
+  opencode  ~/.config/opencode/skills  (OpenCode)
 
 What it does:
   1. Download the prebuilt daemon  → $BIN_PATH
   2. Download the built extension  → $EXT_DIR  (load this in chrome://extensions)
-  3. Install the Claude Code skills → $SKILL_DIR + $E2E_SKILL_DIR
+  3. Install the skills            → each target's skills dir (see above)
   4. Start the daemon (idempotent)
 EOF
 }
@@ -71,6 +82,7 @@ while [ $# -gt 0 ]; do
     -h|--help)   show_help; exit 0 ;;
     --no-start)  NO_START=1; shift ;;
     --no-skill)  NO_SKILL=1; shift ;;
+    --agents)    [ $# -ge 2 ] || die "--agents requires a value"; AGENTS="$2"; shift 2 ;;
     -y|--yes)    ASSUME_YES=1; shift ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
@@ -141,10 +153,23 @@ mkdir -p "$EXT_DIR"
 unzip -q "$TMP_DIR/extension.zip" -d "$EXT_DIR"
 ok "extension: $EXT_DIR"
 
-# ---------- 3. Claude Code skills ----------
+# ---------- 3. coding-agent skills ----------
 
-install_skill() { # tar-name dest-dir
-  download "$DL/$1" "$TMP_DIR/$1"
+agent_skills_base() { # agent → skills base dir
+  case "$1" in
+    claude)   echo "$HOME/.claude/skills" ;;
+    codex)    echo "$HOME/.codex/skills" ;;
+    cursor)   echo "$HOME/.cursor/skills" ;;
+    agents)   echo "$HOME/.agents/skills" ;;
+    opencode) echo "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" ;;
+    *)        return 1 ;;
+  esac
+}
+
+install_skill() { # tar-name dest-dir（tarball 只下载一次，多目标复用）
+  if [ ! -f "$TMP_DIR/$1" ]; then
+    download "$DL/$1" "$TMP_DIR/$1"
+  fi
   rm -rf "$2"
   mkdir -p "$(dirname "$2")"
   tar -xzf "$TMP_DIR/$1" -C "$(dirname "$2")"
@@ -152,24 +177,45 @@ install_skill() { # tar-name dest-dir
 }
 
 if [ "$NO_SKILL" -eq 1 ]; then
-  step "[3/4] Claude Code skills — skipped (--no-skill)"
+  step "[3/4] Coding-agent skills — skipped (--no-skill)"
 else
-  step "[3/4] Claude Code skills"
+  step "[3/4] Coding-agent skills"
+
+  [ "$AGENTS" = "all" ] && AGENTS="claude codex cursor agents opencode"
+  AGENTS="$(printf '%s' "$AGENTS" | tr ',' ' ' | xargs)"
+  [ -n "$AGENTS" ] || die "no skill targets given (--agents)"
+
+  # 先解析全部目标，任何一个不认识就整体失败，不装一半
+  SKILL_BASES=""
+  for agent in $AGENTS; do
+    base="$(agent_skills_base "$agent")" || die "unknown agent: $agent (valid: claude codex cursor agents opencode all)"
+    SKILL_BASES="$SKILL_BASES$base
+"
+  done
 
   do_install=1
-  if { [ -d "$SKILL_DIR" ] || [ -d "$E2E_SKILL_DIR" ]; } && [ "$ASSUME_YES" -eq 0 ]; then
+  existing=""
+  while IFS= read -r base; do
+    [ -n "$base" ] || continue
+    { [ -d "$base/csi" ] || [ -d "$base/csi-e2e" ]; } && existing="$existing $base"
+  done <<< "$SKILL_BASES"
+  if [ -n "$existing" ] && [ "$ASSUME_YES" -eq 0 ]; then
     # 通过管道运行（curl | bash）时 stdin 被脚本占用，从 /dev/tty 读回答
     if [ -t 0 ]; then
-      read -r -p "    skills already present under ~/.claude/skills — overwrite? [y/N] " answer
+      read -r -p "    skills already present under:$existing — overwrite? [y/N] " answer
     else
-      read -r -p "    skills already present under ~/.claude/skills — overwrite? [y/N] " answer < /dev/tty || answer=""
+      read -r -p "    skills already present under:$existing — overwrite? [y/N] " answer < /dev/tty || answer=""
     fi
     case "$answer" in y|Y|yes|YES) ;; *) do_install=0 ;; esac
   fi
 
   if [ "$do_install" -eq 1 ]; then
-    install_skill csi-skill.tar.gz "$SKILL_DIR"
-    install_skill csi-e2e-skill.tar.gz "$E2E_SKILL_DIR"
+    for agent in $AGENTS; do
+      base="$(agent_skills_base "$agent")"
+      info "$agent → $base"
+      install_skill csi-skill.tar.gz "$base/csi"
+      install_skill csi-e2e-skill.tar.gz "$base/csi-e2e"
+    done
   else
     info "skipped (kept existing)"
   fi
