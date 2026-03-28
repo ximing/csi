@@ -1,0 +1,20 @@
+{
+  "name": "csi",
+  "version": "0.3.0",
+  "description": "CSI skills for coding agents: csi (drive the user's real Chrome browser — navigate, click, type, screenshot, save PDF — via the local daemon), csi-e2e (turn natural-language browser scenarios into replayable e2e regression suites)",
+  "author": {
+    "name": "ximing"
+  },
+  "homepage": "https://github.com/ximing/csi",
+  "repository": "https://github.com/ximing/csi",
+  "keywords": [
+    "csi",
+    "browser",
+    "chrome",
+    "browser-automation",
+    "e2e",
+    "testing",
+    "debugging",
+    "skills"
+  ]
+}

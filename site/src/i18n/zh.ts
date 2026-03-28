@@ -86,6 +86,9 @@ export const zh = {
     step2: '2. 在 Chrome 加载扩展：chrome://extensions → 开发者模式 → 加载已解压 → 选 ~/.csi/extension',
     step3: '3. 检查就绪：',
     note: '装好后，让 AI 与网站交互时技能自动接管，无需手动调用。',
+    skillsTitle: '其他编程 Agent 的技能安装',
+    skillsIntro: '上面的安装器面向 Claude Code。同一份技能以薄插件清单的形式支持其他编程工具：',
+    skillsMore: 'daemon 与扩展仍然必需 —— 详见 README 的「编程 Agent Skills」一节。',
   },
   security: {
     title: '安全说明',
