@@ -13,3 +13,24 @@
   color: var(--text-dim); font-size: 13px; margin-top: 28px;
   padding-left: 12px; border-left: 2px solid var(--accent-dim);
 }
+.qs-skills-title { color: var(--text); font-size: 16px; margin: 32px 0 8px; }
+.qs-skills {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 16px; margin-bottom: 12px;
+}
+.qs-skill-row {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  padding: 9px 0; border-bottom: 1px solid var(--border);
+}
+.qs-skill-row:last-child { border-bottom: none; }
+.qs-skill-tool { color: var(--text); font-size: 13px; min-width: 150px; }
+.qs-skill-cmd {
+  font-family: var(--mono); font-size: 12.5px; color: var(--accent);
+  white-space: pre-line; flex: 1; min-width: 240px;
+}
+.qs-skill-hint { color: var(--text-dim); font-size: 11.5px; font-style: italic; }
+@media (max-width: 720px) {
+  .qs-skill-row { flex-direction: column; gap: 4px; }
+  .qs-skill-tool { min-width: 0; }
+  .qs-skill-cmd { min-width: 0; }
+}
