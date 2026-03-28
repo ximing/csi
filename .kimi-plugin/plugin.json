@@ -1,0 +1,34 @@
+{
+  "name": "csi",
+  "version": "0.3.0",
+  "description": "CSI skills for coding agents: csi (drive the user's real Chrome browser — navigate, click, type, screenshot, save PDF — via the local daemon), csi-e2e (turn natural-language browser scenarios into replayable e2e regression suites).",
+  "author": {
+    "name": "ximing",
+    "homepage": "https://github.com/ximing"
+  },
+  "homepage": "https://github.com/ximing/csi",
+  "keywords": [
+    "csi",
+    "browser",
+    "chrome",
+    "browser-automation",
+    "e2e",
+    "testing",
+    "debugging",
+    "skills"
+  ],
+  "skills": "./skills/",
+  "skillInstructions": "CSI skills tool mapping for Kimi Code:\n\n- When a CSI skill drives the browser (navigate, click, fill, snapshot, screenshot, save_as_pdf, etc.), issue `curl -s -X POST http://127.0.0.1:10088/command` requests with Kimi Code's `Bash` tool; the skill documents the exact JSON payloads.\n- When a CSI skill returns a screenshot or PDF file path, view it with `Read`.\n- When csi-e2e writes or refines `e2e/cases/*.md`, `e2e/suites/*.mjs`, or `e2e/lib/*.mjs`, use `Write` and `Edit`; locate existing cases and suites with `Grep` and `Glob`.\n- When replaying suites (`node e2e/run.mjs`), use `Bash`.\n- When a skill asks to fetch a URL or search for documentation, use `FetchURL` and `WebSearch`.\n- Invoke CSI skills with Kimi Code's native `Skill` tool.",
+  "interface": {
+    "displayName": "CSI",
+    "shortDescription": "Let the agent drive your real Chrome browser",
+    "longDescription": "CSI skills let the agent control the user's real Chrome browser — navigate, click, type, read pages, screenshot, save PDFs — through the local csi daemon, using the user's actual login sessions; csi-e2e turns natural-language browser scenarios into replayable e2e regression suites.",
+    "developerName": "ximing",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/ximing/csi"
+  }
+}

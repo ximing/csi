@@ -98,6 +98,75 @@ The installer also drops a second skill, `csi-e2e`, into `~/.claude/skills/`. It
 
 Ask Claude Code to "write an e2e test for X" in any web project and the skill kicks in. See [skills/csi-e2e/SKILL.md](skills/csi-e2e/SKILL.md) for the full workflow.
 
+## Coding Agent Skills
+
+CSI ships [Agent Skills](https://code.claude.com/docs/en/claude-code/skills) in [`skills/`](./skills) that teach coding agents to drive your real Chrome browser:
+
+| Skill | Purpose |
+| --- | --- |
+| [`csi`](./skills/csi) | Drive the user's real Chrome via the local daemon — navigate, click, type, screenshot, save PDF, with real login sessions. |
+| [`csi-e2e`](./skills/csi-e2e) | Turn natural-language browser scenarios into replayable e2e regression suites (describe → verify → solidify → replay). |
+
+The skills are plain `SKILL.md` documents (plus `references/` and templates) with no runtime dependency, so the same files work across coding tools. Installation differs by tool — if you use more than one, install separately for each.
+
+### Claude Code
+
+```bash
+/plugin marketplace add ximing/csi
+/plugin install csi@csi
+```
+
+Or manually: `cp -r skills/csi skills/csi-e2e ~/.claude/skills/`
+
+### Codex App / Codex CLI
+
+This repository doubles as a Codex plugin marketplace (see [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)), so no official listing is needed:
+
+```bash
+codex plugin marketplace add ximing/csi
+codex plugin add csi@csi
+```
+
+### Cursor
+
+The plugin manifest lives at [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json). In Cursor Agent chat run `/add-plugin csi`, or search for `csi` in the plugin marketplace. Manually, copy the skill directories into `.cursor/skills/` of your project.
+
+### Grok Build CLI
+
+Install from xAI's official plugin marketplace (listing PR submitted, in review):
+
+```bash
+grok plugin install csi@xai-official --trust
+```
+
+### Kimi Code
+
+```text
+/plugins install https://github.com/ximing/csi
+```
+
+Then start a fresh session (`/new`) so the plugin loads.
+
+### OpenCode
+
+Add the plugin to `opencode.json` (global or project-level); it registers `skills/` through OpenCode's plugin system:
+
+```json
+{
+  "plugin": ["csi@git+https://github.com/ximing/csi.git"]
+}
+```
+
+### Pi
+
+```bash
+pi install git:github.com/ximing/csi
+```
+
+The package manifest in [`package.json`](package.json) declares the `skills/` directory for Pi's native skill discovery.
+
+> Note: the shell/PowerShell installers in [Quick start](#quick-start) copy the skills to `~/.claude/skills/` (Claude Code's location). For the tools above, use the per-tool install commands instead — the underlying skill files are identical. The daemon and Chrome extension from the installer are still required; skills only teach the agent how to talk to the daemon.
+
 ## Tools
 
 17 tools: `navigate`, `find_tab`, `snapshot` (accessibility tree with `@e` refs), `click`, `fill` (inputs + contenteditable), `evaluate`, `network`, `mouse_click` (trusted coordinate-level clicks), `key_type`, `send_keys`, `cdp` (raw passthrough), `screenshot`, `save_as_pdf`, `upload`, `list_tabs`, `close_tab`, `close_session`. See [docs/protocol.md](docs/protocol.md) §4 for the exact contract.
@@ -111,8 +180,10 @@ csi/
 │   └── cmd/csi/
 ├── extension/              # Chrome MV3 extension (TypeScript, service worker)
 │   └── dist/               # build output — load this in chrome://extensions
-├── skills/csi/             # Claude Code skill: browser control (SKILL.md + references/)
-├── skills/csi-e2e/         # Claude Code skill: describe→verify→solidify→replay e2e suites
+├── skills/csi/             # coding-agent skill: browser control (SKILL.md + references/)
+├── skills/csi-e2e/         # coding-agent skill: describe→verify→solidify→replay e2e suites
+├── .claude-plugin/         # plugin manifests: Claude Code, Codex, Cursor, Kimi, OpenCode, Pi
+│   └── ...                 # (.claude-plugin/ .codex-plugin/ .agents/ .cursor-plugin/ .kimi-plugin/ .opencode/)
 ├── scripts/                # installers: install.sh (macOS/Linux), install.ps1 (Windows)
 └── .github/workflows/      # release.yml — tag v* → cross-build daemon + extension → GitHub Release
 ```

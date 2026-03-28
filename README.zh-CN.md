@@ -98,6 +98,75 @@ claude mcp add csi -- ~/.csi/bin/csi mcp
 
 在任何 web 项目里让 Claude Code"给 X 写个 e2e 测试"，技能就会启动。完整工作流见 [skills/csi-e2e/SKILL.md](skills/csi-e2e/SKILL.md)。
 
+## 编程 Agent Skills
+
+CSI 在 [`skills/`](./skills) 下内置 [Agent Skills](https://code.claude.com/docs/en/claude-code/skills)，教编程 Agent 驱动你真实的 Chrome：
+
+| Skill | 用途 |
+| --- | --- |
+| [`csi`](./skills/csi) | 通过本地 daemon 驱动用户真实 Chrome —— 导航、点击、输入、截图、存 PDF，带真实登录态。 |
+| [`csi-e2e`](./skills/csi-e2e) | 把自然语言浏览器场景变成可重放的 e2e 回归套件（描述 → 验证 → 固化 → 重放）。 |
+
+技能本体是纯 `SKILL.md` 文档（外加 `references/` 与模板），零运行时依赖，同一份文件适用于各编程工具。安装方式因工具而异 —— 多个工具同时使用时，需要分别为每个工具安装。
+
+### Claude Code
+
+```bash
+/plugin marketplace add ximing/csi
+/plugin install csi@csi
+```
+
+或手动安装：`cp -r skills/csi skills/csi-e2e ~/.claude/skills/`
+
+### Codex App / Codex CLI
+
+本仓库自身就是一个 Codex 插件市场（见 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)），无需官方上架：
+
+```bash
+codex plugin marketplace add ximing/csi
+codex plugin add csi@csi
+```
+
+### Cursor
+
+插件清单在 [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json)。在 Cursor Agent 对话框中执行 `/add-plugin csi`，或在插件市场搜索 `csi`。也可以手动把技能目录拷进项目的 `.cursor/skills/`。
+
+### Grok Build CLI
+
+从 xAI 官方插件市场安装（收录 PR 已提交、审核中）：
+
+```bash
+grok plugin install csi@xai-official --trust
+```
+
+### Kimi Code
+
+```text
+/plugins install https://github.com/ximing/csi
+```
+
+安装后新开会话（`/new`）使插件生效。
+
+### OpenCode
+
+在 `opencode.json`（全局或项目级）里加插件；它会通过 OpenCode 插件系统注册 `skills/`：
+
+```json
+{
+  "plugin": ["csi@git+https://github.com/ximing/csi.git"]
+}
+```
+
+### Pi
+
+```bash
+pi install git:github.com/ximing/csi
+```
+
+[`package.json`](package.json) 里的包清单为 Pi 的原生技能发现声明了 `skills/` 目录。
+
+> 说明：[快速开始](#快速开始)里的 shell/PowerShell 安装器把技能拷到 `~/.claude/skills/`（Claude Code 的位置）。上面的工具请改用各自的安装命令 —— 技能文件本身完全相同。安装器装的 daemon 和 Chrome 扩展仍然必需；技能只是教 Agent 怎么与 daemon 对话。
+
 ## 工具
 
 17 个工具：`navigate`、`find_tab`、`snapshot`（带 `@e` 引用的无障碍树）、`click`、`fill`（输入框 + contenteditable）、`evaluate`、`network`、`mouse_click`（可信的坐标级点击）、`key_type`、`send_keys`、`cdp`（原始透传）、`screenshot`、`save_as_pdf`、`upload`、`list_tabs`、`close_tab`、`close_session`。精确契约见 [docs/protocol.md](docs/protocol.md) §4。
@@ -111,8 +180,10 @@ csi/
 │   └── cmd/csi/
 ├── extension/              # Chrome MV3 扩展（TypeScript，service worker）
 │   └── dist/               # 构建产物——在 chrome://extensions 里加载这个
-├── skills/csi/             # Claude Code 技能：浏览器控制（SKILL.md + references/）
-├── skills/csi-e2e/         # Claude Code 技能：描述→验证→固化→重放 e2e 套件
+├── skills/csi/             # 编程 Agent 技能：浏览器控制（SKILL.md + references/）
+├── skills/csi-e2e/         # 编程 Agent 技能：描述→验证→固化→重放 e2e 套件
+├── .claude-plugin/         # 各工具插件清单：Claude Code、Codex、Cursor、Kimi、OpenCode、Pi
+│   └── ...                 #（.claude-plugin/ .codex-plugin/ .agents/ .cursor-plugin/ .kimi-plugin/ .opencode/）
 ├── scripts/                # 安装器：install.sh（macOS/Linux）、install.ps1（Windows）
 └── .github/workflows/      # release.yml——打 v* tag → 交叉编译 daemon + 扩展 → GitHub Release
 ```
