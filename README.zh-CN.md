@@ -133,7 +133,7 @@ codex plugin add csi@csi
 
 ### Grok Build CLI
 
-从 xAI 官方插件市场安装（收录 PR 已提交、审核中）：
+从 xAI 官方插件市场安装（收录 PR 已提交、审核中：[xai-org/plugin-marketplace#266](https://github.com/xai-org/plugin-marketplace/pull/266)）：
 
 ```bash
 grok plugin install csi@xai-official --trust

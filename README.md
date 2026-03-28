@@ -133,7 +133,7 @@ The plugin manifest lives at [`.cursor-plugin/plugin.json`](.cursor-plugin/plugi
 
 ### Grok Build CLI
 
-Install from xAI's official plugin marketplace (listing PR submitted, in review):
+Install from xAI's official plugin marketplace (listing in review at [xai-org/plugin-marketplace#266](https://github.com/xai-org/plugin-marketplace/pull/266)):
 
 ```bash
 grok plugin install csi@xai-official --trust
