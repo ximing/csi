@@ -8,7 +8,7 @@
 
 ## 放置约束
 
-- **双端 parity 是硬约束**：`install.sh` 与 `install.ps1` 必须支持同一组旗标（`--no-start`/`-NoStart`、`--no-skill`/`-NoSkill`、`--agents`/`-Agents`、`-y`/`-Yes`）与同一组环境变量（`CSI_VERSION`、`CSI_AGENTS`）。加功能时两端同时改。
+- **双端 parity 是硬约束**：`install.sh` 与 `install.ps1` 必须支持同一组旗标（`--no-extension`/`-NoExtension`、`--no-start`/`-NoStart`、`--no-skill`/`-NoSkill`、`--agents`/`-Agents`、`-y`/`-Yes`）与同一组环境变量（`CSI_VERSION`、`CSI_AGENTS`、`CSI_NO_EXTENSION`）。加功能时两端同时改。商店用户用 `--no-extension`（或 `CSI_NO_EXTENSION=1`）跳过解压版 zip。
 - 安装布局：`~/.csi/bin`（daemon）、`~/.csi/extension`（扩展）。技能按 `--agents` 目标分发，默认只装 claude：`~/.claude/skills/csi` + `csi-e2e`；可选 `~/.codex/skills`、`~/.cursor/skills`、`~/.agents/skills`（跨工具标准目录）、`~/.config/opencode/skills`。Kimi / Grok / Pi 走各自的插件安装命令，安装器不覆盖。改布局要同步改 README、技能文档里所有引用这些路径的地方。
 - 安装结束默认启动 daemon，且 `csi start` 幂等——不要破坏这个行为。
 
