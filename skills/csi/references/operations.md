@@ -4,7 +4,7 @@ Read this only when a tool call can't reach the daemon, or the user explicitly a
 
 ## The daemon
 
-The `csi` binary lives at `~/.csi/bin/csi` (Windows: `%USERPROFILE%\.csi\bin\csi.exe`) and serves a local HTTP + WebSocket daemon on `127.0.0.1:10088`. The port can be overridden with the `CSI_PORT` environment variable (the extension's popup must then point at the same port).
+The `csi` binary lives at `~/.csi/bin/csi` (Windows: `%USERPROFILE%\.csi\bin\csi.exe`) and serves a local HTTP + WebSocket daemon on `127.0.0.1:10088`. The port can be overridden with the `CSI_PORT` environment variable (the extension's popup / options page must then point at the same port). Persistent settings live in `~/.csi/config.json` and in the extension **Settings** page (click the icon → Settings): port, log retention, tool timeout, reconnect interval. Changing the port requires a daemon restart (`csi restart` or the options-page button).
 
 Directory layout under `~/.csi/`:
 
@@ -12,13 +12,14 @@ Directory layout under `~/.csi/`:
 ~/.csi/
 ├── bin/
 │   └── csi                      # daemon binary
+├── config.json                  # port / log retention / tool timeout
 ├── daemon.pid                   # PID of the running daemon
 └── logs/
     ├── daemon-2026-03-06.log    # one log file per day (local date)
-    └── daemon-2026-03-05.log    # daily rolling — only the last 3 days are kept
+    └── daemon-2026-03-05.log    # daily rolling — last N days (default 3)
 ```
 
-Logs roll by day and are pruned automatically (3-day retention) — that's where to look when identifying anomalies from earlier runs.
+Logs roll by day and are pruned automatically (default 3-day retention, 1–30 via Settings) — that's where to look when identifying anomalies from earlier runs.
 
 The daemon binds `127.0.0.1` only — it is never reachable from other machines. There is no authentication in v1; loopback binding is the isolation boundary.
 
@@ -38,8 +39,8 @@ The daemon binds `127.0.0.1` only — it is never reachable from other machines.
    - Prefer the [Chrome Web Store listing](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol). Sideload alternative: `chrome://extensions` → Developer mode → Load unpacked → `~/.csi/extension` (only if they used the Release zip).
    - Open `chrome://extensions` and verify the CSI extension is installed and enabled.
    - Open the extension's popup and confirm it shows "connected" (and the correct port if `CSI_PORT` is used).
-   - If Chrome was restarted recently, give the service worker a few seconds — the extension reconnects automatically via its reconcile alarm (every 30s).
-4. **Anything still broken after a `start` + retry** → don't deep-troubleshoot in-session. Check today's log under `~/.csi/logs/` (`daemon-YYYY-MM-DD.log`, previous days kept for 3 days) for obvious errors and report them to the user.
+   - If Chrome was restarted recently, give the service worker a few seconds — the extension reconnects automatically via its reconcile alarm (default 30s, configurable in Settings).
+4. **Anything still broken after a `start` + retry** → don't deep-troubleshoot in-session. Check today's log under `~/.csi/logs/` (`daemon-YYYY-MM-DD.log`) for obvious errors and report them to the user.
 
 ## Do NOT do automatically
 
@@ -63,6 +64,6 @@ There is also `GET /healthz`, which returns `200 OK` with body `ok` — use it f
 
 ## Timeouts and errors worth knowing
 
-- Tool calls time out after **120s** at the daemon (`tool call timeout (120s)`); `navigate` additionally has a 30s page-load timeout inside the extension.
+- Tool calls time out after **120s** by default at the daemon (`tool call timeout (120s)`); the value is 5–600s via Settings / `POST /config`. `navigate` additionally has a 30s page-load timeout inside the extension.
 - Errors are always returned in the HTTP 200 body as `{ "success": false, "error": "..." }` — HTTP status codes are only for transport-level failures.
 - The daemon accepts **one extension connection at a time**: if a second Chrome profile connects with the same extension, it kicks the first one off.
