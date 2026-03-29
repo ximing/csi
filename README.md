@@ -32,7 +32,36 @@ The full wire contract is in [docs/protocol.md](docs/protocol.md).
 
 ## Quick start
 
-Prerequisites: Chrome. Everything else is downloaded prebuilt from [GitHub Releases](https://github.com/ximing/csi/releases) — no Go/Node needed.
+Prerequisites: Chrome. The extension comes from the [Chrome Web Store](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol) or a prebuilt zip on [GitHub Releases](https://github.com/ximing/csi/releases). The daemon is always a prebuilt binary from Releases — no Go/Node, and you do not need to build from source.
+
+### Option A — Chrome Web Store (recommended)
+
+**1. Install the extension** from the [Chrome Web Store](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol).
+
+**2. Install the daemon** (and Claude Code skills). `--no-extension` skips the unpacked zip — the store already has the extension:
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.sh | bash -s -- --no-extension
+```
+
+```powershell
+# Windows (PowerShell 5.1+)
+$env:CSI_NO_EXTENSION='1'; irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
+```
+
+**3. Open the extension popup** and confirm it shows "connected".
+
+**4. Check everything is wired up** (the installer already started the daemon; `csi start` is idempotent — safe to run anytime):
+
+```bash
+curl -s http://127.0.0.1:10088/status
+# → {"running":true,"extension_connected":true,...}
+```
+
+### Option B — GitHub Release (sideload)
+
+Use this when you cannot use the Chrome Web Store. The installer downloads the prebuilt daemon, `csi-extension.zip`, and skills.
 
 **1. Install** — daemon → `~/.csi/bin`, extension → `~/.csi/extension`, Claude Code skills → `~/.claude/skills/csi` + `~/.claude/skills/csi-e2e`; the daemon is started at the end:
 
@@ -46,18 +75,13 @@ curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.s
 irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
 ```
 
-Both installers accept the same flags: `--no-start` / `-NoStart` (don't start the daemon), `--no-skill` / `-NoSkill` (skip skills entirely), `--agents codex,cursor` / `-Agents codex,cursor` (pick skill targets — see [Coding Agent Skills](#coding-agent-skills)), `-y` / `-Yes` (don't prompt before overwriting an existing skill install). Pin a specific release with `CSI_VERSION=v0.1.0`.
-
 **2. Load the extension in Chrome** (manual step): `chrome://extensions` → Developer mode → Load unpacked → select `~/.csi/extension`. Open the extension popup and confirm it shows "connected".
 
-**3. Check everything is wired up** (the installer already started the daemon; `csi start` is idempotent — safe to run anytime):
+**3. Check status** — same `curl` as in Option A.
 
-```bash
-curl -s http://127.0.0.1:10088/status
-# → {"running":true,"extension_connected":true,...}
-```
+Both installers accept the same flags: `--no-extension` / `-NoExtension` (skip the unpacked zip; also `CSI_NO_EXTENSION=1`), `--no-start` / `-NoStart` (don't start the daemon), `--no-skill` / `-NoSkill` (skip skills entirely), `--agents codex,cursor` / `-Agents codex,cursor` (pick skill targets — see [Coding Agent Skills](#coding-agent-skills)), `-y` / `-Yes` (don't prompt before overwriting an existing skill install). Pin a specific release with `CSI_VERSION=v0.1.0`.
 
-**4. Drive the browser:**
+**Drive the browser:**
 
 ```bash
 curl -s -X POST http://127.0.0.1:10088/command \
@@ -165,7 +189,7 @@ pi install git:github.com/ximing/csi
 
 The package manifest in [`package.json`](package.json) declares the `skills/` directory for Pi's native skill discovery.
 
-> Note: the shell/PowerShell installers in [Quick start](#quick-start) can also drop the skills into other tools' directories directly — run them with `--agents codex,cursor,agents,opencode` (or `all`; PowerShell: `-Agents ...`). Default is `claude` only. Targets: `~/.codex/skills/` (Codex), `~/.cursor/skills/` (Cursor), `~/.agents/skills/` (the cross-tool standard dir, read by Cursor and OpenCode), `~/.config/opencode/skills/` (OpenCode). Kimi, Grok Build, and Pi use their own plugin install commands above — the installer doesn't cover them. The daemon and Chrome extension from the installer are still required either way; skills only teach the agent how to talk to the daemon.
+> Note: the shell/PowerShell installers in [Quick start](#quick-start) can also drop the skills into other tools' directories directly — run them with `--agents codex,cursor,agents,opencode` (or `all`; PowerShell: `-Agents ...`). Default is `claude` only. Targets: `~/.codex/skills/` (Codex), `~/.cursor/skills/` (Cursor), `~/.agents/skills/` (the cross-tool standard dir, read by Cursor and OpenCode), `~/.config/opencode/skills/` (OpenCode). Kimi, Grok Build, and Pi use their own plugin install commands above — the installer doesn't cover them. The daemon is still required either way; the Chrome extension comes from the [Chrome Web Store](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol) or the Release zip. Skills only teach the agent how to talk to the daemon.
 
 ## Tools
 
@@ -189,6 +213,8 @@ csi/
 ```
 
 ## Development
+
+This section is for contributors. To *use* CSI, install the extension from the Chrome Web Store or a GitHub Release zip — do not build from source unless you are changing the code.
 
 ```bash
 # daemon

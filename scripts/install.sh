@@ -2,11 +2,13 @@
 #
 # csi installer (macOS / Linux)
 #
-# Downloads the prebuilt daemon, the built Chrome extension, and the Claude
-# Code skill from GitHub Releases — no local build, no Go/Node required.
+# Downloads the prebuilt daemon (and optionally the unpacked Chrome
+# extension) plus coding-agent skills from GitHub Releases — no local
+# build, no Go/Node required. Chrome Web Store users pass --no-extension.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.sh | bash
+#   curl -fsSL ... | bash -s -- --no-extension    # store users: skip unpacked zip
 #   curl -fsSL ... | bash -s -- --no-start        # don't start the daemon
 #   curl -fsSL ... | bash -s -- --no-skill        # don't install any skills
 #   curl -fsSL ... | bash -s -- --agents codex,cursor  # pick skill targets (default: claude)
@@ -45,17 +47,19 @@ Usage:
   curl -fsSL ... | bash -s -- [options]
 
 Options:
-  -h, --help       Show this help.
-  --no-start       Install everything, but don't start the daemon.
-  --no-skill       Skip installing the coding-agent skills entirely.
-  --agents LIST    Comma-separated skill targets: claude, codex, cursor,
-                   agents (the ~/.agents standard dir), opencode, or all.
-                   Default: claude. (Alias for CSI_AGENTS.)
-  -y, --yes        Don't prompt before overwriting an existing skill install.
+  -h, --help         Show this help.
+  --no-extension     Skip the unpacked extension zip (Chrome Web Store users).
+  --no-start         Install everything, but don't start the daemon.
+  --no-skill         Skip installing the coding-agent skills entirely.
+  --agents LIST      Comma-separated skill targets: claude, codex, cursor,
+                     agents (the ~/.agents standard dir), opencode, or all.
+                     Default: claude. (Alias for CSI_AGENTS.)
+  -y, --yes          Don't prompt before overwriting an existing skill install.
 
 Environment:
-  CSI_VERSION      Pin to a specific release tag (e.g. v0.2.0; default: latest).
-  CSI_AGENTS       Same as --agents (e.g. "codex,cursor").
+  CSI_VERSION        Pin to a specific release tag (e.g. v0.2.0; default: latest).
+  CSI_AGENTS         Same as --agents (e.g. "codex,cursor").
+  CSI_NO_EXTENSION   Set to 1 to skip the unpacked extension zip.
 
 Skill target directories:
   claude    ~/.claude/skills           (Claude Code)
@@ -66,7 +70,7 @@ Skill target directories:
 
 What it does:
   1. Download the prebuilt daemon  → $BIN_PATH
-  2. Download the built extension  → $EXT_DIR  (load this in chrome://extensions)
+  2. Download the built extension  → $EXT_DIR  (sideload; skip with --no-extension)
   3. Install the skills            → each target's skills dir (see above)
   4. Start the daemon (idempotent)
 EOF
@@ -76,14 +80,17 @@ EOF
 
 NO_START=0
 NO_SKILL=0
+NO_EXT=0
 ASSUME_YES=0
+[ "${CSI_NO_EXTENSION:-}" = "1" ] && NO_EXT=1
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help)   show_help; exit 0 ;;
-    --no-start)  NO_START=1; shift ;;
-    --no-skill)  NO_SKILL=1; shift ;;
-    --agents)    [ $# -ge 2 ] || die "--agents requires a value"; AGENTS="$2"; shift 2 ;;
-    -y|--yes)    ASSUME_YES=1; shift ;;
+    -h|--help)         show_help; exit 0 ;;
+    --no-extension)    NO_EXT=1; shift ;;
+    --no-start)        NO_START=1; shift ;;
+    --no-skill)        NO_SKILL=1; shift ;;
+    --agents)          [ $# -ge 2 ] || die "--agents requires a value"; AGENTS="$2"; shift 2 ;;
+    -y|--yes)          ASSUME_YES=1; shift ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
 done
@@ -143,15 +150,21 @@ ok "daemon: $BIN_PATH"
 
 # ---------- 2. extension ----------
 
-step "[2/4] Installing Chrome extension"
+if [ "$NO_EXT" -eq 1 ]; then
+  step "[2/4] Chrome extension — skipped (--no-extension)"
+  info "install from the Chrome Web Store:"
+  info "  https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol"
+else
+  step "[2/4] Installing Chrome extension"
 
-command -v unzip >/dev/null 2>&1 || die "'unzip' not found — install it and re-run"
+  command -v unzip >/dev/null 2>&1 || die "'unzip' not found — install it and re-run"
 
-download "$DL/csi-extension.zip" "$TMP_DIR/extension.zip"
-rm -rf "$EXT_DIR"
-mkdir -p "$EXT_DIR"
-unzip -q "$TMP_DIR/extension.zip" -d "$EXT_DIR"
-ok "extension: $EXT_DIR"
+  download "$DL/csi-extension.zip" "$TMP_DIR/extension.zip"
+  rm -rf "$EXT_DIR"
+  mkdir -p "$EXT_DIR"
+  unzip -q "$TMP_DIR/extension.zip" -d "$EXT_DIR"
+  ok "extension: $EXT_DIR"
+fi
 
 # ---------- 3. coding-agent skills ----------
 
@@ -238,9 +251,14 @@ fi
 # ---------- done ----------
 
 step "Done. Next steps:"
-info "1. Load the extension in Chrome:"
-info "     chrome://extensions → Developer mode → Load unpacked → select:"
-info "       $EXT_DIR"
+if [ "$NO_EXT" -eq 1 ]; then
+  info "1. Install the CSI extension from the Chrome Web Store if you haven't:"
+  info "     https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol"
+else
+  info "1. Load the extension in Chrome:"
+  info "     chrome://extensions → Developer mode → Load unpacked → select:"
+  info "       $EXT_DIR"
+fi
 info "2. Open the extension popup and confirm it shows 'connected'"
 info "3. Check status:  curl -s http://127.0.0.1:10088/status"
 echo ""

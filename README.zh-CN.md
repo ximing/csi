@@ -32,7 +32,36 @@ AI 客户端 (Claude Code skill)
 
 ## 快速开始
 
-前置条件：Chrome。其它一切从 [GitHub Releases](https://github.com/ximing/csi/releases) 下载预编译产物——不需要 Go/Node。
+前置条件：Chrome。扩展从 [Chrome 应用商店](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol) 或 [GitHub Releases](https://github.com/ximing/csi/releases) 的预编译 zip 安装。daemon 始终是 Releases 上的预编译二进制——不需要 Go/Node，也不需要从源码构建。
+
+### 方式 A — Chrome 应用商店（推荐）
+
+**1. 安装扩展**：打开 [Chrome 应用商店里的 CSI](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol)。
+
+**2. 安装 daemon**（以及 Claude Code 技能）。`--no-extension` 会跳过解压版 zip——商店里已经有扩展了：
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.sh | bash -s -- --no-extension
+```
+
+```powershell
+# Windows (PowerShell 5.1+)
+$env:CSI_NO_EXTENSION='1'; irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
+```
+
+**3. 打开扩展弹窗**，确认显示"已连接"。
+
+**4. 检查一切就绪**（安装器已经启动了 daemon；`csi start` 是幂等的——随时可安全运行）：
+
+```bash
+curl -s http://127.0.0.1:10088/status
+# → {"running":true,"extension_connected":true,...}
+```
+
+### 方式 B — GitHub Release（手动加载）
+
+无法使用 Chrome 应用商店时用这个。安装器会下载预编译 daemon、`csi-extension.zip` 和技能。
 
 **1. 安装** —— daemon → `~/.csi/bin`，扩展 → `~/.csi/extension`，Claude Code 技能 → `~/.claude/skills/csi` + `~/.claude/skills/csi-e2e`；安装末尾会启动 daemon：
 
@@ -46,18 +75,13 @@ curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.s
 irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
 ```
 
-两个安装器接受相同的旗标：`--no-start` / `-NoStart`（不启动 daemon），`--no-skill` / `-NoSkill`（完全跳过技能），`--agents codex,cursor` / `-Agents codex,cursor`（选择技能安装目标，见[编程 Agent Skills](#编程-agent-skills)），`-y` / `-Yes`（覆盖已存在的技能安装前不再询问）。用 `CSI_VERSION=v0.1.0` 固定某个 release。
-
 **2. 在 Chrome 中加载扩展**（手动步骤）：`chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选择 `~/.csi/extension`。打开扩展弹窗，确认显示"已连接"。
 
-**3. 检查一切就绪**（安装器已经启动了 daemon；`csi start` 是幂等的——随时可安全运行）：
+**3. 检查状态** —— 与方式 A 同一个 `curl`。
 
-```bash
-curl -s http://127.0.0.1:10088/status
-# → {"running":true,"extension_connected":true,...}
-```
+两个安装器接受相同的旗标：`--no-extension` / `-NoExtension`（跳过解压版 zip；也可用 `CSI_NO_EXTENSION=1`），`--no-start` / `-NoStart`（不启动 daemon），`--no-skill` / `-NoSkill`（完全跳过技能），`--agents codex,cursor` / `-Agents codex,cursor`（选择技能安装目标，见[编程 Agent Skills](#编程-agent-skills)），`-y` / `-Yes`（覆盖已存在的技能安装前不再询问）。用 `CSI_VERSION=v0.1.0` 固定某个 release。
 
-**4. 驱动浏览器：**
+**驱动浏览器：**
 
 ```bash
 curl -s -X POST http://127.0.0.1:10088/command \
@@ -165,7 +189,7 @@ pi install git:github.com/ximing/csi
 
 [`package.json`](package.json) 里的包清单为 Pi 的原生技能发现声明了 `skills/` 目录。
 
-> 说明：[快速开始](#快速开始)里的 shell/PowerShell 安装器也可以直接把技能装进其他工具的目录 —— 加 `--agents codex,cursor,agents,opencode`（或 `all`；PowerShell 端 `-Agents ...`），默认只装 `claude`。目标：`~/.codex/skills/`（Codex）、`~/.cursor/skills/`（Cursor）、`~/.agents/skills/`（跨工具标准目录，Cursor 和 OpenCode 都读）、`~/.config/opencode/skills/`（OpenCode）。Kimi、Grok Build、Pi 用上面各自的插件安装命令，安装器不覆盖。无论哪种方式，安装器装的 daemon 和 Chrome 扩展仍然必需；技能只是教 Agent 怎么与 daemon 对话。
+> 说明：[快速开始](#快速开始)里的 shell/PowerShell 安装器也可以直接把技能装进其他工具的目录 —— 加 `--agents codex,cursor,agents,opencode`（或 `all`；PowerShell 端 `-Agents ...`），默认只装 `claude`。目标：`~/.codex/skills/`（Codex）、`~/.cursor/skills/`（Cursor）、`~/.agents/skills/`（跨工具标准目录，Cursor 和 OpenCode 都读）、`~/.config/opencode/skills/`（OpenCode）。Kimi、Grok Build、Pi 用上面各自的插件安装命令，安装器不覆盖。无论哪种方式，daemon 仍然必需；Chrome 扩展从 [Chrome 应用商店](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol) 或 Release zip 安装。技能只是教 Agent 怎么与 daemon 对话。
 
 ## 工具
 
@@ -189,6 +213,8 @@ csi/
 ```
 
 ## 开发
+
+这一节给贡献者。**使用** CSI 请从 Chrome 应用商店或 GitHub Release zip 安装扩展——不要从源码构建，除非你在改代码。
 
 ```bash
 # daemon

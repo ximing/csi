@@ -1,3 +1,19 @@
+.qs-intro { color: var(--text-dim); font-size: 15px; margin-bottom: 24px; max-width: 720px; }
+.qs-mode-tabs {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px;
+}
+.qs-mode-tabs button {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--text-dim);
+  font-family: var(--sans); font-size: 14px; padding: 8px 14px; border-radius: 6px; cursor: pointer;
+}
+.qs-mode-tabs button.active { color: var(--accent); border-color: var(--accent-dim); background: var(--panel-2); }
+.qs-badge {
+  font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: #06120b; background: var(--accent);
+  padding: 2px 6px; border-radius: 3px;
+}
+.qs-store-cta { margin: 0 0 20px; }
 .step-text { color: var(--text-dim); font-size: 14px; margin-bottom: 12px; }
 .cmd-block { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
 .cmd-tabs { display: flex; align-items: center; gap: 4px; padding: 8px; background: var(--panel-2); border-bottom: 1px solid var(--border); }

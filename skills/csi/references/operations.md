@@ -29,8 +29,13 @@ The daemon binds `127.0.0.1` only — it is never reachable from other machines.
    - Windows: `& "$env:USERPROFILE\.csi\bin\csi.exe" start`
 
    Then retry the tool call. If `start` answers `found live process <pid> not responding as csi`, the PID in the stale pid file was recycled by another process — don't kill it yourself, ask the user to run `csi restart`.
-2. **`command not found` / binary missing** → not installed. Ask the user to run the installer from the project checkout: `bash scripts/install.sh`, then load the built extension in Chrome.
+2. **`command not found` / binary missing** → not installed. Ask the user to install the prebuilt daemon from GitHub Releases — do not ask them to build from source:
+   - macOS / Linux (Chrome Web Store users): `curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.sh | bash -s -- --no-extension`
+   - macOS / Linux (sideload): `curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.sh | bash`
+   - Windows (Chrome Web Store users): `$env:CSI_NO_EXTENSION='1'; irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex`
+   - Windows (sideload): `irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex`
 3. **Daemon up but `extension not connected`** → the browser side is missing. Ask the user to:
+   - Prefer the [Chrome Web Store listing](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol). Sideload alternative: `chrome://extensions` → Developer mode → Load unpacked → `~/.csi/extension` (only if they used the Release zip).
    - Open `chrome://extensions` and verify the CSI extension is installed and enabled.
    - Open the extension's popup and confirm it shows "connected" (and the correct port if `CSI_PORT` is used).
    - If Chrome was restarted recently, give the service worker a few seconds — the extension reconnects automatically via its reconcile alarm (every 30s).
@@ -40,7 +45,7 @@ The daemon binds `127.0.0.1` only — it is never reachable from other machines.
 
 Never run `stop` / `restart` / `uninstall` on your own. They kill the running daemon and any in-flight work by the user or other agent sessions. If a hard restart is genuinely needed, ask the user to run `csi restart` by hand.
 
-Also do not "fix" version mismatches yourself. If `/status` shows the extension is connected but tool calls fail with `unknown tool`, the daemon and extension builds are out of sync — tell the user to rebuild and reload both.
+Also do not "fix" version mismatches yourself. If `/status` shows the extension is connected but tool calls fail with `unknown tool`, the daemon and extension builds are out of sync — tell the user to update the daemon from the latest GitHub Release and the extension from the Chrome Web Store (or reload the unpacked Release zip). Do not ask them to build from source.
 
 ## /status JSON fields
 
