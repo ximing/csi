@@ -83,7 +83,7 @@ export class SnapshotTool implements Tool {
     const axNodes = compactRoot
       ? [compactRoot, ...nodes.filter((n) => n.nodeId !== compactRoot.nodeId)]
       : nodes;
-    const compact = compactFromAx(axNodes, mode);
+    const compact = compactFromAx(axNodes, mode, Boolean(compactRoot));
     const rendered = renderYaml(compact, maxChars);
     return {
       url: tab.url,
