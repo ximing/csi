@@ -11,3 +11,6 @@ daemon/csi
 
 # 上架打包产物（scripts/package-extension.sh）
 release/
+
+# 本地 git worktree
+.worktrees/
