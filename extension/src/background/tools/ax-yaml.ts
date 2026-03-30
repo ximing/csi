@@ -65,11 +65,18 @@ const TRUNCATED_HINT =
 export function compactFromAx(
   nodes: AxNode[],
   mode: 'compact' | 'interactive',
+  includeRoot = false,
 ): CompactNode[] {
   if (nodes.length === 0) return [];
   const byId = new Map<string, AxNode>();
   for (const node of nodes) byId.set(node.nodeId, node);
-  const formatted = formatNode(nodes[0]!, byId, '');
+  const root = nodes[0]!;
+  // Whole-page trees start at RootWebArea whose name is <title>. Walking
+  // that node would copy the title into nearestName and wipe matching text.
+  // Unscoped: children only (same as full's formatChildren). Selector: include self.
+  const formatted = includeRoot
+    ? formatNode(root, byId, '')
+    : collectChildren(root, byId, '', normalizeRole(rawRole(root)));
   const roots = asList(formatted);
   return mode === 'interactive' ? flattenInteractive(roots) : roots;
 }
@@ -149,7 +156,9 @@ function formatNode(
   const childList = asList(children);
   if (childList.length > 0) result.children = childList;
 
-  if (!result.name && !result.value && !result.ref && !result.children) return null;
+  if (!result.name && !result.value && !result.ref && !result.src && !result.children) {
+    return null;
+  }
   return result;
 }
 
