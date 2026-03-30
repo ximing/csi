@@ -246,4 +246,7 @@ Port: default `10088`, override with the `CSI_PORT` environment variable (set th
 
 ## Roadmap
 
+- **0.4 Agent reliability** — compact YAML snapshots, a real `wait` tool, `scroll` / `hover`, full-page screenshots, and a version handshake so a stale store extension says "please update" instead of `unknown tool`. Spec: [docs/superpowers/specs/2026-03-30-agent-reliability-design.md](docs/superpowers/specs/2026-03-30-agent-reliability-design.md).
+- **0.5 Autostart** — `csi autostart on|off` plus installer default-on, so a reboot does not leave the daemon dead.
+- **0.6 Hard pages** — iframe targeting (refs carry `frameId`), JS dialogs, downloads (CWS permission needed).
 - **DirectCDPBackend**: connect to [obscura](https://github.com/h4ckf0r0day/obscura) — a Rust headless browser with a built-in CDP server. The daemon would talk directly to its CDP WebSocket, no Chrome extension needed, for fully headless automation alongside the current real-Chrome mode.
