@@ -69,6 +69,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
   "version": "0.1.0",
   "extension_connected": true,
   "extension_version": "0.1.0",
+  "extension_tools": ["navigate", "..."],
   "uptime_seconds": 3600,
   "sessions": ["my-task"],
   "port": 10088
@@ -76,6 +77,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 ```
 
 `pid` 供 `csi stop` / `csi start` 做身份校验（防 PID 复用误杀）。
+`extension_tools`：扩展握手上报了 `tools` 则为数组，未上报则为 `null`。
 
 ### 2.3 `GET /healthz`
 
@@ -140,12 +142,17 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 
 | 方向 | type | payload | 说明 |
 |---|---|---|---|
-| ext → daemon | `hello` | `{extensionVersion}` | 连接建立后扩展第一个发送 |
-| daemon → ext | `hello_ack` | `{daemonVersion}` | 应答 |
+| ext → daemon | `hello` | `{extensionVersion, tools?}` | 连接建立后扩展第一个发送 |
+| daemon → ext | `hello_ack` | `{daemonVersion, tools}` | 应答 |
 | daemon → ext | `ping` | — | 心跳 |
 | ext → daemon | `pong` | — | 心跳应答 |
 | daemon → ext | `tool_call` | `{name, args}` | 请求执行工具，带 `requestId` |
 | ext → daemon | `tool_result` | `{data}` 或 `{error}` | 执行结果，`responseToRequestId` 关联 |
+
+- `tools` 为工具名字符串数组。扩展发自己 registry 的全部键；缺省该字段（0.3.0 及更早）视为 0.3.0 的 17 件套。
+- daemon 的 `hello_ack.tools` 为当前 `validTools`（排序后）。
+- 扩展缺某个已调用工具时，daemon **不转发**，返回
+  `extension <ver> does not implement "<name>" (need ≥ <since>). Update the CSI extension from the Chrome Web Store, or reload ~/.csi/extension.`
 
 `tool_call` 示例：
 
@@ -189,7 +196,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - `find_tab`：默认只在 `_tabIds` 内按 URL 域名匹配；`active:true` 时借用用户正在前台浏览的标签（返回 `borrowed:true`，不拉入分组）。
 - 标签分组：`navigate` 新建标签时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。
 
-## 4. 工具清单（17 个）
+## 4. 工具清单（20 个）
 
 > `selector` 一律支持 `@e<num>` 引用（snapshot 产出）或 CSS 选择器。
 
@@ -197,21 +204,24 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 |---|---|---|---|---|
 | 1 | `navigate` | `url`*, `newTab`, `group_title` | `{success, url, tabId, frameId?}` | 等待 load 完成（30s 超时） |
 | 2 | `find_tab` | `url`*, `active` | `{success, url, tabId, borrowed}` | 见 §3.4 |
-| 3 | `snapshot` | — | `{url, title, tree}` | Accessibility.getFullAXTree；可交互元素带 `ref:"@eN"` |
+| 3 | `snapshot` | `mode`(compact/interactive/full，默认 compact), `selector`, `max_chars`(默认 24000，1000–80000) | `{url, title, mode, chars, truncated, tree}` | compact/interactive 的 tree 是 YAML 字符串；full 的 tree 是既有 JSON 数组。iframe 只输出一行不下行。 |
 | 4 | `click` | `selector`* | `{success, tag, text}` | DOM 级 `el.click()` |
 | 5 | `fill` | `selector`*, `value`* | `{success, tag, mode}` | input/textarea → `mode:"value"`；contenteditable → `mode:"contenteditable"` |
 | 6 | `evaluate` | `code`* | `{type, value}` | `Runtime.evaluate`，`awaitPromise:true` |
 | 7 | `network` | `cmd`* (start/stop/list/detail), `filter`, `requestId` | 见参考实现 | detail 返回 `{requestId,url,method,status,mimeType,base64Encoded,body}` |
 | 8 | `mouse_click` | `selector`* | `{success, x, y, tag, text}` | 坐标级 Input.dispatchMouseEvent，可过 isTrusted 检查 |
-| 9 | `key_type` | `text`* | `{success, length}` | `Input.insertText` |
-| 10 | `send_keys` | `keys`* , `repeat`(1-100) | `{success, dispatched, os}` | 支持 `Enter`/`Escape`/`Tab`/`F1-F12`/单字母数字、修饰键 `Alt/Ctrl/Cmd/Meta/Shift/Mod`（Mod 自动解析）、空格分隔多段 |
-| 11 | `cdp` | `method`*, `params` | 原始 CDP 返回 | 裸透传 escape hatch |
-| 12 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `path` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5 |
-| 13 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
-| 14 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` |
-| 15 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}]}` | 仅当前 session |
-| 16 | `close_tab` | — | `{success, closed, reason?}` | 关当前标签 |
-| 17 | `close_session` | — | `{success, closed}` | 关 session 全部标签 |
+| 9 | `wait` | 恰好 `text`/`selector`/`url` 之一；`gone`；`timeout_ms`(默认 15000，100–120000)；`interval_ms`(默认 200，50–2000) | `{success, waitedMs, matched}` | 扩展内轮询。@e 不在 ref 表则立刻失败。超时文案带 last url。 |
+| 10 | `scroll` | 恰好 `selector` / `to`(top\|bottom) / `direction`(up\|down\|left\|right) 之一；`amount`(number\|"page"，仅 direction，默认 page) | `{success, x, y, maxX, maxY}` | page = 0.9 * innerHeight/innerWidth |
+| 11 | `hover` | `selector`* | `{success, x, y, tag, text}` | Input.dispatchMouseEvent mouseMoved，不过 mousePressed |
+| 12 | `key_type` | `text`* | `{success, length}` | `Input.insertText` |
+| 13 | `send_keys` | `keys`* , `repeat`(1-100) | `{success, dispatched, os}` | 支持 `Enter`/`Escape`/`Tab`/`F1-F12`/单字母数字、修饰键 `Alt/Ctrl/Cmd/Meta/Shift/Mod`（Mod 自动解析）、空格分隔多段 |
+| 14 | `cdp` | `method`*, `params` | 原始 CDP 返回 | 裸透传 escape hatch |
+| 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现 |
+| 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
+| 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` |
+| 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}]}` | 仅当前 session |
+| 19 | `close_tab` | — | `{success, closed, reason?}` | 关当前标签 |
+| 20 | `close_session` | — | `{success, closed}` | 关 session 全部标签 |
 
 ## 5. 大结果后处理（daemon 侧）
 
@@ -221,7 +231,10 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 ## 6. 版本与兼容
 
 - daemon 与扩展各自带版本号，`hello`/`hello_ack` 交换。
-- 工具集不匹配时由 daemon 在 `/command` 返回明确错误，不做自动协商（v1 从简）。
+- 工具集不匹配时由 daemon 在 `/command` 返回明确错误，不做自动降级（v1 从简）。
+- 0.4.0 起 snapshot 默认 `mode=compact`，`tree` 为 YAML 字符串；旧客户端传 `mode=full`。
+- 扩展未实现的工具由 daemon 按 §3.3 改写错误，不发 `tool_call`。
+- `wait` / `scroll` / `hover` 自 0.4.0 引入。
 
 ## 7. 安全约束
 
