@@ -29,6 +29,7 @@ interface DesiredState {
 
 export interface WsClientOptions {
   onToolCall: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  tools: string[];
 }
 
 function sameHost(a: string, b: string): boolean {
@@ -45,9 +46,11 @@ export class WsClient {
   private currentUrl = '';
   private connectingTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onToolCall: WsClientOptions['onToolCall'];
+  private readonly tools: string[];
 
   constructor(options: WsClientOptions) {
     this.onToolCall = options.onToolCall;
+    this.tools = options.tools;
   }
 
   isConnected(): boolean {
@@ -153,7 +156,10 @@ export class WsClient {
       this.state = 'connected';
       this.clearConnectingTimer();
       console.log('[ws] connected to', url);
-      const payload: HelloPayload = { extensionVersion: chrome.runtime.getManifest().version };
+      const payload: HelloPayload = {
+        extensionVersion: chrome.runtime.getManifest().version,
+        tools: this.tools,
+      };
       this.send({ type: 'hello', payload });
     });
 

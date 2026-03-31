@@ -3,7 +3,7 @@
  * daemon WebSocket client, wires the reconcile alarm, and answers popup
  * runtime messages.
  */
-import { dispatchTool, registerAllTools } from './registry';
+import { dispatchTool, registerAllTools, toolNames } from './registry';
 import { WsClient } from './ws-client';
 import type { ToolArgs } from '../shared/messages';
 
@@ -11,6 +11,7 @@ registerAllTools();
 
 const wsClient = new WsClient({
   onToolCall: (name, args) => dispatchTool(name, args as ToolArgs),
+  tools: toolNames(),
 });
 
 void wsClient.start();

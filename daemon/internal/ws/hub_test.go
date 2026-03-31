@@ -288,3 +288,69 @@ func TestPongWatchdog(t *testing.T) {
 	// 客户端此后不读不写，ping 堆积在 TCP 缓冲，daemon 读超时兜底
 	waitFor(t, func() bool { return !h.Connected() }, "watchdog closes half-dead connection")
 }
+
+func TestHandshakeStoresTools(t *testing.T) {
+	h, url := newTestHub(t)
+	h.SetDaemonTools([]string{"navigate", "wait"})
+	conn := dial(t, url)
+	hello, _ := json.Marshal(map[string]any{
+		"extensionVersion": "0.4.0",
+		"tools":            []string{"navigate", "snapshot"},
+	})
+	if err := conn.WriteJSON(Message{Type: MsgHello, Payload: hello}); err != nil {
+		t.Fatal(err)
+	}
+	var ack Message
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatal(err)
+	}
+	var p struct {
+		DaemonVersion string   `json:"daemonVersion"`
+		Tools         []string `json:"tools"`
+	}
+	_ = json.Unmarshal(ack.Payload, &p)
+	if p.DaemonVersion != "test" {
+		t.Fatalf("daemonVersion=%q", p.DaemonVersion)
+	}
+	if len(p.Tools) != 2 || p.Tools[0] != "navigate" || p.Tools[1] != "wait" {
+		t.Fatalf("ack tools=%v", p.Tools)
+	}
+	waitFor(t, h.Connected, "connected")
+	got := h.ExtensionTools()
+	if len(got) != 2 || got[0] != "navigate" || got[1] != "snapshot" {
+		t.Fatalf("ExtensionTools=%v", got)
+	}
+}
+
+func TestHandshakeMissingToolsIsNil(t *testing.T) {
+	h, url := newTestHub(t)
+	_ = dialHello(t, url) // 现有 helper 不带 tools
+	waitFor(t, h.Connected, "connected")
+	if h.ExtensionTools() != nil {
+		t.Fatalf("want nil, got %v", h.ExtensionTools())
+	}
+}
+
+func TestHandshakeEmptyToolsAdvertised(t *testing.T) {
+	h, url := newTestHub(t)
+	conn := dial(t, url)
+	hello, _ := json.Marshal(map[string]any{
+		"extensionVersion": "0.4.0",
+		"tools":            []string{},
+	})
+	if err := conn.WriteJSON(Message{Type: MsgHello, Payload: hello}); err != nil {
+		t.Fatal(err)
+	}
+	var ack Message
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, h.Connected, "connected")
+	got := h.ExtensionTools()
+	if got == nil {
+		t.Fatal("advertised empty tools must be empty slice, not nil")
+	}
+	if len(got) != 0 {
+		t.Fatalf("ExtensionTools=%v", got)
+	}
+}

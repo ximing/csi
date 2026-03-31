@@ -64,11 +64,14 @@ type Hub struct {
 	HandshakeTimeout time.Duration // hello 握手超时，默认 5s
 	Logger           *log.Logger
 
-	mu         sync.Mutex
-	conn       *websocket.Conn
-	gen        uint64 // 连接代数，setConn 时递增
-	extVersion string
-	pending    map[string]pendingCall
+	mu            sync.Mutex
+	conn          *websocket.Conn
+	gen           uint64 // 连接代数，setConn 时递增
+	extVersion    string
+	daemonTools   []string
+	extTools      []string
+	extAdvertised bool
+	pending       map[string]pendingCall
 
 	writeMu sync.Mutex // 写帧串行化（ping 与 tool_call 并发写）
 	counter atomic.Uint64
@@ -117,6 +120,25 @@ func (h *Hub) ExtensionVersion() string {
 	return h.extVersion
 }
 
+// SetDaemonTools 存一份拷贝，hello_ack.tools 回给扩展（协议 §3.3）。
+func (h *Hub) SetDaemonTools(names []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.daemonTools = append([]string(nil), names...)
+}
+
+// ExtensionTools 扩展 hello 上报的工具清单。未上报返回 nil；上报了返回拷贝（可为空切片）。
+func (h *Hub) ExtensionTools() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.extAdvertised {
+		return nil
+	}
+	out := make([]string, len(h.extTools))
+	copy(out, h.extTools)
+	return out
+}
+
 var upgrader = websocket.Upgrader{
 	// v1 无认证，仅依赖 127.0.0.1 回环隔离（协议 §7），不做 Origin 校验。
 	CheckOrigin: func(r *http.Request) bool { return true },
@@ -129,16 +151,22 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		h.Logger.Printf("ws upgrade failed: %v", err)
 		return
 	}
-	extVersion, ok := h.handshake(conn)
+	extVersion, tools, ok := h.handshake(conn)
 	if !ok {
 		conn.Close() // 未通过 hello 校验，不动在位连接
 		return
 	}
-	gen := h.setConn(conn, extVersion)
+	gen := h.setConn(conn, extVersion, tools)
 	h.Logger.Printf("extension hello, version=%q", extVersion)
 	// 握手完成，转入 pong 看门狗：每读到一条消息续期读超时
 	_ = conn.SetReadDeadline(time.Now().Add(h.pongWait()))
-	ack, _ := json.Marshal(map[string]any{"daemonVersion": h.Version})
+	h.mu.Lock()
+	ackTools := h.daemonTools
+	h.mu.Unlock()
+	ack, _ := json.Marshal(map[string]any{
+		"daemonVersion": h.Version,
+		"tools":         ackTools,
+	})
 	if err := h.writeJSON(conn, Message{Type: MsgHelloAck, Payload: ack}); err != nil {
 		h.connDone(conn, gen)
 		return
@@ -147,10 +175,10 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 	h.readLoop(conn, gen) // 阻塞直至连接断开
 }
 
-// handshake 握手阶段（协议 §3.3）：首条消息必须是 hello，返回扩展版本。
+// handshake 握手阶段（协议 §3.3）：首条消息必须是 hello，返回扩展版本与可选 tools。
 // 任何失败（非 hello、读超时）都返回 false，由调用方直接关闭连接、
 // 不顶替在位连接——防止端口扫描、误连把真扩展挤下线。
-func (h *Hub) handshake(conn *websocket.Conn) (string, bool) {
+func (h *Hub) handshake(conn *websocket.Conn) (version string, tools *[]string, ok bool) {
 	timeout := h.HandshakeTimeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
@@ -159,18 +187,19 @@ func (h *Hub) handshake(conn *websocket.Conn) (string, bool) {
 	_, data, err := conn.ReadMessage()
 	if err != nil {
 		h.Logger.Printf("ws: handshake read failed (expect hello): %v", err)
-		return "", false
+		return "", nil, false
 	}
 	var msg Message
 	if err := json.Unmarshal(data, &msg); err != nil || msg.Type != MsgHello {
 		h.Logger.Printf("ws: first message is not hello, closing")
-		return "", false
+		return "", nil, false
 	}
 	var p struct {
-		ExtensionVersion string `json:"extensionVersion"`
+		ExtensionVersion string    `json:"extensionVersion"`
+		Tools            *[]string `json:"tools"`
 	}
 	_ = json.Unmarshal(msg.Payload, &p)
-	return p.ExtensionVersion, true
+	return p.ExtensionVersion, p.Tools, true
 }
 
 // pongWait 读超时阈值：2 倍 ping 间隔。pong 及其它消息都算活跃证据。
@@ -179,13 +208,22 @@ func (h *Hub) pongWait() time.Duration {
 }
 
 // setConn 握手通过后换绑新连接并递增代数，返回新连接的代数。
-func (h *Hub) setConn(conn *websocket.Conn, extVersion string) uint64 {
+// tools 非 nil 视为扩展上报了清单（可为空）；nil 表示未上报。
+func (h *Hub) setConn(conn *websocket.Conn, extVersion string, tools *[]string) uint64 {
 	h.mu.Lock()
 	h.gen++
 	gen := h.gen
 	old := h.conn
 	h.conn = conn
 	h.extVersion = extVersion
+	if tools != nil {
+		h.extAdvertised = true
+		h.extTools = make([]string, len(*tools))
+		copy(h.extTools, *tools)
+	} else {
+		h.extAdvertised = false
+		h.extTools = nil
+	}
 	h.mu.Unlock()
 	if old != nil && old != conn {
 		h.Logger.Printf("new extension connected, kicking old connection")
@@ -258,6 +296,8 @@ func (h *Hub) connDone(conn *websocket.Conn, gen uint64) {
 	if same {
 		h.conn = nil
 		h.extVersion = ""
+		h.extAdvertised = false
+		h.extTools = nil
 	}
 	h.mu.Unlock()
 	h.sweepPending(gen, ErrNotConnected.Error())
@@ -289,6 +329,8 @@ func (h *Hub) Close() {
 	conn := h.conn
 	h.conn = nil
 	h.extVersion = ""
+	h.extAdvertised = false
+	h.extTools = nil
 	pending := h.pending
 	h.pending = make(map[string]pendingCall)
 	h.mu.Unlock()

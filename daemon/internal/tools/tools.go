@@ -4,6 +4,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"csi/daemon/internal/backend"
 	"csi/daemon/internal/session"
@@ -32,6 +33,16 @@ var validTools = map[string]bool{
 
 // Valid 校验工具名是否在协议清单内。
 func Valid(name string) bool { return validTools[name] }
+
+// Names 返回 validTools 的键，字典序（协议 §3.3 hello_ack.tools）。
+func Names() []string {
+	out := make([]string, 0, len(validTools))
+	for n := range validTools {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // Executor 工具路由：校验 → session 注入 → 后端调用 → 后处理 → session 更新。
 type Executor struct {

@@ -14,6 +14,7 @@ export interface WsEnvelope {
 
 export interface HelloPayload {
   extensionVersion: string;
+  tools?: string[];
 }
 
 export interface ToolCallPayload {
