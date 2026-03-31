@@ -48,9 +48,11 @@ func New(cfg *daemon.ResolvedConfig, dir string, logger *log.Logger) *Server {
 	hub.SetToolTimeout(time.Duration(cfg.Values.ToolTimeoutSeconds) * time.Second)
 	sessions := session.NewManager()
 	be := backend.NewExtensionBackend(hub)
+	ex := tools.NewExecutor(be, sessions)
+	ex.Inventory = hub
 	return &Server{
 		Hub:      hub,
-		Executor: tools.NewExecutor(be, sessions),
+		Executor: ex,
 		Sessions: sessions,
 		Port:     cfg.Values.Port,
 		dir:      dir,

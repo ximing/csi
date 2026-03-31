@@ -10,7 +10,7 @@ import (
 	"csi/daemon/internal/session"
 )
 
-// 协议 §4 的 17 个工具名。
+// 协议 §4 的 20 个工具名。
 var validTools = map[string]bool{
 	"navigate":      true,
 	"find_tab":      true,
@@ -20,6 +20,9 @@ var validTools = map[string]bool{
 	"evaluate":      true,
 	"network":       true,
 	"mouse_click":   true,
+	"wait":          true,
+	"scroll":        true,
+	"hover":         true,
 	"key_type":      true,
 	"send_keys":     true,
 	"cdp":           true,
@@ -29,6 +32,19 @@ var validTools = map[string]bool{
 	"list_tabs":     true,
 	"close_tab":     true,
 	"close_session": true,
+}
+
+// toolSince 0.4.0 新增工具：旧扩展未上报 tools 时按此表视为缺失。
+var toolSince = map[string]string{
+	"wait":   "0.4.0",
+	"scroll": "0.4.0",
+	"hover":  "0.4.0",
+}
+
+// Inventory 扩展握手上报的版本与工具清单。
+type Inventory interface {
+	ExtensionVersion() string
+	ExtensionTools() []string
 }
 
 // Valid 校验工具名是否在协议清单内。
@@ -44,10 +60,11 @@ func Names() []string {
 	return out
 }
 
-// Executor 工具路由：校验 → session 注入 → 后端调用 → 后处理 → session 更新。
+// Executor 工具路由：校验 → 扩展清单检查 → session 注入 → 后端调用 → 后处理 → session 更新。
 type Executor struct {
-	Backend  backend.Backend
-	Sessions *session.Manager
+	Backend   backend.Backend
+	Sessions  *session.Manager
+	Inventory Inventory // 可 nil，测试可注入
 }
 
 // NewExecutor 创建 Executor。
@@ -59,6 +76,9 @@ func NewExecutor(b backend.Backend, sm *session.Manager) *Executor {
 func (e *Executor) Execute(ctx context.Context, action, sess string, args map[string]any) (any, error) {
 	if !Valid(action) {
 		return nil, fmt.Errorf("unknown tool: %s", action)
+	}
+	if err := e.checkExtension(action); err != nil {
+		return nil, err
 	}
 	if sess == "" {
 		sess = "default" // 协议 §2.1：缺省 session 为 "default"
@@ -81,4 +101,36 @@ func (e *Executor) Execute(ctx context.Context, action, sess string, args map[st
 
 	// 4. 大结果后处理（协议 §5：截图/PDF 落盘）
 	return PostProcess(action, args, data)
+}
+
+// checkExtension 对照扩展清单；未实现则不转发，返回升级提示（协议 §3.3）。
+func (e *Executor) checkExtension(action string) error {
+	if e.Inventory == nil {
+		return nil
+	}
+	ver := e.Inventory.ExtensionVersion()
+	if ver == "" {
+		ver = "unknown"
+	}
+	listed := e.Inventory.ExtensionTools()
+	if listed != nil {
+		for _, n := range listed {
+			if n == action {
+				return nil
+			}
+		}
+		return missingTool(ver, action)
+	}
+	if _, added := toolSince[action]; added {
+		return missingTool(ver, action)
+	}
+	return nil
+}
+
+func missingTool(ver, action string) error {
+	need, ok := toolSince[action]
+	if !ok {
+		need = "a newer CSI extension"
+	}
+	return fmt.Errorf("extension %s does not implement %q (need ≥ %s). Update the CSI extension from the Chrome Web Store, or reload ~/.csi/extension.", ver, action, need)
 }
