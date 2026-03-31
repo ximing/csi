@@ -20,6 +20,7 @@ import { MouseClickTool } from './tools/mouse-click';
 import { CdpTool } from './tools/cdp';
 import { KeyTypeTool } from './tools/key-type';
 import { SendKeysTool } from './tools/send-keys';
+import { WaitTool } from './tools/wait';
 import { ScreenshotTool } from './tools/screenshot';
 import { SaveAsPdfTool } from './tools/save-as-pdf';
 import { UploadTool } from './tools/upload';
@@ -53,6 +54,7 @@ export function registerAllTools(): void {
   register(new CdpTool());
   register(new KeyTypeTool());
   register(new SendKeysTool());
+  register(new WaitTool());
   register(new ScreenshotTool());
   register(new SaveAsPdfTool());
   register(new UploadTool());
