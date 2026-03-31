@@ -36,6 +36,10 @@ function register(tool: Tool): void {
 /** Tools that manage `_tabId` themselves instead of being aimed at it. */
 const SESSION_SCOPED_TOOLS = new Set(['close_tab', 'list_tabs', 'close_session']);
 
+export function toolNames(): string[] {
+  return [...registry.keys()];
+}
+
 export function registerAllTools(): void {
   ensureGroupRemovedListener();
   register(new NavigateTool());

@@ -19,6 +19,7 @@ import (
 
 	"csi/daemon/internal/daemon"
 	"csi/daemon/internal/server"
+	"csi/daemon/internal/tools"
 	"csi/daemon/internal/ws"
 )
 
@@ -348,6 +349,19 @@ func TestHelloAckAndStatus(t *testing.T) {
 	if p["daemonVersion"] != "0.3.0" {
 		t.Fatalf("daemonVersion = %v", p["daemonVersion"])
 	}
+	gotAckTools, ok := p["tools"].([]any)
+	if !ok {
+		t.Fatalf("hello_ack.tools = %v", p["tools"])
+	}
+	wantAckTools := tools.Names()
+	if len(gotAckTools) != len(wantAckTools) {
+		t.Fatalf("hello_ack.tools = %v, want %v", gotAckTools, wantAckTools)
+	}
+	for i, n := range wantAckTools {
+		if gotAckTools[i] != n {
+			t.Fatalf("hello_ack.tools = %v, want %v", gotAckTools, wantAckTools)
+		}
+	}
 	waitFor(t, srv.Hub.Connected, "extension connected")
 
 	// /status 应反映扩展连接状态
@@ -368,6 +382,9 @@ func TestHelloAckAndStatus(t *testing.T) {
 	if st["extension_connected"] != true || st["extension_version"] != "9.9.9" {
 		t.Fatalf("status ext fields = %v", st)
 	}
+	if st["extension_tools"] != nil {
+		t.Fatalf("extension_tools = %v, want nil", st["extension_tools"])
+	}
 	if _, ok := st["sessions"].([]any); !ok {
 		t.Fatalf("sessions field = %v", st["sessions"])
 	}
@@ -381,6 +398,45 @@ func TestHelloAckAndStatus(t *testing.T) {
 	body, _ := io.ReadAll(resp2.Body)
 	if resp2.StatusCode != http.StatusOK || string(body) != "ok" {
 		t.Fatalf("healthz = %d %q", resp2.StatusCode, body)
+	}
+}
+
+func TestStatusExtensionToolsAdvertised(t *testing.T) {
+	t.Parallel()
+	srv, ts := newTestServer(t)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+	hello, _ := json.Marshal(map[string]any{
+		"extensionVersion": "9.9.9",
+		"tools":            []string{"navigate", "snapshot"},
+	})
+	if err := conn.WriteJSON(ws.Message{Type: ws.MsgHello, Payload: hello}); err != nil {
+		t.Fatal(err)
+	}
+	var ack ws.Message
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatalf("read hello_ack: %v", err)
+	}
+	waitFor(t, srv.Hub.Connected, "extension connected")
+
+	resp, err := http.Get(ts.URL + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var st map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&st)
+	got, ok := st["extension_tools"].([]any)
+	if !ok {
+		t.Fatalf("extension_tools = %v (%T)", st["extension_tools"], st["extension_tools"])
+	}
+	if len(got) != 2 || got[0] != "navigate" || got[1] != "snapshot" {
+		t.Fatalf("extension_tools = %v", got)
 	}
 }
 

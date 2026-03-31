@@ -44,6 +44,7 @@ func New(cfg *daemon.ResolvedConfig, dir string, logger *log.Logger) *Server {
 		logger = log.Default()
 	}
 	hub := ws.New(version.Version, logger)
+	hub.SetDaemonTools(tools.Names())
 	hub.SetToolTimeout(time.Duration(cfg.Values.ToolTimeoutSeconds) * time.Second)
 	sessions := session.NewManager()
 	be := backend.NewExtensionBackend(hub)
@@ -110,23 +111,30 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 
 // statusResponse /status 响应（协议 §2.2）。
 type statusResponse struct {
-	Running            bool     `json:"running"`
-	PID                int      `json:"pid"` // 供 stop/start 做身份校验，防 PID 复用误杀
-	Version            string   `json:"version"`
-	ExtensionConnected bool     `json:"extension_connected"`
-	ExtensionVersion   string   `json:"extension_version"`
-	UptimeSeconds      int64    `json:"uptime_seconds"`
-	Sessions           []string `json:"sessions"`
-	Port               int      `json:"port"`
+	Running            bool      `json:"running"`
+	PID                int       `json:"pid"` // 供 stop/start 做身份校验，防 PID 复用误杀
+	Version            string    `json:"version"`
+	ExtensionConnected bool      `json:"extension_connected"`
+	ExtensionVersion   string    `json:"extension_version"`
+	ExtensionTools     *[]string `json:"extension_tools"`
+	UptimeSeconds      int64     `json:"uptime_seconds"`
+	Sessions           []string  `json:"sessions"`
+	Port               int       `json:"port"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	var extTools *[]string
+	if t := s.Hub.ExtensionTools(); t != nil {
+		cp := append([]string(nil), t...)
+		extTools = &cp
+	}
 	writeJSON(w, statusResponse{
 		Running:            true,
 		PID:                os.Getpid(),
 		Version:            version.Version,
 		ExtensionConnected: s.Hub.Connected(),
 		ExtensionVersion:   s.Hub.ExtensionVersion(),
+		ExtensionTools:     extTools,
 		UptimeSeconds:      int64(time.Since(s.started).Seconds()),
 		Sessions:           s.Sessions.Names(),
 		Port:               s.Port,
