@@ -1,5 +1,5 @@
 // Package mcp 实现 csi 的 stdio MCP server：
-// 将协议 §4 的 17 个浏览器工具暴露为 MCP tools，
+// 将协议 §4 的 20 个浏览器工具暴露为 MCP tools，
 // 作为薄代理转发到本机 daemon 的 POST /command（协议 §2.1）。
 package mcp
 
@@ -32,7 +32,7 @@ func Run(ctx context.Context) error {
 	return nil
 }
 
-// NewServer 构建注册好 17 个工具的 MCP server，工具调用转发到 baseURL（daemon HTTP 地址）。
+// NewServer 构建注册好 20 个工具的 MCP server，工具调用转发到 baseURL（daemon HTTP 地址）。
 func NewServer(baseURL string) *mcpsdk.Server {
 	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "csi",

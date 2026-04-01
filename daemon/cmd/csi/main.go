@@ -8,7 +8,7 @@
 //	restart  重启后台 daemon
 //	status   查询运行状态
 //	version  打印版本
-//	mcp      stdio MCP server（17 个浏览器工具，转发到本机 daemon）
+//	mcp      stdio MCP server（20 个浏览器工具，转发到本机 daemon）
 package main
 
 import (
