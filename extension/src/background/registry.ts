@@ -21,6 +21,8 @@ import { CdpTool } from './tools/cdp';
 import { KeyTypeTool } from './tools/key-type';
 import { SendKeysTool } from './tools/send-keys';
 import { WaitTool } from './tools/wait';
+import { ScrollTool } from './tools/scroll';
+import { HoverTool } from './tools/hover';
 import { ScreenshotTool } from './tools/screenshot';
 import { SaveAsPdfTool } from './tools/save-as-pdf';
 import { UploadTool } from './tools/upload';
@@ -55,6 +57,8 @@ export function registerAllTools(): void {
   register(new KeyTypeTool());
   register(new SendKeysTool());
   register(new WaitTool());
+  register(new ScrollTool());
+  register(new HoverTool());
   register(new ScreenshotTool());
   register(new SaveAsPdfTool());
   register(new UploadTool());
