@@ -1,7 +1,7 @@
 /**
  * screenshot (protocol §4.12): Page.captureScreenshot, optionally clipped to
- * an element's border box. The base64 payload goes back to the daemon,
- * which writes it to disk (protocol §5).
+ * an element's border box or captured beyond the viewport (fullPage). The
+ * base64 payload goes back to the daemon, which writes it to disk (protocol §5).
  */
 import type { ToolArgs } from '../../shared/messages';
 import type { Tool } from './types';
@@ -27,11 +27,16 @@ export class ScreenshotTool implements Tool {
     const format = (args.format as string | undefined) || 'png';
     const quality = format === 'jpeg' ? ((args.quality as number | undefined) || 80) : undefined;
     const selector = typeof args.selector === 'string' ? args.selector : '';
+    const fullPage = args.fullPage === true;
+    if (fullPage && selector) {
+      throw new Error('screenshot: fullPage and selector are mutually exclusive');
+    }
 
-    const params: CaptureParams = { format };
-    if (quality !== undefined) params.quality = quality;
-
+    let shot: { data: string };
     if (selector) {
+      const params: CaptureParams = { format };
+      if (quality !== undefined) params.quality = quality;
+
       const objectId = await resolveObjectId(this.name, selector);
       await scrollIntoView(objectId);
 
@@ -54,9 +59,22 @@ export class ScreenshotTool implements Tool {
         throw new Error(`screenshot: element has zero-size box (width=${width}, height=${height}).`);
       }
       params.clip = { x, y, width, height, scale: 1 };
+      shot = await sendCommand<{ data: string }>('Page.captureScreenshot', params);
+    } else {
+      const params: CaptureParams & { captureBeyondViewport?: boolean } = { format };
+      if (quality !== undefined) params.quality = quality;
+      if (fullPage) params.captureBeyondViewport = true;
+      try {
+        shot = await sendCommand<{ data: string }>('Page.captureScreenshot', params);
+      } catch (err) {
+        if (fullPage) {
+          throw new Error(
+            `screenshot: fullPage failed (${(err as Error).message}); try selector or a smaller viewport`,
+          );
+        }
+        throw err;
+      }
     }
-
-    const shot = await sendCommand<{ data: string }>('Page.captureScreenshot', params);
     return { format, dataLength: shot.data.length, data: shot.data };
   }
 }
