@@ -86,7 +86,11 @@ var toolDefs = []toolDef{
 	{
 		name:        "snapshot",
 		description: "Capture the accessibility tree of the current page; interactive elements are tagged with @eN refs usable as selectors.",
-		props:       map[string]any{},
+		props: map[string]any{
+			"mode":      strEnumProp("Snapshot verbosity. compact=YAML with structure+refs (default); interactive=refs only; full=JSON tree.", "compact", "interactive", "full"),
+			"selector":  strProp("Limit the snapshot to this element (@e ref or CSS)."),
+			"max_chars": intProp("Max YAML characters for compact/interactive (default 24000, range 1000-80000)."),
+		},
 	},
 	{
 		name:        "click",
@@ -132,6 +136,36 @@ var toolDefs = []toolDef{
 		required: []string{"selector"},
 	},
 	{
+		name:        "wait",
+		description: "Wait until text appears, a selector is visible, or the tab URL contains a substring. Exactly one of text, selector, url.",
+		props: map[string]any{
+			"text":        strProp("Substring to find in visible text or AX names."),
+			"selector":    strProp("@e ref or CSS selector to wait for (visible, non-zero box)."),
+			"url":         strProp("Substring the current tab URL must contain."),
+			"gone":        boolProp("Invert: wait until the condition is no longer true."),
+			"timeout_ms":  intProp("Timeout in milliseconds (default 15000, max 120000). Must be less than the daemon tool timeout."),
+			"interval_ms": intProp("Poll interval in milliseconds (default 200)."),
+		},
+	},
+	{
+		name:        "scroll",
+		description: "Scroll the page or an element into view. Exactly one of selector, to, direction.",
+		props: map[string]any{
+			"selector":  strProp("Scroll this element into the center of the viewport."),
+			"to":        strEnumProp("Scroll to the top or bottom of the page.", "top", "bottom"),
+			"direction": strEnumProp("Scroll one step in this direction.", "up", "down", "left", "right"),
+			"amount":    map[string]any{"description": "Pixels or \"page\" (default page). Only with direction."},
+		},
+	},
+	{
+		name:        "hover",
+		description: "Move the mouse over an element (CSS :hover menus). Trusted mouseMoved, no click.",
+		props: map[string]any{
+			"selector": strProp("@e ref or CSS selector to hover."),
+		},
+		required: []string{"selector"},
+	},
+	{
 		name:        "key_type",
 		description: "Type text into the currently focused element via Input.insertText.",
 		props: map[string]any{
@@ -164,6 +198,7 @@ var toolDefs = []toolDef{
 			"format":   strEnumProp("Image format (default png).", "png", "jpeg"),
 			"quality":  intProp("JPEG quality 0-100 (jpeg only)."),
 			"selector": strProp("@eN ref or CSS selector to capture only that element."),
+			"fullPage": boolProp("Capture the full scrollable page. Mutually exclusive with selector."),
 			"path":     strProp("Output file path (default: a temp file)."),
 		},
 	},

@@ -205,7 +205,7 @@ func startDaemon() error {
 	return fmt.Errorf("daemon did not become ready within 5s, see logs under %s/logs", dir)
 }
 
-// cmdMCP 以 stdio 传输运行 MCP server，把 17 个浏览器工具暴露给 MCP 客户端，
+// cmdMCP 以 stdio 传输运行 MCP server，把 20 个浏览器工具暴露给 MCP 客户端，
 // 内部转发到本机 daemon 的 POST /command。
 func cmdMCP() error {
 	return mcpserver.Run(context.Background())
