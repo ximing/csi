@@ -1,7 +1,7 @@
 {
   "name": "csi-extension",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "CSI Chrome MV3 extension — lets a local daemon drive the browser over CDP",
   "scripts": {

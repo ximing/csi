@@ -3,7 +3,7 @@ name: csi-e2e
 description: |
   Turn natural-language browser scenarios into replayable e2e regression suites driven by the csi daemon (real Chrome). Workflow: write a case .md describing the scenario → verify it live in the browser → solidify into a suite .mjs → replay anytime with `node e2e/run.mjs`. Use when the user asks to write e2e / end-to-end / browser regression tests, convert a manual acceptance scenario or bug reproduction into a replayable script, scaffold an e2e/ test directory for a web project, or run/replay existing e2e suites. Requires the csi daemon + Chrome extension (see the `csi` skill); for general one-off browsing or scraping use `csi` instead.
 metadata:
-  version: "0.3.0"
+  version: "0.4.0"
 ---
 
 # csi-e2e
