@@ -12,23 +12,19 @@ Verification means: execute the case's steps against the real product through th
 
 **Snapshot first, evaluate second.** Locate elements via the accessibility tree's `@e` refs during verification — it's the fastest way to find things. But remember `@e` refs are per-snapshot numbering: they are a verification tool, never suite material. When you find the target, also determine its stable selector (aria-label, role+text, id, data-*) and write that in your notes.
 
-**Poll conditions, never fixed sleeps.** To wait for async UI, poll a predicate with `evaluate` in a loop:
+**Wait with `wait`, never fixed sleeps.** For live verification, wait for async UI with one `wait` call — do not write a bash `while` + `evaluate` poll:
 
 ```bash
-# wait until the loading spinner is gone
-while :; do
-  r=$(curl -s -X POST http://127.0.0.1:10088/command -H 'Content-Type: application/json' \
-    -d '{"action":"evaluate","args":{"code":"!document.querySelector(\".loading\")"},"session":"e2e-myproj"}')
-  echo "$r" | grep -q '"value":true' && break
-  sleep 0.4
-done
+curl -s -X POST http://127.0.0.1:10088/command \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"wait","args":{"text":"保存成功","timeout_ms":15000},"session":"e2e-myproj"}'
 ```
 
-Good predicates: target text appeared, loading element detached, `document.readyState === 'complete'`, a specific store/localStorage value. If the only way to know is "it usually settles in a second", note that — the suite will encode it as a commented sleep, but try harder first.
+Live verify uses `wait`. Suite replay may still use `pollUntil` (no model involved). Good wait targets: target text appeared, a loading element gone (`gone:true` + selector), URL substring. If the only way to know is "it usually settles in a second", note that — the suite will encode it as a commented sleep, but try harder first.
 
 **Failure triage order.** When a step fails: `screenshot` (what's actually on screen) → `snapshot` (what the structure is) → `evaluate` (read app state — store, localStorage, DOM attributes). Most failures are one of: element not there yet (wait condition wrong), wrong element (selector matched something else), or real product bug.
 
-**Throttled tabs.** Background tabs throttle timers and rAF; if a debounced save or animation "doesn't happen", bring the tab to front (`cdp` → `Page.bringToFront`) and prefer polling over sleeps — throttled timers fire late, not never.
+**Throttled tabs.** Background tabs throttle timers and rAF; if a debounced save or animation "doesn't happen", bring the tab to front (`cdp` → `Page.bringToFront`) and prefer `wait` over sleeps — throttled timers fire late, not never.
 
 ## Iteration discipline
 

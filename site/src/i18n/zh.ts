@@ -8,7 +8,7 @@ export const zh = {
     title: 'AI 勘查浏览器案发现场',
     subtitle: '让 AI 用你真实的登录态，操控你正在用的那台 Chrome——导航、点击、输入、截图、读页面。',
     ctaStart: '快速开始',
-    ctaTools: '查看 17 件工具',
+    ctaTools: '查看 20 件工具',
   },
   heroDemo: {
     prompt: 'curl -X POST 127.0.0.1:10088/command',
@@ -46,7 +46,7 @@ export const zh = {
       cmd3: 'fill → @e17 "Pro"',
       reading: '正在读取页面结构…',
       searching: '搜索命中 3 处…',
-      answer: 'AI: Pro 版 $29/月，含 17 工具 + e2e 套件',
+      answer: 'AI: Pro 版 $29/月，含 20 工具 + e2e 套件',
       pageUrl: 'acme.example.com/pricing',
       priceLabel: 'Pro · $29/月',
     },
@@ -73,7 +73,7 @@ export const zh = {
     },
   },
   tools: {
-    title: '17 件勘查工具',
+    title: '20 件勘查工具',
     subtitle: '覆盖浏览器交互全链路，精确契约见 protocol.md §4',
   },
   quickstart: {

@@ -101,7 +101,7 @@ curl -s -X POST http://127.0.0.1:10088/command \
 
 ## MCP server
 
-`csi mcp` 跑一个 stdio MCP server，暴露全部 17 个浏览器工具。它是一个薄代理：每次工具调用都转发给本地 daemon 的 `POST /command`（同一个 `CSI_PORT`，默认 10088），所以 daemon 必须在运行（`csi start`）。
+`csi mcp` 跑一个 stdio MCP server，暴露全部 20 个浏览器工具。它是一个薄代理：每次工具调用都转发给本地 daemon 的 `POST /command`（同一个 `CSI_PORT`，默认 10088），所以 daemon 必须在运行（`csi start`）。
 
 在 Claude Code 中挂载：
 
@@ -193,7 +193,7 @@ pi install git:github.com/ximing/csi
 
 ## 工具
 
-17 个工具：`navigate`、`find_tab`、`snapshot`（带 `@e` 引用的无障碍树）、`click`、`fill`（输入框 + contenteditable）、`evaluate`、`network`、`mouse_click`（可信的坐标级点击）、`key_type`、`send_keys`、`cdp`（原始透传）、`screenshot`、`save_as_pdf`、`upload`、`list_tabs`、`close_tab`、`close_session`。精确契约见 [docs/protocol.md](docs/protocol.md) §4。
+20 个工具：`navigate`、`find_tab`、`snapshot`（默认 compact YAML 无障碍树，带 `@e` 引用）、`click`、`fill`（输入框 + contenteditable）、`evaluate`、`network`、`mouse_click`（可信的坐标级点击）、`wait`、`scroll`、`hover`、`key_type`、`send_keys`、`cdp`（原始透传）、`screenshot`、`save_as_pdf`、`upload`、`list_tabs`、`close_tab`、`close_session`。精确契约见 [docs/protocol.md](docs/protocol.md) §4。
 
 ## 目录结构
 

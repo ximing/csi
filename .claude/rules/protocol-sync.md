@@ -18,7 +18,7 @@ paths:
 3. extension 侧：`src/background/tools/` 实现 + `src/background/registry.ts` 注册（tab 自管理工具同时更新 `SESSION_SCOPED_TOOLS`）；消息类型在 `src/shared/messages.ts`
 4. 技能侧：`skills/csi/SKILL.md` 的工具表格
 
-四处的工具清单必须始终一致（当前 17 个，见协议 §4）。
+四处的工具清单必须始终一致（当前 20 个，见协议 §4）。
 
 ## 不变量
 

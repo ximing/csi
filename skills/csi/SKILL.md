@@ -16,16 +16,19 @@ Control the user's real Chrome browser (with their login sessions) via a local d
 |------|------|---------|------|
 | `navigate` | `url`*, `newTab`(bool), `group_title` | `{success, url, tabId, frameId?}` | First call opens a tab — see [Tabs](#tabs-and-the-current-tab). `group_title` sets the group's visible label. Waits for page load (30s timeout) |
 | `find_tab` | `url`*, `active`(bool) | `{success, url, tabId, borrowed}` | Re-select a tab **this session** opened; `active:true` borrows the tab the **user** is viewing — see [Tabs](#tabs-and-the-current-tab) |
-| `snapshot` | — | `{url, title, tree}` with `@e` refs | **Accessibility tree** (text) — use this to read page content and locate elements |
+| `snapshot` | `mode`(compact/interactive/full), `selector`, `max_chars` | `{url,title,mode,chars,truncated,tree}` | 默认 compact YAML，可交互带 @e。truncated 时换 interactive 或对容器传 selector。调试才用 full |
 | `click` | `selector`* (@e ref or CSS) | `{success, tag, text}` | Synthetic DOM-level `el.click()` |
 | `fill` | `selector`*, `value`* | `{success, tag, mode}` | Works on `<input>`/`<textarea>` AND `[contenteditable]` (ProseMirror/Lexical/Slate). `mode` is `"value"` or `"contenteditable"` |
 | `evaluate` | `code`* (supports async/await) | `{type, value}` | `Runtime.evaluate` with `awaitPromise:true` |
 | `network` | `cmd`* (start\|stop\|list\|detail), `filter`, `requestId` | request/response data | `detail` returns `{requestId, url, method, status, mimeType, base64Encoded, body}` |
 | `mouse_click` | `selector`* (@e ref or CSS) | `{success, x, y, tag, text}` | Coordinate-level `Input.dispatchMouseEvent` — passes `isTrusted` checks |
+| `wait` | 恰好 `text`/`selector`/`url` 之一；`gone`；`timeout_ms`；`interval_ms` | `{success,waitedMs,matched}` | 一次调用，扩展内轮询。优先 text 或 CSS；@e 不在表里会立刻失败 |
+| `scroll` | 恰好 `selector` / `to` / `direction` 之一；`amount` | `{success,x,y,maxX,maxY}` | page = 0.9 视口。maxY=0 表示不能再往下滚 |
+| `hover` | `selector`* | `{success,x,y,tag,text}` | CSS :hover 菜单。不是 DOM mouseover |
 | `key_type` | `text`* | `{success, length}` | `Input.insertText` — types text at the focused element |
 | `send_keys` | `keys`*, `repeat`(1-100) | `{success, dispatched, os}` | `Enter`/`Escape`/`Tab`/`F1-F12`/single letters+digits, modifiers `Alt/Ctrl/Cmd/Meta/Shift/Mod` (`Mod` auto-resolves to Cmd on macOS, Ctrl elsewhere), space-separated combos — see [Special keys](#form-submit--special-keys) |
 | `cdp` | `method`*, `params` | raw CDP response | Raw CDP passthrough — what `evaluate` is to JS, `cdp` is to CDP. Low-level escape hatch for cases the tools above don't cover |
-| `screenshot` | `format`(png\|jpeg), `quality`(0-100), optional `selector` (@e/CSS), optional `path` | `{format, path, sizeBytes, mimeType}` | Returns a file path, not base64 — see [Screenshots](#screenshots) |
+| `screenshot` | `format`(png\|jpeg), `quality`(0-100), optional `selector` (@e/CSS), optional `fullPage`, optional `path` | `{format, path, sizeBytes, mimeType}` | Returns a file path, not base64 — see [Screenshots](#screenshots). `fullPage` and `selector` are mutually exclusive |
 | `save_as_pdf` | `paper_format`, `landscape`, `scale`, `print_background`, `file_name`, optional `path` | `{path, sizeBytes, mimeType, pageTitle}` | Render current page → PDF, returns a file path — see [Save as PDF](#save-the-current-page-as-pdf) |
 | `upload` | `selector`*, `files`*(string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` on a file input |
 | `list_tabs` | — | `{success, tabs:[{tabId, url, title, active, groupTitle}]}` | Inspect tabs in the current session |
@@ -100,26 +103,30 @@ The daemon writes the image to disk and returns `{format, path, sizeBytes, mimeT
 ```bash
 # Default: PNG of the visible viewport, daemon picks a temp path
 curl ... -d '{"action":"screenshot","args":{}}'
-# Options (each independent): JPEG quality, element-only via @e/CSS selector, custom output path
+# Options: JPEG quality, element-only via @e/CSS selector, full page, custom output path
 curl ... -d '{"action":"screenshot","args":{"format":"jpeg","quality":60}}'
 curl ... -d '{"action":"screenshot","args":{"selector":"@e123"}}'
+curl ... -d '{"action":"screenshot","args":{"fullPage":true}}'
 ```
 
-A caller-supplied `path` is honored verbatim (parent dirs created, existing file overwritten) — use a unique name to avoid clobbering. `save_as_pdf` follows the same rule.
+`fullPage` and `selector` are mutually exclusive — do not pass both. A caller-supplied `path` is honored verbatim (parent dirs created, existing file overwritten) — use a unique name to avoid clobbering. `save_as_pdf` follows the same rule.
 
 ## Prefer snapshot over CSS/JS selectors
 
 `snapshot` returns interactive elements with `@e` refs based on semantic role/name. Use them directly with click/fill — they survive CSS class hash changes that break manually-written selectors.
 
+Do not pass `mode` by default (compact YAML). If the result is `truncated`, retry with `mode=interactive`; if it is still too large, pass `selector` on the container. Use `mode=full` only for debugging.
+
 Fall back to `evaluate` (JS) only when:
 - The target has no `@e` ref in the snapshot
 - You need attributes not in the snapshot (e.g., `href`)
-- You need to dispatch complex event sequences, or scroll
+- You need to dispatch complex event sequences
 
 ## Evaluate Tips
 
 - Always use compact `JSON.stringify(data)` — never add `null, 2` formatting. Indentation and newlines can inflate the response several times over, causing truncation during transmission.
 - `evaluate` calls share the page's JS realm — re-declaring the same `const`/`let` across two calls throws `SyntaxError`. Wrap in an IIFE for a fresh scope: `(() => { const x = ...; return x; })()`.
+- Scroll with `scroll`. Wait for UI with `wait`. `evaluate` is still a last resort.
 - `evaluate` (and `cdp`) is an arbitrary code execution channel in the page — that is by design, but use it deliberately.
 
 ## Text input — use `fill`
@@ -129,6 +136,13 @@ Fall back to `evaluate` (JS) only when:
 `fill` is **clear-and-insert**: existing content is replaced. To append, read the current value via `evaluate`, concatenate, then `fill` with the result.
 
 For plain typing into the already-focused element, `key_type` (`Input.insertText`) also works — but prefer `fill`, which targets a specific element.
+
+## Wait
+
+Wait for text, an element, or a URL with `wait`. Do not write a bash `while` loop plus `evaluate`.
+
+- `timeout_ms` must be less than the daemon tool timeout (default 120s).
+- On timeout, read the last URL in the error, then `snapshot`. Do not treat a timeout as success.
 
 ## Form submit / special keys
 
@@ -169,8 +183,8 @@ Decoded PDF cap is 100 MB. Above that the daemon refuses; reduce `scale` or spli
 
 ## Known limitations
 
-- **Sites that strictly check `event.isTrusted`** (some banking portals, captchas) ignore `click` / `fill` because those fire DOM-level synthetic events (`isTrusted=false`). Use `mouse_click` instead — it dispatches trusted input events at the coordinate level via CDP.
-- **Cross-origin iframes**: `fill`, `click`, `evaluate`, and `snapshot` operate on the top frame. If a target element lives in a same-page iframe from a different origin (e.g. embedded sandbox demos), navigate to the iframe's URL directly instead.
+- **Sites that strictly check `event.isTrusted`** (some banking portals, captchas) ignore `click` / `fill` because those fire DOM-level synthetic events (`isTrusted=false`). Use `mouse_click` instead — it dispatches trusted input events at the coordinate level via CDP. For CSS `:hover` menus, use `hover`.
+- **Cross-origin iframes**: 0.4 只在 snapshot 里露出一行 iframe，不下行；要操作请 navigate 进 iframe URL.
 
 ## If a tool call fails (daemon not ready)
 

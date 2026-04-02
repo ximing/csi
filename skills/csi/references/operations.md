@@ -46,7 +46,11 @@ The daemon binds `127.0.0.1` only — it is never reachable from other machines.
 
 Never run `stop` / `restart` / `uninstall` on your own. They kill the running daemon and any in-flight work by the user or other agent sessions. If a hard restart is genuinely needed, ask the user to run `csi restart` by hand.
 
-Also do not "fix" version mismatches yourself. If `/status` shows the extension is connected but tool calls fail with `unknown tool`, the daemon and extension builds are out of sync — tell the user to update the daemon from the latest GitHub Release and the extension from the Chrome Web Store (or reload the unpacked Release zip). Do not ask them to build from source.
+Also do not "fix" version mismatches yourself:
+
+1. If the error contains `does not implement` → tell the user to upgrade the extension (Chrome Web Store, or reload `~/.csi/extension`). Do not start/stop/restart.
+2. If the error is `unknown tool` and `/status.version` is < 0.4.0 → tell the user to upgrade the daemon (GitHub Release / installer).
+3. Do not try to align versions yourself.
 
 ## /status JSON fields
 
