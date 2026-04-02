@@ -113,7 +113,7 @@ export const en = {
     readme: 'README',
     protocol: 'protocol.md',
     privacy: 'Privacy Policy',
-    version: 'v0.3.0',
+    version: 'v0.4.0',
     tagline: 'Ctrl+Shift+I · AI investigates the browser crime scene',
   },
 }
