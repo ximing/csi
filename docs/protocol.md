@@ -153,6 +153,7 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 - daemon 的 `hello_ack.tools` 为当前 `validTools`（排序后）。
 - 扩展缺某个已调用工具时，daemon **不转发**，返回
   `extension <ver> does not implement "<name>" (need ≥ <since>). Update the CSI extension from the Chrome Web Store, or reload ~/.csi/extension.`
+- 扩展未连接时不走此改写，与其它工具一样返回 `extension not connected`。
 
 `tool_call` 示例：
 

@@ -322,6 +322,22 @@ func TestExtensionNotConnected(t *testing.T) {
 	}
 }
 
+func TestExtensionNotConnectedWait(t *testing.T) {
+	t.Parallel()
+	_, ts := newTestServer(t)
+	resp := postCommand(t, ts, `{"action":"wait","args":{"text":"x"}}`)
+	if resp["success"] != false {
+		t.Fatalf("success = %v", resp["success"])
+	}
+	errStr, _ := resp["error"].(string)
+	if errStr != "extension not connected" {
+		t.Fatalf("error = %q", errStr)
+	}
+	if strings.Contains(errStr, "does not implement") {
+		t.Fatalf("upgrade wording leaked: %q", errStr)
+	}
+}
+
 func TestHelloAckAndStatus(t *testing.T) {
 	t.Parallel()
 	srv, ts := newTestServer(t)

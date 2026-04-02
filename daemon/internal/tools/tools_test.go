@@ -2,28 +2,37 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"csi/daemon/internal/session"
 )
 
-type fakeBE struct{ called string }
+type fakeBE struct {
+	called string
+	err    error
+}
 
 func (f *fakeBE) Name() string    { return "fake" }
-func (f *fakeBE) Connected() bool { return true }
+func (f *fakeBE) Connected() bool { return f.err == nil }
 func (f *fakeBE) CallTool(_ context.Context, name string, _ map[string]any) (any, error) {
 	f.called = name
+	if f.err != nil {
+		return nil, f.err
+	}
 	return map[string]any{"ok": true}, nil
 }
 
 type fakeInv struct {
-	ver   string
-	tools []string // nil = 未上报
+	ver          string
+	tools        []string // nil = 未上报
+	disconnected bool
 }
 
 func (f fakeInv) ExtensionVersion() string { return f.ver }
 func (f fakeInv) ExtensionTools() []string { return f.tools }
+func (f fakeInv) Connected() bool          { return !f.disconnected }
 
 func TestMissingToolNotForwarded(t *testing.T) {
 	be := &fakeBE{}
@@ -71,5 +80,21 @@ func TestUnknownToolUnchanged(t *testing.T) {
 	_, err := ex.Execute(context.Background(), "not_a_tool", "s", nil)
 	if err == nil || err.Error() != "unknown tool: not_a_tool" {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestDisconnectedWaitIsNotConnected(t *testing.T) {
+	be := &fakeBE{err: errors.New("extension not connected")}
+	ex := NewExecutor(be, session.NewManager())
+	ex.Inventory = fakeInv{disconnected: true}
+	_, err := ex.Execute(context.Background(), "wait", "s", nil)
+	if err == nil || err.Error() != "extension not connected" {
+		t.Fatalf("err=%v", err)
+	}
+	if strings.Contains(err.Error(), "does not implement") {
+		t.Fatalf("upgrade wording leaked: %v", err)
+	}
+	if be.called != "wait" {
+		t.Fatalf("backend not reached, called=%q", be.called)
 	}
 }

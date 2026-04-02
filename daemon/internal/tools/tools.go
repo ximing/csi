@@ -45,6 +45,7 @@ var toolSince = map[string]string{
 type Inventory interface {
 	ExtensionVersion() string
 	ExtensionTools() []string
+	Connected() bool
 }
 
 // Valid 校验工具名是否在协议清单内。
@@ -104,8 +105,9 @@ func (e *Executor) Execute(ctx context.Context, action, sess string, args map[st
 }
 
 // checkExtension 对照扩展清单；未实现则不转发，返回升级提示（协议 §3.3）。
+// 未连接时不改写，交给后端返回 extension not connected。
 func (e *Executor) checkExtension(action string) error {
-	if e.Inventory == nil {
+	if e.Inventory == nil || !e.Inventory.Connected() {
 		return nil
 	}
 	ver := e.Inventory.ExtensionVersion()
