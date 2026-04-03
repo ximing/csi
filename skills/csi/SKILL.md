@@ -190,7 +190,7 @@ Decoded PDF cap is 100 MB. Above that the daemon refuses; reduce `scale` or spli
 
 **If a tool call can't reach the daemon (connection refused), start it yourself — don't ask the user. This is safe to run anytime: it no-ops if the daemon is already up.**
 
-This is also the expected state after a computer reboot: the installer does not register any login autostart, so the daemon stays down until something starts it. Just start it and move on — no need to tell the user anything is wrong.
+After a reboot the installer-registered login autostart should already have run `csi start`. If a tool call still cannot reach the daemon, start it yourself — don't ask the user. `start` is idempotent.
 
 **macOS / Linux:**
 
@@ -206,4 +206,4 @@ This is also the expected state after a computer reboot: the installer does not 
 
 Then retry the tool call. If it still fails — or the browser extension won't connect — check `references/operations.md` for recovery steps, and ask the user to verify the CSI extension is installed and enabled in Chrome (`chrome://extensions`) and shows "connected" in its popup.
 
-Never run `stop` / `restart` / `uninstall` automatically — those kill a running daemon. See `references/operations.md` for anything deeper.
+Never run `stop` / `restart` / `uninstall` / `autostart on` / `autostart off` automatically — those change the running daemon or the machine's login behavior. If the user complains they wait a round after every boot, tell them to run `csi autostart status` (prints `on` or `off` plus the unit path) and, if they agree, `csi autostart on`. Re-running the installer also turns autostart back on, even after a manual `off`. See `references/operations.md` for anything deeper.
