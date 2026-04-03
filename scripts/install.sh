@@ -10,6 +10,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.sh | bash
 #   curl -fsSL ... | bash -s -- --no-extension    # store users: skip unpacked zip
 #   curl -fsSL ... | bash -s -- --no-start        # don't start the daemon
+#   curl -fsSL ... | bash -s -- --no-autostart    # don't register login autostart
 #   curl -fsSL ... | bash -s -- --no-skill        # don't install any skills
 #   curl -fsSL ... | bash -s -- --agents codex,cursor  # pick skill targets (default: claude)
 #   CSI_VERSION=v0.2.0 curl -fsSL ... | bash      # pin a release (default: latest)
@@ -50,6 +51,9 @@ Options:
   -h, --help         Show this help.
   --no-extension     Skip the unpacked extension zip (Chrome Web Store users).
   --no-start         Install everything, but don't start the daemon.
+  --no-autostart     Don't register login autostart (csi start at login).
+                     Re-running the installer re-enables autostart even if
+                     you previously ran csi autostart off.
   --no-skill         Skip installing the coding-agent skills entirely.
   --agents LIST      Comma-separated skill targets: claude, codex, cursor,
                      agents (the ~/.agents standard dir), opencode, or all.
@@ -60,6 +64,7 @@ Environment:
   CSI_VERSION        Pin to a specific release tag (e.g. v0.2.0; default: latest).
   CSI_AGENTS         Same as --agents (e.g. "codex,cursor").
   CSI_NO_EXTENSION   Set to 1 to skip the unpacked extension zip.
+  CSI_NO_AUTOSTART   Set to 1 to skip login autostart.
 
 Skill target directories:
   claude    ~/.claude/skills           (Claude Code)
@@ -72,22 +77,26 @@ What it does:
   1. Download the prebuilt daemon  → $BIN_PATH
   2. Download the built extension  → $EXT_DIR  (sideload; skip with --no-extension)
   3. Install the skills            → each target's skills dir (see above)
-  4. Start the daemon (idempotent)
+  4. Register login autostart (skip with --no-autostart / CSI_NO_AUTOSTART=1)
+  5. Start the daemon (idempotent)
 EOF
 }
 
 # ---------- args ----------
 
 NO_START=0
+NO_AUTOSTART=0
 NO_SKILL=0
 NO_EXT=0
 ASSUME_YES=0
 [ "${CSI_NO_EXTENSION:-}" = "1" ] && NO_EXT=1
+[ "${CSI_NO_AUTOSTART:-}" = "1" ] && NO_AUTOSTART=1
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help)         show_help; exit 0 ;;
     --no-extension)    NO_EXT=1; shift ;;
     --no-start)        NO_START=1; shift ;;
+    --no-autostart)    NO_AUTOSTART=1; shift ;;
     --no-skill)        NO_SKILL=1; shift ;;
     --agents)          [ $# -ge 2 ] || die "--agents requires a value"; AGENTS="$2"; shift 2 ;;
     -y|--yes)          ASSUME_YES=1; shift ;;
@@ -136,7 +145,7 @@ download() { # url dest
 
 # ---------- 1. daemon ----------
 
-step "[1/4] Installing daemon ($OS-$ARCH)"
+step "[1/5] Installing daemon ($OS-$ARCH)"
 
 mkdir -p "$BIN_DIR"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/csi-install.XXXXXX")"
@@ -151,11 +160,11 @@ ok "daemon: $BIN_PATH"
 # ---------- 2. extension ----------
 
 if [ "$NO_EXT" -eq 1 ]; then
-  step "[2/4] Chrome extension — skipped (--no-extension)"
+  step "[2/5] Chrome extension — skipped (--no-extension)"
   info "install from the Chrome Web Store:"
   info "  https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol"
 else
-  step "[2/4] Installing Chrome extension"
+  step "[2/5] Installing Chrome extension"
 
   command -v unzip >/dev/null 2>&1 || die "'unzip' not found — install it and re-run"
 
@@ -190,9 +199,9 @@ install_skill() { # tar-name dest-dir（tarball 只下载一次，多目标复�
 }
 
 if [ "$NO_SKILL" -eq 1 ]; then
-  step "[3/4] Coding-agent skills — skipped (--no-skill)"
+  step "[3/5] Coding-agent skills — skipped (--no-skill)"
 else
-  step "[3/4] Coding-agent skills"
+  step "[3/5] Coding-agent skills"
 
   [ "$AGENTS" = "all" ] && AGENTS="claude codex cursor agents opencode"
   AGENTS="$(printf '%s' "$AGENTS" | tr ',' ' ' | xargs)"
@@ -234,13 +243,27 @@ else
   fi
 fi
 
-# ---------- 4. start daemon ----------
+# ---------- 4. login autostart ----------
+
+if [ "$NO_AUTOSTART" -eq 1 ]; then
+  step "[4/5] Login autostart — skipped (--no-autostart)"
+  info "enable later with:  $BIN_PATH autostart on"
+else
+  step "[4/5] Login autostart"
+  if "$BIN_PATH" autostart on; then
+    ok "login autostart registered"
+  else
+    warn "failed to register login autostart — after reboot run: $BIN_PATH autostart on"
+  fi
+fi
+
+# ---------- 5. start daemon ----------
 
 if [ "$NO_START" -eq 1 ]; then
-  step "[4/4] Start daemon — skipped (--no-start)"
+  step "[5/5] Start daemon — skipped (--no-start)"
   info "start it later with:  $BIN_PATH start"
 else
-  step "[4/4] Starting daemon"
+  step "[5/5] Starting daemon"
   if "$BIN_PATH" start; then
     ok "daemon is running"
   else

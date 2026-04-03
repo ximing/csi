@@ -79,7 +79,7 @@ irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | ie
 
 **3. 检查状态** —— 与方式 A 同一个 `curl`。
 
-两个安装器接受相同的旗标：`--no-extension` / `-NoExtension`（跳过解压版 zip；也可用 `CSI_NO_EXTENSION=1`），`--no-start` / `-NoStart`（不启动 daemon），`--no-skill` / `-NoSkill`（完全跳过技能），`--agents codex,cursor` / `-Agents codex,cursor`（选择技能安装目标，见[编程 Agent Skills](#编程-agent-skills)），`-y` / `-Yes`（覆盖已存在的技能安装前不再询问）。用 `CSI_VERSION=v0.1.0` 固定某个 release。
+两个安装器接受相同的旗标：`--no-extension` / `-NoExtension`（跳过解压版 zip；也可用 `CSI_NO_EXTENSION=1`），`--no-start` / `-NoStart`（不启动 daemon），`--no-autostart` / `-NoAutostart`（不注册登录自启；也可用 `CSI_NO_AUTOSTART=1`；再跑一次安装器会把曾经 `csi autostart off` 过的自启重新打开），`--no-skill` / `-NoSkill`（完全跳过技能），`--agents codex,cursor` / `-Agents codex,cursor`（选择技能安装目标，见[编程 Agent Skills](#编程-agent-skills)），`-y` / `-Yes`（覆盖已存在的技能安装前不再询问）。用 `CSI_VERSION=v0.1.0` 固定某个 release。
 
 **驱动浏览器：**
 
