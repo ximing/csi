@@ -6,7 +6,8 @@ Go daemon：AI 客户端的 HTTP 入口 + 扩展的 WS 服务端 + 会话状态 
 
 ## 结构
 
-- `cmd/csi/` — CLI 入口（`start`/`stop`/`status`/`mcp` 等命令、平台相关的 `sysproc_*`/`alive_*`）
+- `cmd/csi/` — CLI 入口（`start`/`stop`/`status`/`autostart`/`mcp` 等命令、平台相关的 `sysproc_*`/`alive_*`）
+- `internal/autostart/` — 登录自启（plist/systemd/HKCU Run）；生成函数纯字符串，apply 禁止 KeepAlive
 - `internal/server/` — HTTP 路由（`/command`、`/status`、`/healthz` 等）
 - `internal/ws/` — WS hub，扩展连接管理（hello 门控、pong 看门狗）
 - `internal/session/` — 会话状态：`_session`/`_tabId`/`_tabIds` 注入与更新（协议 §3.4）
