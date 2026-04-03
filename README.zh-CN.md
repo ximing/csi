@@ -247,6 +247,6 @@ git tag v0.1.0 && git push origin v0.1.0
 ## 路线图
 
 - **0.4 Agent 可靠性** — compact YAML snapshot、真正的 `wait`、`scroll` / `hover`、整页截图、版本握手（商店扩展过旧时说「请升级」而不是 `unknown tool`）。规格：[docs/superpowers/specs/2026-03-30-agent-reliability-design.md](docs/superpowers/specs/2026-03-30-agent-reliability-design.md)。
-- **0.5 开机自启** — `csi autostart on|off` + 安装器默认打开，重启电脑后 daemon 还在。
+- **0.5 开机自启** — 已做：`csi autostart on|off` + 安装器默认打开，重启电脑后 daemon 还在。
 - **0.6 难页面** — iframe（ref 自带 `frameId`）、JS 对话框、下载（要过 CWS 权限审核）。
 - **DirectCDPBackend**：连接 [obscura](https://github.com/h4ckf0r0day/obscura)——一个带内置 CDP server 的 Rust 无头浏览器。daemon 会直接和它的 CDP WebSocket 对话，不需要 Chrome 扩展，在当前真实 Chrome 模式之外提供完全无头的自动化。
