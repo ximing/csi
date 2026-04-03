@@ -25,7 +25,7 @@ The daemon binds `127.0.0.1` only — it is never reachable from other machines.
 
 ## Recovery — what to do when a tool call fails
 
-1. **Daemon not reachable (connection refused)** → start it yourself, don't ask the user. `start` is idempotent: it no-ops if the daemon is already up, and concurrent starts converge to a single daemon (the OS lets only one process bind port 10088). Note this is the expected state after a computer reboot — there is no login autostart, so the daemon waits for something to start it.
+1. **Daemon not reachable (connection refused)** → start it yourself, don't ask the user. `start` is idempotent: it no-ops if the daemon is already up, and concurrent starts converge to a single daemon (the OS lets only one process bind port 10088). After a reboot, login autostart (if registered) should already have run `csi start`. If the daemon is still down, start it yourself — `start` is idempotent. If the user says this happens after every boot, tell them to run `csi autostart status` and, only if they ask, `csi autostart on`. Never run `autostart on`/`off` yourself. Re-running the installer re-enables autostart even after a manual `off`.
    - macOS / Linux: `~/.csi/bin/csi start`
    - Windows: `& "$env:USERPROFILE\.csi\bin\csi.exe" start`
 
@@ -44,7 +44,7 @@ The daemon binds `127.0.0.1` only — it is never reachable from other machines.
 
 ## Do NOT do automatically
 
-Never run `stop` / `restart` / `uninstall` on your own. They kill the running daemon and any in-flight work by the user or other agent sessions. If a hard restart is genuinely needed, ask the user to run `csi restart` by hand.
+Never run `stop` / `restart` / `uninstall` / `autostart on` / `autostart off` on your own. `stop`/`restart`/`uninstall` kill the running daemon and any in-flight work. `autostart on`/`off` change whether the daemon comes back at login — that needs the user's OK. If a hard restart is genuinely needed, ask the user to run `csi restart` by hand. If they want login autostart, ask them to run `csi autostart on`.
 
 Also do not "fix" version mismatches yourself:
 
