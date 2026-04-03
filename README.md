@@ -79,7 +79,7 @@ irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | ie
 
 **3. Check status** — same `curl` as in Option A.
 
-Both installers accept the same flags: `--no-extension` / `-NoExtension` (skip the unpacked zip; also `CSI_NO_EXTENSION=1`), `--no-start` / `-NoStart` (don't start the daemon), `--no-skill` / `-NoSkill` (skip skills entirely), `--agents codex,cursor` / `-Agents codex,cursor` (pick skill targets — see [Coding Agent Skills](#coding-agent-skills)), `-y` / `-Yes` (don't prompt before overwriting an existing skill install). Pin a specific release with `CSI_VERSION=v0.1.0`.
+Both installers accept the same flags: `--no-extension` / `-NoExtension` (skip the unpacked zip; also `CSI_NO_EXTENSION=1`), `--no-start` / `-NoStart` (don't start the daemon), `--no-autostart` / `-NoAutostart` (don't register login autostart; also `CSI_NO_AUTOSTART=1`; re-running the installer turns autostart back on even after `csi autostart off`), `--no-skill` / `-NoSkill` (skip skills entirely), `--agents codex,cursor` / `-Agents codex,cursor` (pick skill targets — see [Coding Agent Skills](#coding-agent-skills)), `-y` / `-Yes` (don't prompt before overwriting an existing skill install). Pin a specific release with `CSI_VERSION=v0.1.0`.
 
 **Drive the browser:**
 

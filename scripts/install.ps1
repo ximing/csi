@@ -19,6 +19,7 @@
 param(
     [switch]$Help,
     [switch]$NoStart,
+    [switch]$NoAutostart,
     [switch]$NoSkill,
     [switch]$NoExtension,
     [string]$Agents,
@@ -40,6 +41,7 @@ $ExtDir     = Join-Path $InstallDir 'extension'
 # 与 install.sh --agents 对齐：claude(默认) codex cursor agents opencode all
 $Agents = if ($Agents) { $Agents } elseif ($env:CSI_AGENTS) { $env:CSI_AGENTS } else { 'claude' }
 if (-not $NoExtension -and $env:CSI_NO_EXTENSION -eq '1') { $NoExtension = $true }
+if (-not $NoAutostart -and $env:CSI_NO_AUTOSTART -eq '1') { $NoAutostart = $true }
 
 function Get-SkillsBase ([string]$Agent) {
     switch ($Agent) {
@@ -77,6 +79,9 @@ Options:
   -Help          Show this help.
   -NoExtension   Skip the unpacked extension zip (Chrome Web Store users).
   -NoStart       Install everything, but don't start the daemon.
+  -NoAutostart   Don't register login autostart (csi start at login).
+                 Re-running the installer re-enables autostart even if
+                 you previously ran csi autostart off.
   -NoSkill       Skip installing the coding-agent skills entirely.
   -Agents LIST   Comma-separated skill targets: claude, codex, cursor,
                  agents (the ~\.agents standard dir), opencode, or all.
@@ -87,6 +92,7 @@ Environment:
   `$env:CSI_VERSION        Pin to a specific release tag (e.g. v0.2.0; default: latest).
   `$env:CSI_AGENTS         Same as -Agents (e.g. "codex,cursor").
   `$env:CSI_NO_EXTENSION   Set to 1 to skip the unpacked extension zip.
+  `$env:CSI_NO_AUTOSTART   Set to 1 to skip login autostart.
 
 Skill target directories:
   claude    ~\.claude\skills           (Claude Code)
@@ -99,7 +105,8 @@ What it does:
   1. Download the prebuilt daemon  -> $BinPath
   2. Download the built extension  -> $ExtDir  (sideload; skip with -NoExtension)
   3. Install the skills            -> each target's skills dir (see above)
-  4. Start the daemon (idempotent)
+  4. Register login autostart (skip with -NoAutostart / CSI_NO_AUTOSTART=1)
+  5. Start the daemon (idempotent)
 "@
     exit 0
 }
@@ -135,7 +142,7 @@ function Download ([string]$url, [string]$dest) {
 try {
     # ---------- 1. daemon ----------
 
-    Step '[1/4] Installing daemon (windows-amd64)'
+    Step '[1/5] Installing daemon (windows-amd64)'
 
     New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
     $daemonZip = Join-Path $TmpDir 'daemon.zip'
@@ -147,11 +154,11 @@ try {
     # ---------- 2. extension ----------
 
     if ($NoExtension) {
-        Step '[2/4] Chrome extension - skipped (-NoExtension)'
+        Step '[2/5] Chrome extension - skipped (-NoExtension)'
         Info 'install from the Chrome Web Store:'
         Info '  https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol'
     } else {
-        Step '[2/4] Installing Chrome extension'
+        Step '[2/5] Installing Chrome extension'
 
         $extZip = Join-Path $TmpDir 'extension.zip'
         Download "$DL/csi-extension.zip" $extZip
@@ -175,9 +182,9 @@ try {
     }
 
     if ($NoSkill) {
-        Step '[3/4] Coding-agent skills - skipped (-NoSkill)'
+        Step '[3/5] Coding-agent skills - skipped (-NoSkill)'
     } else {
-        Step '[3/4] Coding-agent skills'
+        Step '[3/5] Coding-agent skills'
 
         if ($Agents -eq 'all') { $Agents = 'claude,codex,cursor,agents,opencode' }
         # 先解析全部目标，任何一个不认识就整体失败，不装一半
@@ -205,13 +212,34 @@ try {
         }
     }
 
-    # ---------- 4. start daemon ----------
+    # ---------- 4. login autostart ----------
+
+    if ($NoAutostart) {
+        Step '[4/5] Login autostart - skipped (-NoAutostart)'
+        Info "enable later with:  $BinPath autostart on"
+    } else {
+        Step '[4/5] Login autostart'
+        $autoOk = $false
+        try {
+            & $BinPath autostart on
+            $autoOk = ($LASTEXITCODE -eq 0)
+        } catch {
+            $autoOk = $false
+        }
+        if ($autoOk) {
+            Ok 'login autostart registered'
+        } else {
+            Warn "failed to register login autostart - after reboot run: $BinPath autostart on"
+        }
+    }
+
+    # ---------- 5. start daemon ----------
 
     if ($NoStart) {
-        Step '[4/4] Start daemon - skipped (-NoStart)'
+        Step '[5/5] Start daemon - skipped (-NoStart)'
         Info "start it later with:  $BinPath start"
     } else {
-        Step '[4/4] Starting daemon'
+        Step '[5/5] Starting daemon'
         $started = $false
         try {
             & $BinPath start
