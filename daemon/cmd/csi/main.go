@@ -2,13 +2,14 @@
 //
 // 子命令：
 //
-//	serve    前台运行 daemon
-//	start    后台守护（幂等：已在运行则 no-op）
-//	stop     停止后台 daemon（--force 跳过身份校验）
-//	restart  重启后台 daemon
-//	status   查询运行状态
-//	version  打印版本
-//	mcp      stdio MCP server（20 个浏览器工具，转发到本机 daemon）
+//	serve      前台运行 daemon
+//	start      后台守护（幂等：已在运行则 no-op）
+//	stop       停止后台 daemon（--force 跳过身份校验）
+//	restart    重启后台 daemon
+//	status     查询运行状态
+//	autostart  登录自启（status | on | off；默认 status）
+//	version    打印版本
+//	mcp        stdio MCP server（20 个浏览器工具，转发到本机 daemon）
 package main
 
 import (
@@ -35,6 +36,8 @@ func main() {
 		err = cmdRestart()
 	case "status":
 		err = cmdStatus()
+	case "autostart":
+		err = cmdAutostart()
 	case "version":
 		fmt.Println("csi " + version.Version)
 	case "mcp":
@@ -53,7 +56,11 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `usage: csi <command>
+	fmt.Fprint(os.Stderr, usageText())
+}
+
+func usageText() string {
+	return `usage: csi <command>
 
 commands:
   serve           run daemon in foreground
@@ -61,10 +68,11 @@ commands:
   stop [--force]  stop background daemon
   restart         restart background daemon
   status          show daemon status
+  autostart       login autostart (status | on | off; default status)
   version         print version
   mcp             run MCP server over stdio (forwards to the local daemon)
 
 environment:
   CSI_PORT  listen port (default 10088)
-`)
+`
 }
