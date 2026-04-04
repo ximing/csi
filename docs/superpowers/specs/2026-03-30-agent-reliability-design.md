@@ -460,30 +460,7 @@ WantedBy=default.target
 
 ## C.1 iframe
 
-原则：**`@e` ref 自己带着 frameId**。snapshot → click 这条主路对模型透明。
-
-`RefEntry` 增加可选 `frameId`。`resolveObjectId` 对 `@e` 用该 frame 的执行上下文，不再默认顶层 `document.querySelector`。
-
-新工具 `list_frames`：
-
-```json
-{ "frames": [{ "frameId": "…", "parentId": "", "url": "https://…", "name": "payment", "isolated": true }] }
-```
-
-`isolated=true` 表示跨域（CDP 仍可进，因为 debugger attach 在 tab 上）。
-
-`snapshot` / `evaluate` / `click` / `fill` / `mouse_click` / `hover` / `screenshot` / `wait` 增加可选 `frame`：CDP `frameId` 或 URL 子串。CSS 选择器默认顶层；`@e` 忽略传入的 `frame`，以 ref 表为准。
-
-`snapshot` 增加 `mode` 不变，另增 `descend_frames`（bool，默认 false）。true 时每个 iframe 下多一块：
-
-```
-- iframe "payment" [src=https://pay.example.com/…]
-  - textbox "Card number" [ref=@e12]
-```
-
-编号全局递增，不按 frame 重置。
-
-0.4.0 的 compact 已经输出一行 `iframe` 且不下行，和这个兼容。
+**已改口径。** 0.6.0 只做同域穿透、默认不下行、跨域报人话；API 预留跨域但不在本期 attach OOPIF。完整规格见 `docs/superpowers/specs/2026-04-04-same-origin-iframe-design.md`。下文作废，不要按 `descend_frames` / 「CDP 仍可进跨域」实现。
 
 ## C.2 对话框
 
