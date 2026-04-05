@@ -90,6 +90,7 @@ var toolDefs = []toolDef{
 			"mode":      strEnumProp("Snapshot verbosity. compact=YAML with structure+refs (default); interactive=refs only; full=JSON tree.", "compact", "interactive", "full"),
 			"selector":  strProp("Limit the snapshot to this element (@e ref or CSS)."),
 			"max_chars": intProp("Max YAML characters for compact/interactive (default 24000, range 1000-80000)."),
+			"frame":     strProp("Enter a same-origin iframe and snapshot only it: CDP frameId or an untruncated substring of the frame URL. Alternative to passing a selector that points at an iframe @e ref."),
 		},
 	},
 	{
@@ -97,6 +98,7 @@ var toolDefs = []toolDef{
 		description: "Click an element via a DOM-level el.click().",
 		props: map[string]any{
 			"selector": strProp("@eN ref (from snapshot) or CSS selector of the element to click."),
+			"frame":    strProp("Frame to resolve CSS selectors in (frameId or URL substring). Ignored for @e refs — they carry their own frame."),
 		},
 		required: []string{"selector"},
 	},
@@ -106,6 +108,7 @@ var toolDefs = []toolDef{
 		props: map[string]any{
 			"selector": strProp("@eN ref (from snapshot) or CSS selector of the element to fill."),
 			"value":    strProp("Value to set."),
+			"frame":    strProp("Frame to resolve CSS selectors in (frameId or URL substring). Ignored for @e refs — they carry their own frame."),
 		},
 		required: []string{"selector", "value"},
 	},
@@ -113,7 +116,8 @@ var toolDefs = []toolDef{
 		name:        "evaluate",
 		description: "Evaluate JavaScript in the current page (awaitPromise enabled) and return the result.",
 		props: map[string]any{
-			"code": strProp("JavaScript expression or statements to evaluate."),
+			"code":  strProp("JavaScript expression or statements to evaluate."),
+			"frame": strProp("Frame to run the code in (frameId or URL substring). Default: top frame."),
 		},
 		required: []string{"code"},
 	},
@@ -132,6 +136,7 @@ var toolDefs = []toolDef{
 		description: "Click an element via coordinate-level mouse events (passes isTrusted checks, unlike click).",
 		props: map[string]any{
 			"selector": strProp("@eN ref (from snapshot) or CSS selector of the element to click."),
+			"frame":    strProp("Frame to resolve CSS selectors in (frameId or URL substring). Ignored for @e refs — they carry their own frame."),
 		},
 		required: []string{"selector"},
 	},
@@ -145,6 +150,7 @@ var toolDefs = []toolDef{
 			"gone":        boolProp("Invert: wait until the condition is no longer true."),
 			"timeout_ms":  intProp("Timeout in milliseconds (default 15000, max 120000). Must be less than the daemon tool timeout."),
 			"interval_ms": intProp("Poll interval in milliseconds (default 200)."),
+			"frame":       strProp("Frame to poll text/selector in (frameId or URL substring). url still matches the tab URL."),
 		},
 	},
 	{
@@ -162,6 +168,7 @@ var toolDefs = []toolDef{
 		description: "Move the mouse over an element (CSS :hover menus). Trusted mouseMoved, no click.",
 		props: map[string]any{
 			"selector": strProp("@e ref or CSS selector to hover."),
+			"frame":    strProp("Frame to resolve CSS selectors in (frameId or URL substring). Ignored for @e refs — they carry their own frame."),
 		},
 		required: []string{"selector"},
 	},
@@ -200,6 +207,7 @@ var toolDefs = []toolDef{
 			"selector": strProp("@eN ref or CSS selector to capture only that element."),
 			"fullPage": boolProp("Capture the full scrollable page. Mutually exclusive with selector."),
 			"path":     strProp("Output file path (default: a temp file)."),
+			"frame":    strProp("Frame context for selector (frameId or URL substring). With fullPage, clips to the iframe's visible box in the parent viewport."),
 		},
 	},
 	{
@@ -236,6 +244,11 @@ var toolDefs = []toolDef{
 	{
 		name:        "close_session",
 		description: "Close all tabs of the session.",
+		props:       map[string]any{},
+	},
+	{
+		name:        "list_frames",
+		description: "List all frames in the current tab, including cross-origin iframes (marked isolated, cannot be entered).",
 		props:       map[string]any{},
 	},
 }

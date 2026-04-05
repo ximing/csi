@@ -16,7 +16,7 @@ import (
 var wantTools = []string{
 	"navigate", "find_tab", "snapshot", "click", "fill", "evaluate",
 	"network", "mouse_click", "wait", "scroll", "hover", "key_type", "send_keys", "cdp",
-	"screenshot", "save_as_pdf", "upload", "list_tabs", "close_tab", "close_session",
+	"screenshot", "save_as_pdf", "upload", "list_tabs", "close_tab", "close_session", "list_frames",
 }
 
 var wantRequired = map[string][]string{
@@ -53,7 +53,7 @@ func connectClient(t *testing.T, srv *mcpsdk.Server) *mcpsdk.ClientSession {
 	return cs
 }
 
-// TestToolRegistration 验证 initialize + tools/list 握手后返回 20 个工具，名称与协议 §4 一致。
+// TestToolRegistration 验证 initialize + tools/list 握手后返回 21 个工具，名称与协议 §4 一致。
 func TestToolRegistration(t *testing.T) {
 	srv := NewServer("http://127.0.0.1:1") // 不实际调用
 	cs := connectClient(t, srv)
@@ -62,8 +62,8 @@ func TestToolRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(res.Tools) != 20 {
-		t.Fatalf("got %d tools, want 20", len(res.Tools))
+	if len(res.Tools) != 21 {
+		t.Fatalf("got %d tools, want 21", len(res.Tools))
 	}
 	got := map[string]*mcpsdk.Tool{}
 	for _, tool := range res.Tools {
