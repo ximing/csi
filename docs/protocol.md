@@ -153,6 +153,9 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 - daemon 的 `hello_ack.tools` 为当前 `validTools`（排序后）。
 - 扩展缺某个已调用工具时，daemon **不转发**，返回
   `extension <ver> does not implement "<name>" (need ≥ <since>). Update the CSI extension from the Chrome Web Store, or reload ~/.csi/extension.`
+- 调用方对任何工具传了非空 `frame`（string；`null` / 缺省 / 空字符串视为未传，**非字符串真值也算已传**）而扩展版本 < 0.6.0（或未上报 `tools`）时，daemon 同样**不转发**，返回
+  `extension <ver> does not implement "frame" (need ≥ 0.6.0). Update the CSI extension from the Chrome Web Store, or reload ~/.csi/extension.`
+  版本按 hello 的 `extensionVersion` 做 semver 主.次.补比较，解析失败视为不够。
 - 扩展未连接时不走此改写，与其它工具一样返回 `extension not connected`。
 
 `tool_call` 示例：
@@ -197,7 +200,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - `find_tab`：默认只在 `_tabIds` 内按 URL 域名匹配；`active:true` 时借用用户正在前台浏览的标签（返回 `borrowed:true`，不拉入分组）。
 - 标签分组：`navigate` 新建标签时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。
 
-## 4. 工具清单（20 个）
+## 4. 工具清单（21 个）
 
 > `selector` 一律支持 `@e<num>` 引用（snapshot 产出）或 CSS 选择器。
 
@@ -205,24 +208,37 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 |---|---|---|---|---|
 | 1 | `navigate` | `url`*, `newTab`, `group_title` | `{success, url, tabId, frameId?}` | 等待 load 完成（30s 超时） |
 | 2 | `find_tab` | `url`*, `active` | `{success, url, tabId, borrowed}` | 见 §3.4 |
-| 3 | `snapshot` | `mode`(compact/interactive/full，默认 compact), `selector`, `max_chars`(默认 24000，1000–80000) | `{url, title, mode, chars, truncated, tree}` | compact/interactive 的 tree 是 YAML 字符串；full 的 tree 是既有 JSON 数组。iframe 只输出一行不下行。 |
-| 4 | `click` | `selector`* | `{success, tag, text}` | DOM 级 `el.click()` |
-| 5 | `fill` | `selector`*, `value`* | `{success, tag, mode}` | input/textarea → `mode:"value"`；contenteditable → `mode:"contenteditable"` |
-| 6 | `evaluate` | `code`* | `{type, value}` | `Runtime.evaluate`，`awaitPromise:true` |
+| 3 | `snapshot` | `mode`(compact/interactive/full，默认 compact), `selector`, `max_chars`(默认 24000，1000–80000), `frame`(frameId 或未截断 URL 子串) | `{url, title, mode, chars, truncated, tree}` | compact/interactive 的 tree 是 YAML 字符串；full 的 tree 是既有 JSON 数组。iframe 只输出一行不下行，但带 `[ref=@eN]`，跨域行带 `[isolated]`；`frame` 或指向 iframe 的 `selector` 进入该帧再拍。 |
+| 4 | `click` | `selector`*, `frame` | `{success, tag, text}` | DOM 级 `el.click()`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
+| 5 | `fill` | `selector`*, `value`*, `frame` | `{success, tag, mode}` | input/textarea → `mode:"value"`；contenteditable → `mode:"contenteditable"`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
+| 6 | `evaluate` | `code`*, `frame` | `{type, value}` | `Runtime.evaluate`，`awaitPromise:true`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 7 | `network` | `cmd`* (start/stop/list/detail), `filter`, `requestId` | 见参考实现 | detail 返回 `{requestId,url,method,status,mimeType,base64Encoded,body}` |
-| 8 | `mouse_click` | `selector`* | `{success, x, y, tag, text}` | 坐标级 Input.dispatchMouseEvent，可过 isTrusted 检查 |
-| 9 | `wait` | 恰好 `text`/`selector`/`url` 之一；`gone`；`timeout_ms`(默认 15000，100–120000)；`interval_ms`(默认 200，50–2000) | `{success, waitedMs, matched}` | 扩展内轮询。@e 不在 ref 表则立刻失败。超时文案带 last url。 |
+| 8 | `mouse_click` | `selector`*, `frame` | `{success, x, y, tag, text}` | 坐标级 Input.dispatchMouseEvent，可过 isTrusted 检查。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
+| 9 | `wait` | 恰好 `text`/`selector`/`url` 之一；`gone`；`timeout_ms`(默认 15000，100–120000)；`interval_ms`(默认 200，50–2000), `frame` | `{success, waitedMs, matched}` | 扩展内轮询。@e 不在 ref 表则立刻失败。超时文案带 last url。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 10 | `scroll` | 恰好 `selector` / `to`(top\|bottom) / `direction`(up\|down\|left\|right) 之一；`amount`(number\|"page"，仅 direction，默认 page) | `{success, x, y, maxX, maxY}` | page = 0.9 * innerHeight/innerWidth |
-| 11 | `hover` | `selector`* | `{success, x, y, tag, text}` | Input.dispatchMouseEvent mouseMoved，不过 mousePressed |
+| 11 | `hover` | `selector`*, `frame` | `{success, x, y, tag, text}` | Input.dispatchMouseEvent mouseMoved，不过 mousePressed。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 12 | `key_type` | `text`* | `{success, length}` | `Input.insertText` |
 | 13 | `send_keys` | `keys`* , `repeat`(1-100) | `{success, dispatched, os}` | 支持 `Enter`/`Escape`/`Tab`/`F1-F12`/单字母数字、修饰键 `Alt/Ctrl/Cmd/Meta/Shift/Mod`（Mod 自动解析）、空格分隔多段 |
 | 14 | `cdp` | `method`*, `params` | 原始 CDP 返回 | 裸透传 escape hatch |
-| 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现 |
+| 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
 | 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` |
 | 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}]}` | 仅当前 session |
 | 19 | `close_tab` | — | `{success, closed, reason?}` | 关当前标签 |
 | 20 | `close_session` | — | `{success, closed}` | 关 session 全部标签 |
+| 21 | `list_frames` | — | `{success, frames:[{frameId,parentId,url,name,isolated}]}` | 含顶层帧（`parentId` 为 `""`）。`isolated:true` 的帧本期进不去；无 CDP frameId 的 isolated 帧用 `isolated:<url>` 占位。不含 targetId |
+
+### 4.1 iframe 与 frame 参数（0.6.0 起）
+
+- 进框入口（snapshot 二选一）：`selector` 解析出的节点角色是 iframe/frame → 进其子帧；或 `frame` 非空 → 先按 frameId 精确匹配，再按未截断 frame URL 子串匹配。同时传且对不上 → `iframe: selector and frame do not refer to the same frame`。
+- 匹配 0 个 → `iframe: no frame matching "<value>"`；≥2 个 → `iframe: multiple frames match "<value>": <url1>, <url2>, …`（最多 5 个）。
+- 命中帧 isolated → `iframe: cross-origin frame "<url>" is not supported yet. If it is a full page, navigate to its URL.` 禁止返回成功空树。
+- 同域帧已卸载 / context 失效 → `iframe: frame is gone; run snapshot again`。
+- 进框 snapshot 返回 `{url, title, mode, chars, truncated, tree}`，`url`/`title` 用该帧的（title 没有就 `""`），`max_chars` 作用在该帧 YAML 上。只下一层。
+- ref 表：`RefEntry` 加可选 `frameId`（空 = 顶层）。整页 snapshot 与非 iframe 的 selector 子树 → reset（`@e1` 起）；进帧 snapshot → 不 reset，序号续编，父页旧 `@e` 保留。navigate / 关 tab / 主文档 commit 导航 → 清空 ref 表。
+- `frame` 在七个工具上：`@e` 忽略 `frame`（以 ref 表 frameId 为准）；CSS / evaluate 的 `code` 无 `frame` 在顶层、有 `frame` 在该帧（跨域走跨域错误）。
+- `screenshot`：`fullPage` 与 `selector` 仍互斥；`fullPage + frame` clip 到该 iframe 元素在父页视口里的可见盒（不是子文档完整滚动高度）。
+- `wait`：`url` 仍看 tab URL；`text`/`selector` 在指定帧（或 `@e` 所在帧）轮询。
 
 ## 5. 大结果后处理（daemon 侧）
 
@@ -236,6 +252,9 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - 0.4.0 起 snapshot 默认 `mode=compact`，`tree` 为 YAML 字符串；旧客户端传 `mode=full`。
 - 扩展未实现的工具由 daemon 按 §3.3 改写错误，不发 `tool_call`。
 - `wait` / `scroll` / `hover` 自 0.4.0 引入。
+- `list_frames` 与工具参数 `frame` 自 0.6.0 引入；旧扩展由 daemon 按 §3.3 改写（`frame` 按参数闸）。
+- 对 iframe 的 `@e` 再 snapshot 无法被 daemon 识别：0.5 扩展会拍到空壳，客户端应按 `/status.version` 与 `extension_tools` 规避。
+- 0.6.0 起同域 iframe 可进入；`isolated:true`（跨域 OOPIF、不透明源、sandbox 无 allow-same-origin 等）只列不进。
 
 ## 7. 安全约束
 
