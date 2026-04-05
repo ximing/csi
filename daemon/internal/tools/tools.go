@@ -5,12 +5,14 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 
 	"csi/daemon/internal/backend"
 	"csi/daemon/internal/session"
 )
 
-// 协议 §4 的 20 个工具名。
+// 协议 §4 的 21 个工具名。
 var validTools = map[string]bool{
 	"navigate":      true,
 	"find_tab":      true,
@@ -32,13 +34,17 @@ var validTools = map[string]bool{
 	"list_tabs":     true,
 	"close_tab":     true,
 	"close_session": true,
+	"list_frames":   true,
 }
 
-// toolSince 0.4.0 新增工具：旧扩展未上报 tools 时按此表视为缺失。
+// toolSince 记录各工具/参数引入版本：旧扩展未上报 tools 时按此表视为缺失；
+// "frame" 不是工具，是 0.6.0 起七个旧工具上的新参数闸（协议 §3.3、§4.1）。
 var toolSince = map[string]string{
-	"wait":   "0.4.0",
-	"scroll": "0.4.0",
-	"hover":  "0.4.0",
+	"wait":        "0.4.0",
+	"scroll":      "0.4.0",
+	"hover":       "0.4.0",
+	"list_frames": "0.6.0",
+	"frame":       "0.6.0",
 }
 
 // Inventory 扩展握手上报的版本与工具清单。
@@ -78,14 +84,14 @@ func (e *Executor) Execute(ctx context.Context, action, sess string, args map[st
 	if !Valid(action) {
 		return nil, fmt.Errorf("unknown tool: %s", action)
 	}
-	if err := e.checkExtension(action); err != nil {
-		return nil, err
-	}
 	if sess == "" {
 		sess = "default" // 协议 §2.1：缺省 session 为 "default"
 	}
 	if args == nil {
 		args = map[string]any{}
+	}
+	if err := e.checkExtension(action, args); err != nil {
+		return nil, err
 	}
 
 	// 1. 注入 session 内部字段（协议 §3.4）
@@ -106,7 +112,9 @@ func (e *Executor) Execute(ctx context.Context, action, sess string, args map[st
 
 // checkExtension 对照扩展清单；未实现则不转发，返回升级提示（协议 §3.3）。
 // 未连接时不改写，交给后端返回 extension not connected。
-func (e *Executor) checkExtension(action string) error {
+// frame 闸（协议 §3.3）：0.5 及更早扩展会忽略未知字段，带非空 frame 转发
+// 等于误操作顶层，所以一律拦下。
+func (e *Executor) checkExtension(action string, args map[string]any) error {
 	if e.Inventory == nil || !e.Inventory.Connected() {
 		return nil
 	}
@@ -118,7 +126,7 @@ func (e *Executor) checkExtension(action string) error {
 	if listed != nil {
 		for _, n := range listed {
 			if n == action {
-				return nil
+				return checkFrameGate(ver, true, args)
 			}
 		}
 		return missingTool(ver, action)
@@ -126,7 +134,54 @@ func (e *Executor) checkExtension(action string) error {
 	if _, added := toolSince[action]; added {
 		return missingTool(ver, action)
 	}
+	return checkFrameGate(ver, false, args)
+}
+
+// checkFrameGate：args 带非空 frame 且扩展不够新（未上报 tools 视为不够）→ 不转发。
+func checkFrameGate(ver string, advertised bool, args map[string]any) error {
+	v, ok := args["frame"]
+	if !ok || !framePresent(v) {
+		return nil
+	}
+	if !advertised || semverLess(ver, 0, 6, 0) {
+		return missingTool(ver, "frame")
+	}
 	return nil
+}
+
+// framePresent：null 与空字符串视为未传；非字符串真值（如 true）算已传。
+func framePresent(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return false
+	case string:
+		return t != ""
+	case bool:
+		return t
+	case float64:
+		return t != 0
+	default:
+		return true
+	}
+}
+
+// semverLess 主.次.补比较；解析失败视为不够新（协议 §3.3）。
+func semverLess(ver string, major, minor, patch int) bool {
+	parts := strings.Split(ver, ".")
+	if len(parts) != 3 {
+		return true
+	}
+	want := [3]int{major, minor, patch}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return true
+		}
+		if n != want[i] {
+			return n < want[i]
+		}
+	}
+	return false
 }
 
 func missingTool(ver, action string) error {

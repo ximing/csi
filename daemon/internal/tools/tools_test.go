@@ -98,3 +98,107 @@ func TestDisconnectedWaitIsNotConnected(t *testing.T) {
 		t.Fatalf("backend not reached, called=%q", be.called)
 	}
 }
+
+func TestListFramesOldExtNotForwarded(t *testing.T) {
+	be := &fakeBE{}
+	ex := NewExecutor(be, session.NewManager())
+	ex.Inventory = fakeInv{ver: "0.5.0", tools: []string{"navigate", "snapshot"}}
+	_, err := ex.Execute(context.Background(), "list_frames", "s", nil)
+	if err == nil || !strings.Contains(err.Error(), `does not implement "list_frames"`) {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "need ≥ 0.6.0") {
+		t.Fatalf("err=%v", err)
+	}
+	if be.called != "" {
+		t.Fatalf("backend was called with %q", be.called)
+	}
+}
+
+func TestListFramesUnadvertisedNotForwarded(t *testing.T) {
+	be := &fakeBE{}
+	ex := NewExecutor(be, session.NewManager())
+	ex.Inventory = fakeInv{ver: "0.3.0", tools: nil}
+	_, err := ex.Execute(context.Background(), "list_frames", "s", nil)
+	if err == nil || !strings.Contains(err.Error(), `does not implement "list_frames"`) {
+		t.Fatalf("err=%v", err)
+	}
+	if be.called != "" {
+		t.Fatal("backend called")
+	}
+}
+
+func TestFrameGateOldExtNotForwarded(t *testing.T) {
+	be := &fakeBE{}
+	ex := NewExecutor(be, session.NewManager())
+	ex.Inventory = fakeInv{ver: "0.5.0", tools: []string{"snapshot"}}
+	_, err := ex.Execute(context.Background(), "snapshot", "s", map[string]any{"frame": "pay"})
+	if err == nil || !strings.Contains(err.Error(), `does not implement "frame"`) {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "need ≥ 0.6.0") || !strings.Contains(err.Error(), "Chrome Web Store") {
+		t.Fatalf("err=%v", err)
+	}
+	if be.called != "" {
+		t.Fatal("backend called")
+	}
+}
+
+func TestFrameGateTruthyNonStringBlocked(t *testing.T) {
+	be := &fakeBE{}
+	ex := NewExecutor(be, session.NewManager())
+	ex.Inventory = fakeInv{ver: "0.5.0", tools: []string{"snapshot"}}
+	_, err := ex.Execute(context.Background(), "snapshot", "s", map[string]any{"frame": true})
+	if err == nil || !strings.Contains(err.Error(), `does not implement "frame"`) {
+		t.Fatalf("err=%v", err)
+	}
+	if be.called != "" {
+		t.Fatal("backend called")
+	}
+}
+
+func TestFrameGateEmptyAndNullForwarded(t *testing.T) {
+	for _, v := range []any{"", nil} {
+		be := &fakeBE{}
+		ex := NewExecutor(be, session.NewManager())
+		ex.Inventory = fakeInv{ver: "0.5.0", tools: []string{"snapshot"}}
+		if _, err := ex.Execute(context.Background(), "snapshot", "s", map[string]any{"frame": v}); err != nil {
+			t.Fatalf("frame=%v: %v", v, err)
+		}
+		if be.called != "snapshot" {
+			t.Fatalf("frame=%v: called=%q", v, be.called)
+		}
+	}
+}
+
+func TestFrameGateNewExtForwarded(t *testing.T) {
+	be := &fakeBE{}
+	ex := NewExecutor(be, session.NewManager())
+	ex.Inventory = fakeInv{ver: "0.6.0", tools: []string{"snapshot", "list_frames"}}
+	if _, err := ex.Execute(context.Background(), "snapshot", "s", map[string]any{"frame": "pay"}); err != nil {
+		t.Fatal(err)
+	}
+	if be.called != "snapshot" {
+		t.Fatalf("called=%q", be.called)
+	}
+}
+
+func TestFrameGateUnparsableVersionBlocked(t *testing.T) {
+	be := &fakeBE{}
+	ex := NewExecutor(be, session.NewManager())
+	ex.Inventory = fakeInv{ver: "dev-build", tools: []string{"snapshot"}}
+	_, err := ex.Execute(context.Background(), "snapshot", "s", map[string]any{"frame": "pay"})
+	if err == nil || !strings.Contains(err.Error(), `does not implement "frame"`) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestFrameGateUnadvertisedBlocked(t *testing.T) {
+	be := &fakeBE{}
+	ex := NewExecutor(be, session.NewManager())
+	ex.Inventory = fakeInv{ver: "0.3.0", tools: nil}
+	_, err := ex.Execute(context.Background(), "snapshot", "s", map[string]any{"frame": "pay"})
+	if err == nil || !strings.Contains(err.Error(), `does not implement "frame"`) {
+		t.Fatalf("err=%v", err)
+	}
+}
