@@ -9,7 +9,7 @@
 //	status     查询运行状态
 //	autostart  登录自启（status | on | off；默认 status）
 //	version    打印版本
-//	mcp        stdio MCP server（20 个浏览器工具，转发到本机 daemon）
+//	mcp        stdio MCP server（21 个浏览器工具，转发到本机 daemon）
 package main
 
 import (
