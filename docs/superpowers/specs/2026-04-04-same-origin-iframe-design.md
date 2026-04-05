@@ -1,7 +1,7 @@
 # 0.6.0 同域 iframe 穿透
 
 日期：2026-04-04
-状态：待确认
+状态：已确认
 版本：0.6.0（协议 bump）。本文件取代 `2026-03-30-agent-reliability-design.md` 的 **C.1**。C.2 对话框、C.3 下载仍在那份里，**不在本期**。
 
 可行性与成本审查（2026-04-04）：同域、未 sandbox 的 iframe 在 `chrome.debugger.attach({tabId})` 上可行；默认不下行则 token 与 0.4 同量级，进框比 `navigate` 进 src 更省轮数。下列条款已吸收审查结论（坐标、isolated 判定、`list_frames` 发现源、iframe `@e`）。
