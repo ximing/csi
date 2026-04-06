@@ -38,6 +38,7 @@ export async function ensureAttached(tabId: number): Promise<void> {
     // not attached — fine
   }
   await chrome.debugger.attach({ tabId }, DEBUGGER_PROTOCOL_VERSION);
+  await chrome.debugger.sendCommand({ tabId }, 'Page.enable', {});
   attachedTabIds.add(tabId);
   attachedTabId = tabId;
 }

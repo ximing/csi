@@ -7,6 +7,7 @@
 import type { ToolArgs } from '../../shared/messages';
 import type { Tool } from './types';
 import { ensureAttached, sendCommand, setLastUserTabId } from '../debugger-session';
+import { resetRefs } from '../refs';
 import { getTrackedTab } from '../tab-manager';
 import { addToSessionGroup } from '../tab-group';
 
@@ -18,6 +19,9 @@ export class NavigateTool implements Tool {
   async execute(args: ToolArgs): Promise<unknown> {
     const url = args.url as string | undefined;
     if (!url) throw new Error('navigate: url is required');
+
+    // 导航后旧 @e 全部失效（协议 §4.1）
+    resetRefs();
 
     const newTab = args.newTab as boolean | undefined;
     const session = args._session;
