@@ -9,7 +9,7 @@
  *   →
  *   - heading "Sign in" [level=1]
  *   - textbox "Email" [ref=@e1]
- *   - iframe "reCAPTCHA" [src=https://www.google.com/recaptcha/…]
+ *   - iframe "reCAPTCHA" [src=https://www.google.com/recaptcha/…] [isolated] [ref=@e2]
  *
  * Example 2 — text already in the nearest ancestor name is dropped:
  *
@@ -45,6 +45,7 @@ export type CompactNode = {
   expanded?: boolean;
   disabled?: boolean;
   invalid?: boolean;
+  isolated?: boolean;
   src?: string;
   children?: CompactNode[];
 };
@@ -53,7 +54,7 @@ export const STRUCTURAL_ROLES = new Set([
   'heading', 'paragraph', 'list', 'listitem', 'navigation', 'main',
   'banner', 'contentinfo', 'complementary', 'form', 'article', 'region',
   'img', 'table', 'row', 'rowheader', 'columnheader', 'cell', 'caption',
-  'blockquote', 'separator', 'status', 'alert', 'dialog', 'iframe', 'text',
+  'blockquote', 'separator', 'status', 'alert', 'dialog', 'iframe', 'frame', 'text',
 ]);
 
 const NAME_LIMIT = 120;
@@ -66,6 +67,8 @@ export function compactFromAx(
   nodes: AxNode[],
   mode: 'compact' | 'interactive',
   includeRoot = false,
+  frameId?: string,
+  isolatedSrcs?: Set<string>,
 ): CompactNode[] {
   if (nodes.length === 0) return [];
   const byId = new Map<string, AxNode>();
@@ -75,8 +78,8 @@ export function compactFromAx(
   // that node would copy the title into nearestName and wipe matching text.
   // Unscoped: children only (same as full's formatChildren). Selector: include self.
   const formatted = includeRoot
-    ? formatNode(root, byId, '')
-    : collectChildren(root, byId, '', normalizeRole(rawRole(root)));
+    ? formatNode(root, byId, '', frameId, isolatedSrcs)
+    : collectChildren(root, byId, '', normalizeRole(rawRole(root)), frameId, isolatedSrcs);
   const roots = asList(formatted);
   return mode === 'interactive' ? flattenInteractive(roots) : roots;
 }
@@ -111,6 +114,8 @@ function formatNode(
   node: AxNode,
   byId: Map<string, AxNode>,
   nearestName: string,
+  frameId?: string,
+  isolatedSrcs?: Set<string>,
 ): CompactNode | CompactNode[] | null {
   const role = normalizeRole(rawRole(node));
   const name = axString(node.name?.value);
@@ -119,11 +124,11 @@ function formatNode(
   const isStructural = STRUCTURAL_ROLES.has(role);
 
   if (role === 'text' && name && nearestName.includes(name)) {
-    return collectChildren(node, byId, nextNearest, role);
+    return collectChildren(node, byId, nextNearest, role, frameId, isolatedSrcs);
   }
 
   if (!isInteractive && !isStructural) {
-    return collectChildren(node, byId, nextNearest, role);
+    return collectChildren(node, byId, nextNearest, role, frameId, isolatedSrcs);
   }
 
   const result: CompactNode = { role };
@@ -148,11 +153,19 @@ function formatNode(
     if (url) result.src = url.length > SRC_LIMIT ? url.slice(0, SRC_LIMIT) : url;
   }
 
-  if (isInteractive) {
-    result.ref = `@${assignRef(node.backendDOMNodeId!, role, name)}`;
+  const isFrameRole = role === 'iframe' || role === 'frame';
+  if (isFrameRole && node.backendDOMNodeId != null) {
+    // iframe/frame 也进 ref 表（协议 §4.1：snapshot({selector:"@eN"}) 进框入口）
+    result.ref = `@${assignRef(node.backendDOMNodeId, role, name, frameId)}`;
+    const full = axString(propValue(node, 'url'));
+    if (full && isolatedSrcs?.has(full)) result.isolated = true;
   }
 
-  const children = collectChildren(node, byId, nextNearest, role);
+  if (isInteractive) {
+    result.ref = `@${assignRef(node.backendDOMNodeId!, role, name, frameId)}`;
+  }
+
+  const children = collectChildren(node, byId, nextNearest, role, frameId, isolatedSrcs);
   const childList = asList(children);
   if (childList.length > 0) result.children = childList;
 
@@ -167,13 +180,15 @@ function collectChildren(
   byId: Map<string, AxNode>,
   nearestName: string,
   role: string,
+  frameId?: string,
+  isolatedSrcs?: Set<string>,
 ): CompactNode | CompactNode[] | null {
-  if (role === 'iframe' || !node.childIds?.length) return null;
+  if (role === 'iframe' || role === 'frame' || !node.childIds?.length) return null;
   const children: CompactNode[] = [];
   for (const childId of node.childIds) {
     const child = byId.get(childId);
     if (!child) continue;
-    const formatted = formatNode(child, byId, nearestName);
+    const formatted = formatNode(child, byId, nearestName, frameId, isolatedSrcs);
     if (!formatted) continue;
     if (Array.isArray(formatted)) children.push(...formatted);
     else children.push(formatted);
@@ -208,6 +223,7 @@ function formatLine(node: CompactNode, depth: number): string {
   if (node.expanded) parts.push('[expanded]');
   if (node.disabled) parts.push('[disabled]');
   if (node.invalid) parts.push('[invalid]');
+  if (node.isolated) parts.push('[isolated]');
   if (node.src) parts.push(`[src=${node.src}]`);
   if (node.ref) parts.push(`[ref=${node.ref}]`);
   let line = parts.join(' ');
