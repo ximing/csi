@@ -1,13 +1,16 @@
 /**
  * The `@eN` reference table produced by `snapshot` and consumed by
  * selector-taking tools (click/fill/mouse_click/screenshot). Refs map to
- * CDP backendDOMNodeIds and are reset on every snapshot.
+ * CDP backendDOMNodeIds and are reset on full-page / subtree snapshot,
+ * navigation, tab close; frame snapshots append（协议 §4.1）.
  */
 
 export interface RefEntry {
   backendDOMNodeId: number;
   role: string;
   name: string;
+  /** 所在帧的 CDP frameId；空/缺省 = 顶层帧（协议 §4.1）。 */
+  frameId?: string;
 }
 
 /** Roles that get an @eN ref in snapshots (protocol §4, snapshot). */
@@ -40,9 +43,14 @@ export function resetRefs(): void {
 }
 
 /** Assign the next ref id (`e1`, `e2`, ...) — callers prefix with `@`. */
-export function assignRef(backendDOMNodeId: number, role: string, name: string): string {
+export function assignRef(
+  backendDOMNodeId: number,
+  role: string,
+  name: string,
+  frameId?: string,
+): string {
   const ref = `e${refCounter++}`;
-  refTable.set(ref, { backendDOMNodeId, role, name });
+  refTable.set(ref, { backendDOMNodeId, role, name, frameId });
   return ref;
 }
 
