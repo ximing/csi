@@ -6,6 +6,8 @@ import type { Tool } from './types';
 import { ensureAttached, sendCommand } from '../debugger-session';
 import { getCurrentTab } from '../tab-manager';
 import { isRefSelector, lookupRef } from '../refs';
+import { parseFrameArg } from './element';
+import { resolveFrame, contextIdForFrame } from '../frames';
 
 const CLICK_FN = `function() {
   this.scrollIntoView({ block: 'center' });
@@ -20,9 +22,15 @@ export class ClickTool implements Tool {
     const selector = args.selector as string | undefined;
     if (!selector) throw new Error('click: selector is required (CSS selector or @e ref)');
     await ensureAttached((await getCurrentTab()).id!);
+    const frameArg = parseFrameArg(this.name, args.frame);
+    // @e 忽略 frame（ref 自带帧）；CSS 才解析
+    const frameId =
+      frameArg && !isRefSelector(selector)
+        ? (await resolveFrame(frameArg)).frameId
+        : undefined;
     return isRefSelector(selector)
       ? this.clickByRef(selector)
-      : this.clickBySelector(selector);
+      : this.clickBySelector(selector, frameId);
   }
 
   private async clickByRef(selector: string): Promise<unknown> {
@@ -48,7 +56,7 @@ export class ClickTool implements Tool {
     return result.result.value || { success: true };
   }
 
-  private async clickBySelector(selector: string): Promise<unknown> {
+  private async clickBySelector(selector: string, frameId?: string): Promise<unknown> {
     const result = await sendCommand<{
       exceptionDetails?: { text: string };
       result: { value?: { error?: string } | unknown };
@@ -62,6 +70,7 @@ export class ClickTool implements Tool {
       })()`,
       returnByValue: true,
       awaitPromise: false,
+      ...(frameId ? { contextId: await contextIdForFrame(frameId) } : {}),
     });
     if (result.exceptionDetails) throw new Error(`click: ${result.exceptionDetails.text}`);
     const value = result.result.value as { error?: string } | undefined;

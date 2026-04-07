@@ -7,7 +7,8 @@ import type { Tool } from './types';
 import { ensureAttached, sendCommand } from '../debugger-session';
 import { getCurrentTab } from '../tab-manager';
 import { isRefSelector, lookupRef } from '../refs';
-import { resolveObjectId } from './element';
+import { parseFrameArg, resolveObjectId } from './element';
+import { resolveFrame, contextIdForFrame } from '../frames';
 
 type WaitKind = 'text' | 'selector' | 'url';
 
@@ -49,13 +50,22 @@ export class WaitTool implements Tool {
     const currentId = tab.id!;
     await ensureAttached(currentId);
 
+    // frameArg 在进循环之前解析成 frameId（resolveFrame 的错误要立刻抛，不能被轮询吃掉）。
+    // @e 忽略 frame（ref 自带帧）；url 不看 frame（仍看 tab URL，协议 §4.1）。
+    const frameArg = parseFrameArg(this.name, args.frame);
+    const isRefSel = picked.kind === 'selector' && isRefSelector(picked.value);
+    const frameId =
+      frameArg && picked.kind !== 'url' && !isRefSel
+        ? (await resolveFrame(frameArg)).frameId
+        : undefined;
+
     const kindLabel = gone ? `gone:${picked.kind}` : picked.kind;
     const matched = `${kindLabel}:${picked.value}`;
 
     const start = Date.now();
     const deadline = start + timeout;
     while (true) {
-      const hit = await this.check(picked.kind, picked.value, currentId);
+      const hit = await this.check(picked.kind, picked.value, currentId, frameId);
       if (gone ? !hit : hit) {
         return { success: true, waitedMs: Date.now() - start, matched };
       }
@@ -74,11 +84,16 @@ export class WaitTool implements Tool {
     );
   }
 
-  private async check(kind: WaitKind, value: string, currentId: number): Promise<boolean> {
+  private async check(
+    kind: WaitKind,
+    value: string,
+    currentId: number,
+    frameId?: string,
+  ): Promise<boolean> {
     try {
       if (kind === 'url') return await checkUrl(currentId, value);
-      if (kind === 'text') return await checkText(value);
-      return await checkSelector(value);
+      if (kind === 'text') return await checkText(value, frameId);
+      return await checkSelector(value, frameId);
     } catch {
       return false;
     }
@@ -119,25 +134,28 @@ async function checkUrl(currentId: number, needle: string): Promise<boolean> {
   return (tab.url ?? '').includes(needle);
 }
 
-async function checkText(needle: string): Promise<boolean> {
+async function checkText(needle: string, frameId?: string): Promise<boolean> {
+  const params: Record<string, unknown> = {
+    expression: `document.body && document.body.innerText.includes(${JSON.stringify(needle)})`,
+    returnByValue: true,
+  };
+  if (frameId) params.contextId = await contextIdForFrame(frameId);
   const result = await sendCommand<{
     exceptionDetails?: { text: string };
     result?: { value?: unknown };
-  }>('Runtime.evaluate', {
-    expression: `document.body && document.body.innerText.includes(${JSON.stringify(needle)})`,
-    returnByValue: true,
-  });
+  }>('Runtime.evaluate', params);
   if (!result.exceptionDetails && result.result?.value === true) return true;
 
   const { nodes } = await sendCommand<{ nodes?: { name?: { value?: unknown } }[] }>(
     'Accessibility.getFullAXTree',
+    frameId ? { frameId } : undefined,
   );
   return (nodes ?? []).some(
     (node) => typeof node.name?.value === 'string' && node.name.value.includes(needle),
   );
 }
 
-async function checkSelector(selector: string): Promise<boolean> {
+async function checkSelector(selector: string, frameId?: string): Promise<boolean> {
   let objectId: string | undefined;
   if (isRefSelector(selector)) {
     try {
@@ -146,13 +164,15 @@ async function checkSelector(selector: string): Promise<boolean> {
       return false;
     }
   } else {
+    const params: Record<string, unknown> = {
+      expression: `document.querySelector(${JSON.stringify(selector)})`,
+      returnByValue: false,
+    };
+    if (frameId) params.contextId = await contextIdForFrame(frameId);
     const result = await sendCommand<{
       exceptionDetails?: { text: string };
       result?: { subtype?: string; objectId?: string };
-    }>('Runtime.evaluate', {
-      expression: `document.querySelector(${JSON.stringify(selector)})`,
-      returnByValue: false,
-    });
+    }>('Runtime.evaluate', params);
     if (result.exceptionDetails || result.result?.subtype === 'null' || !result.result?.objectId) {
       return false;
     }

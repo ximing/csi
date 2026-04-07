@@ -1,12 +1,17 @@
 /**
  * hover (protocol §4.11): trusted-path mouseMoved at the element's
  * box-model center — CSS :hover menus without a click. No mousePressed.
+ *
+ * frame 内元素坐标同样是根视口像素，禁止累加 iframe 盒（DOM.getBoxModel
+ * 返回的是根视口 CSS 像素，Input.dispatchMouseEvent 也以根视口为原点）。
  */
 import type { ToolArgs } from '../../shared/messages';
 import type { Tool } from './types';
 import { ensureAttached, sendCommand } from '../debugger-session';
 import { getCurrentTab } from '../tab-manager';
-import { resolveObjectId, scrollIntoView } from './element';
+import { isRefSelector } from '../refs';
+import { parseFrameArg, resolveObjectId, scrollIntoView } from './element';
+import { resolveFrame } from '../frames';
 
 const NO_BOX_ERROR =
   'hover: element has no layout box (display:none / detached / zero-size).';
@@ -19,7 +24,14 @@ export class HoverTool implements Tool {
     if (!selector) throw new Error('hover: selector is required (CSS selector or @e ref)');
     await ensureAttached((await getCurrentTab()).id!);
 
-    const objectId = await resolveObjectId(this.name, selector);
+    const frameArg = parseFrameArg(this.name, args.frame);
+    // @e 忽略 frame（ref 自带帧）；CSS 才解析
+    const frameId =
+      frameArg && !isRefSelector(selector)
+        ? (await resolveFrame(frameArg)).frameId
+        : undefined;
+
+    const objectId = await resolveObjectId(this.name, selector, frameId);
     await scrollIntoView(objectId);
 
     let boxModel: { model?: { content?: number[] } };

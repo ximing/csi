@@ -2,12 +2,17 @@
  * mouse_click (protocol §4.8): trusted-path clicking via
  * Input.dispatchMouseEvent at the element's box-model center — passes
  * isTrusted checks that DOM-level click() cannot.
+ *
+ * frame 内元素坐标同样是根视口像素，禁止累加 iframe 盒（DOM.getBoxModel
+ * 返回的是根视口 CSS 像素，Input.dispatchMouseEvent 也以根视口为原点）。
  */
 import type { ToolArgs } from '../../shared/messages';
 import type { Tool } from './types';
 import { ensureAttached, sendCommand } from '../debugger-session';
 import { getCurrentTab } from '../tab-manager';
-import { resolveObjectId, scrollIntoView } from './element';
+import { isRefSelector } from '../refs';
+import { parseFrameArg, resolveObjectId, scrollIntoView } from './element';
+import { resolveFrame } from '../frames';
 
 const NO_BOX_ERROR =
   "mouse_click: element has no layout box (display:none / detached / zero-size). Use 'click' for DOM-level fallback.";
@@ -20,7 +25,14 @@ export class MouseClickTool implements Tool {
     if (!selector) throw new Error('mouse_click: selector is required (CSS selector or @e ref)');
     await ensureAttached((await getCurrentTab()).id!);
 
-    const objectId = await resolveObjectId(this.name, selector);
+    const frameArg = parseFrameArg(this.name, args.frame);
+    // @e 忽略 frame（ref 自带帧）；CSS 才解析
+    const frameId =
+      frameArg && !isRefSelector(selector)
+        ? (await resolveFrame(frameArg)).frameId
+        : undefined;
+
+    const objectId = await resolveObjectId(this.name, selector, frameId);
     await scrollIntoView(objectId);
 
     let boxModel: { model?: { content?: number[] } };
