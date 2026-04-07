@@ -16,24 +16,25 @@ Control the user's real Chrome browser (with their login sessions) via a local d
 |------|------|---------|------|
 | `navigate` | `url`*, `newTab`(bool), `group_title` | `{success, url, tabId, frameId?}` | First call opens a tab — see [Tabs](#tabs-and-the-current-tab). `group_title` sets the group's visible label. Waits for page load (30s timeout) |
 | `find_tab` | `url`*, `active`(bool) | `{success, url, tabId, borrowed}` | Re-select a tab **this session** opened; `active:true` borrows the tab the **user** is viewing — see [Tabs](#tabs-and-the-current-tab) |
-| `snapshot` | `mode`(compact/interactive/full), `selector`, `max_chars` | `{url,title,mode,chars,truncated,tree}` | 默认 compact YAML，可交互带 @e。truncated 时换 interactive 或对容器传 selector。调试才用 full |
-| `click` | `selector`* (@e ref or CSS) | `{success, tag, text}` | Synthetic DOM-level `el.click()` |
-| `fill` | `selector`*, `value`* | `{success, tag, mode}` | Works on `<input>`/`<textarea>` AND `[contenteditable]` (ProseMirror/Lexical/Slate). `mode` is `"value"` or `"contenteditable"` |
-| `evaluate` | `code`* (supports async/await) | `{type, value}` | `Runtime.evaluate` with `awaitPromise:true` |
+| `snapshot` | `mode`(compact/interactive/full), `selector`, `max_chars`, `frame` | `{url,title,mode,chars,truncated,tree}` | 默认 compact YAML，可交互带 @e。truncated 时换 interactive 或对容器传 selector。调试才用 full |
+| `click` | `selector`* (@e ref or CSS), `frame` | `{success, tag, text}` | Synthetic DOM-level `el.click()` |
+| `fill` | `selector`*, `value`*, `frame` | `{success, tag, mode}` | Works on `<input>`/`<textarea>` AND `[contenteditable]` (ProseMirror/Lexical/Slate). `mode` is `"value"` or `"contenteditable"` |
+| `evaluate` | `code`* (supports async/await), `frame` | `{type, value}` | `Runtime.evaluate` with `awaitPromise:true` |
 | `network` | `cmd`* (start\|stop\|list\|detail), `filter`, `requestId` | request/response data | `detail` returns `{requestId, url, method, status, mimeType, base64Encoded, body}` |
-| `mouse_click` | `selector`* (@e ref or CSS) | `{success, x, y, tag, text}` | Coordinate-level `Input.dispatchMouseEvent` — passes `isTrusted` checks |
-| `wait` | 恰好 `text`/`selector`/`url` 之一；`gone`；`timeout_ms`；`interval_ms` | `{success,waitedMs,matched}` | 一次调用，扩展内轮询。优先 text 或 CSS；@e 不在表里会立刻失败 |
+| `mouse_click` | `selector`* (@e ref or CSS), `frame` | `{success, x, y, tag, text}` | Coordinate-level `Input.dispatchMouseEvent` — passes `isTrusted` checks |
+| `wait` | 恰好 `text`/`selector`/`url` 之一；`gone`；`timeout_ms`；`interval_ms`；`frame` | `{success,waitedMs,matched}` | 一次调用，扩展内轮询。优先 text 或 CSS；@e 不在表里会立刻失败 |
 | `scroll` | 恰好 `selector` / `to` / `direction` 之一；`amount` | `{success,x,y,maxX,maxY}` | page = 0.9 视口。maxY=0 表示不能再往下滚 |
-| `hover` | `selector`* | `{success,x,y,tag,text}` | CSS :hover 菜单。不是 DOM mouseover |
+| `hover` | `selector`*, `frame` | `{success,x,y,tag,text}` | CSS :hover 菜单。不是 DOM mouseover |
 | `key_type` | `text`* | `{success, length}` | `Input.insertText` — types text at the focused element |
 | `send_keys` | `keys`*, `repeat`(1-100) | `{success, dispatched, os}` | `Enter`/`Escape`/`Tab`/`F1-F12`/single letters+digits, modifiers `Alt/Ctrl/Cmd/Meta/Shift/Mod` (`Mod` auto-resolves to Cmd on macOS, Ctrl elsewhere), space-separated combos — see [Special keys](#form-submit--special-keys) |
 | `cdp` | `method`*, `params` | raw CDP response | Raw CDP passthrough — what `evaluate` is to JS, `cdp` is to CDP. Low-level escape hatch for cases the tools above don't cover |
-| `screenshot` | `format`(png\|jpeg), `quality`(0-100), optional `selector` (@e/CSS), optional `fullPage`, optional `path` | `{format, path, sizeBytes, mimeType}` | Returns a file path, not base64 — see [Screenshots](#screenshots). `fullPage` and `selector` are mutually exclusive |
+| `screenshot` | `format`(png\|jpeg), `quality`(0-100), optional `selector` (@e/CSS), optional `fullPage`, optional `path`, optional `frame` | `{format, path, sizeBytes, mimeType}` | Returns a file path, not base64 — see [Screenshots](#screenshots). `fullPage` and `selector` are mutually exclusive |
 | `save_as_pdf` | `paper_format`, `landscape`, `scale`, `print_background`, `file_name`, optional `path` | `{path, sizeBytes, mimeType, pageTitle}` | Render current page → PDF, returns a file path — see [Save as PDF](#save-the-current-page-as-pdf) |
 | `upload` | `selector`*, `files`*(string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` on a file input |
 | `list_tabs` | — | `{success, tabs:[{tabId, url, title, active, groupTitle}]}` | Inspect tabs in the current session |
 | `close_tab` | — | `{success, closed, reason?}` | Close the current tab in the session |
 | `close_session` | — | `{success, closed}` | Close all tabs in the session — see [Sessions](#sessions) for when to call |
+| `list_frames` | — | `{success, frames:[{frameId,parentId,url,name,isolated}]}` | 列当前 tab 全部帧（含顶层）。辅助工具：歧义排查、看 name/完整 URL/isolated。**不是**进框前置步骤 |
 
 `*` marks required args.
 
@@ -122,6 +123,16 @@ Fall back to `evaluate` (JS) only when:
 - You need attributes not in the snapshot (e.g., `href`)
 - You need to dispatch complex event sequences
 
+## Iframes
+
+- 整页 snapshot 里 iframe 仍是一行（不下行），但带 `[ref=@eN]`；跨域行带 `[isolated]`。
+- 同域 iframe 行（**没有** `[isolated]`）：对该 `@e` 再 `snapshot`（`selector` 传那个 ref），返回只含那一帧的 YAML，里面的控件带新 `@e`，直接 click/fill。进框后父页旧 `@e` 仍然有效；点父页失败再重拍父页，不要每次进出都重拍。
+- 或 `snapshot({frame: "<未截断 URL 子串或 frameId>"})`。嵌套场景已知内层完整 URL 时可跳过中间层。**不要**用行里截到 80 字符的 `src` 当 `frame=`；优先 `@e`。**不要**编造 CDP frameId。
+- 之后 click/fill/hover/mouse_click/wait/screenshot **不必**传 `frame`（`@e` 自带帧）；只有 CSS 选择器 / `evaluate` 要进框时才传 `frame=`。
+- `[isolated]` 行：本期进不去。src 是完整页面就 `navigate` 进去；否则告诉用户这期不支持跨域框。对 isolated 帧 snapshot/click 会得到 `iframe: cross-origin frame ...`。
+- `list_frames` 只在需要排查时用（`frame=` 多命中、看 `name`、看完整 URL / `isolated`），不是每次进框的前置。
+- `/status.version` < 0.6.0 或 `extension_tools` 没有 `list_frames`：不要对 iframe `@e` 再 snapshot（旧扩展会拍空壳），退回 `navigate` 进 src。
+
 ## Evaluate Tips
 
 - Always use compact `JSON.stringify(data)` — never add `null, 2` formatting. Indentation and newlines can inflate the response several times over, causing truncation during transmission.
@@ -184,7 +195,7 @@ Decoded PDF cap is 100 MB. Above that the daemon refuses; reduce `scale` or spli
 ## Known limitations
 
 - **Sites that strictly check `event.isTrusted`** (some banking portals, captchas) ignore `click` / `fill` because those fire DOM-level synthetic events (`isTrusted=false`). Use `mouse_click` instead — it dispatches trusted input events at the coordinate level via CDP. For CSS `:hover` menus, use `hover`.
-- **Cross-origin iframes**: 0.4 只在 snapshot 里露出一行 iframe，不下行；要操作请 navigate 进 iframe URL.
+- **Cross-origin iframes**: 0.6 只列出（`[isolated]` / `list_frames` 的 `isolated:true`），进不去；整页型嵌入请 navigate 进 iframe URL。同域 iframe 可直接进入 — see [Iframes](#iframes)。
 
 ## If a tool call fails (daemon not ready)
 

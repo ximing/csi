@@ -8,7 +8,7 @@ export const en = {
     title: 'AI investigates the browser crime scene',
     subtitle: 'Let AI drive the Chrome you already use — with your real login sessions — to navigate, click, type, screenshot, and read pages.',
     ctaStart: 'Quick start',
-    ctaTools: 'See the 20 tools',
+    ctaTools: 'See the 21 tools',
   },
   heroDemo: {
     prompt: 'curl -X POST 127.0.0.1:10088/command',
@@ -46,7 +46,7 @@ export const en = {
       cmd3: 'fill → @e17 "Pro"',
       reading: 'reading page structure…',
       searching: '3 matches found…',
-      answer: 'AI: Pro plan $29/mo, includes 20 tools + e2e suites',
+      answer: 'AI: Pro plan $29/mo, includes 21 tools + e2e suites',
       pageUrl: 'acme.example.com/pricing',
       priceLabel: 'Pro · $29/mo',
     },
@@ -73,7 +73,7 @@ export const en = {
     },
   },
   tools: {
-    title: '20 investigation tools',
+    title: '21 investigation tools',
     subtitle: 'Covering the full browser interaction chain — exact contract in protocol.md §4',
   },
   quickstart: {

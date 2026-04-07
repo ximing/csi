@@ -101,7 +101,7 @@ The installer also copies two Claude Code skills to `~/.claude/skills/`: `csi` (
 
 ## MCP server
 
-`csi mcp` runs a stdio MCP server exposing all 20 browser tools. It is a thin proxy: each tool call is forwarded to the local daemon's `POST /command` (same `CSI_PORT`, default 10088), so the daemon must be running (`csi start`).
+`csi mcp` runs a stdio MCP server exposing all 21 browser tools. It is a thin proxy: each tool call is forwarded to the local daemon's `POST /command` (same `CSI_PORT`, default 10088), so the daemon must be running (`csi start`).
 
 Mount it in Claude Code:
 
@@ -193,7 +193,7 @@ The package manifest in [`package.json`](package.json) declares the `skills/` di
 
 ## Tools
 
-20 tools: `navigate`, `find_tab`, `snapshot` (default compact YAML accessibility tree with `@e` refs), `click`, `fill` (inputs + contenteditable), `evaluate`, `network`, `mouse_click` (trusted coordinate-level clicks), `wait`, `scroll`, `hover`, `key_type`, `send_keys`, `cdp` (raw passthrough), `screenshot`, `save_as_pdf`, `upload`, `list_tabs`, `close_tab`, `close_session`. See [docs/protocol.md](docs/protocol.md) §4 for the exact contract.
+21 tools: `navigate`, `find_tab`, `snapshot` (default compact YAML accessibility tree with `@e` refs), `click`, `fill` (inputs + contenteditable), `evaluate`, `network`, `mouse_click` (trusted coordinate-level clicks), `wait`, `scroll`, `hover`, `key_type`, `send_keys`, `cdp` (raw passthrough), `screenshot`, `save_as_pdf`, `upload`, `list_tabs`, `close_tab`, `close_session`, `list_frames`. See [docs/protocol.md](docs/protocol.md) §4 for the exact contract.
 
 ## Directory layout
 

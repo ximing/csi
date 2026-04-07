@@ -48,9 +48,9 @@ Never run `stop` / `restart` / `uninstall` / `autostart on` / `autostart off` on
 
 Also do not "fix" version mismatches yourself:
 
-1. If the error contains `does not implement` → tell the user to upgrade the extension (Chrome Web Store, or reload `~/.csi/extension`). Do not start/stop/restart.
-2. If the error is `unknown tool` and `/status.version` is < 0.4.0 → tell the user to upgrade the daemon (GitHub Release / installer).
-3. Do not try to align versions yourself.
+1. If the error contains `does not implement` (including `"list_frames"` or `"frame"`, need ≥ 0.6.0) → tell the user to upgrade the extension (Chrome Web Store, or reload `~/.csi/extension`). Do not start/stop/restart.
+2. If the error is `unknown tool` and `/status.version` is < 0.6.0 → tell the user to upgrade the daemon (GitHub Release / installer).
+3. 不要自己「对齐版本」。
 
 ## /status JSON fields
 
