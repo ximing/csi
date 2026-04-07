@@ -2,7 +2,7 @@
 
 ## 这个目录负责什么
 
-Chrome MV3 扩展（TypeScript）：作为 WS **客户端**主动连 daemon，在真实 Chrome 里通过 CDP debugger API 执行协议 §4 的 20 个工具。
+Chrome MV3 扩展（TypeScript）：作为 WS **客户端**主动连 daemon，在真实 Chrome 里通过 CDP debugger API 执行协议 §4 的 21 个工具。
 
 ## 结构
 

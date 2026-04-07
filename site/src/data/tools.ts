@@ -25,4 +25,5 @@ export const tools: Tool[] = [
   { name: 'list_tabs', zh: '列出当前所有标签页', en: 'List all open tabs' },
   { name: 'close_tab', zh: '关闭指定标签页', en: 'Close a specific tab' },
   { name: 'close_session', zh: '关闭整个 session 的标签页', en: 'Close all tabs in a session' },
+  { name: 'list_frames', zh: '列出全部帧，跨域标 isolated', en: 'List all frames; cross-origin marked isolated' },
 ]
