@@ -1,5 +1,5 @@
 /**
- * Background service worker entry: registers the 20 tools, starts the
+ * Background service worker entry: registers the 21 tools, starts the
  * daemon WebSocket client, wires the reconcile alarm, and answers popup
  * runtime messages.
  */
