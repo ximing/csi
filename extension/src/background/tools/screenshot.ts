@@ -7,7 +7,9 @@ import type { ToolArgs } from '../../shared/messages';
 import type { Tool } from './types';
 import { ensureAttached, sendCommand } from '../debugger-session';
 import { getCurrentTab } from '../tab-manager';
-import { resolveObjectId, scrollIntoView } from './element';
+import { isRefSelector } from '../refs';
+import { parseFrameArg, resolveObjectId, scrollIntoView } from './element';
+import { resolveFrame, FRAME_GONE_ERROR } from '../frames';
 
 const NO_BOX_ERROR =
   'screenshot: element has no layout box (display:none / detached / zero-size).';
@@ -32,17 +34,61 @@ export class ScreenshotTool implements Tool {
       throw new Error('screenshot: fullPage and selector are mutually exclusive');
     }
 
+    const frameArg = parseFrameArg(this.name, args.frame);
+    // @e 忽略 frame（ref 自带帧）；CSS 才解析
+    const frameId =
+      frameArg && selector && !isRefSelector(selector)
+        ? (await resolveFrame(frameArg)).frameId
+        : undefined;
+
     let shot: { data: string };
     if (selector) {
       const params: CaptureParams = { format };
       if (quality !== undefined) params.quality = quality;
 
-      const objectId = await resolveObjectId(this.name, selector);
+      const objectId = await resolveObjectId(this.name, selector, frameId);
       await scrollIntoView(objectId);
 
       let boxModel: { model?: { border?: number[] } };
       try {
         boxModel = await sendCommand('DOM.getBoxModel', { objectId });
+      } catch (err) {
+        throw new Error(`${NO_BOX_ERROR} (CDP: ${(err as Error).message})`);
+      }
+      const border = boxModel.model?.border;
+      if (!border || border.length < 8) throw new Error(NO_BOX_ERROR);
+
+      const xs = [border[0]!, border[2]!, border[4]!, border[6]!];
+      const ys = [border[1]!, border[3]!, border[5]!, border[7]!];
+      const x = Math.min(...xs);
+      const y = Math.min(...ys);
+      const width = Math.max(...xs) - x;
+      const height = Math.max(...ys) - y;
+      if (width <= 0 || height <= 0) {
+        throw new Error(`screenshot: element has zero-size box (width=${width}, height=${height}).`);
+      }
+      params.clip = { x, y, width, height, scale: 1 };
+      shot = await sendCommand<{ data: string }>('Page.captureScreenshot', params);
+    } else if (fullPage && frameArg) {
+      // fullPage + frame（无 selector）：clip 到该 iframe 元素在父页视口里的可见盒，
+      // 不开 captureBeyondViewport（协议 §4.1）。
+      const frameId = (await resolveFrame(frameArg)).frameId;
+      const { backendNodeId } = await sendCommand<{ backendNodeId: number }>(
+        'DOM.getFrameOwner',
+        { frameId },
+      );
+      const { object } = await sendCommand<{ object?: { objectId?: string } }>(
+        'DOM.resolveNode',
+        { backendNodeId },
+      );
+      if (!object?.objectId) throw new Error(FRAME_GONE_ERROR);
+
+      const params: CaptureParams = { format };
+      if (quality !== undefined) params.quality = quality;
+
+      let boxModel: { model?: { border?: number[] } };
+      try {
+        boxModel = await sendCommand('DOM.getBoxModel', { objectId: object.objectId });
       } catch (err) {
         throw new Error(`${NO_BOX_ERROR} (CDP: ${(err as Error).message})`);
       }

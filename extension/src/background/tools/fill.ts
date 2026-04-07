@@ -9,6 +9,8 @@ import type { Tool } from './types';
 import { ensureAttached, sendCommand } from '../debugger-session';
 import { getCurrentTab } from '../tab-manager';
 import { isRefSelector, lookupRef } from '../refs';
+import { parseFrameArg } from './element';
+import { resolveFrame, contextIdForFrame } from '../frames';
 
 /** Injected snippet: fills `targetExpr` with `value` and reports the mode. */
 function fillSnippet(targetExpr: string, value: string): string {
@@ -65,9 +67,15 @@ export class FillTool implements Tool {
     if (!selector) throw new Error('fill: selector is required (CSS selector or @e ref)');
     if (value == null) throw new Error('fill: value is required');
     await ensureAttached((await getCurrentTab()).id!);
+    const frameArg = parseFrameArg(this.name, args.frame);
+    // @e 忽略 frame（ref 自带帧）；CSS 才解析
+    const frameId =
+      frameArg && !isRefSelector(selector)
+        ? (await resolveFrame(frameArg)).frameId
+        : undefined;
     return isRefSelector(selector)
       ? this.fillByRef(selector, value)
-      : this.fillBySelector(selector, value);
+      : this.fillBySelector(selector, value, frameId);
   }
 
   private async fillByRef(selector: string, value: string): Promise<unknown> {
@@ -93,7 +101,7 @@ export class FillTool implements Tool {
     return result.result.value || { success: true };
   }
 
-  private async fillBySelector(selector: string, value: string): Promise<unknown> {
+  private async fillBySelector(selector: string, value: string, frameId?: string): Promise<unknown> {
     const result = await sendCommand<{
       exceptionDetails?: { text: string };
       result: { value?: { error?: string } | unknown };
@@ -105,6 +113,7 @@ export class FillTool implements Tool {
       })()`,
       returnByValue: true,
       awaitPromise: false,
+      ...(frameId ? { contextId: await contextIdForFrame(frameId) } : {}),
     });
     if (result.exceptionDetails) throw new Error(`fill: ${result.exceptionDetails.text}`);
     const ret = result.result.value as { error?: string } | undefined;
