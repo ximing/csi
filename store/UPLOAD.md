@@ -10,7 +10,7 @@ CSI 扩展的上架步骤。打包产物为 `release/csi-extension-v<version>.zi
 scripts/package-extension.sh
 ```
 
-产出 `release/csi-extension-v0.5.0.zip`。自检:`unzip -l` 确认 zip 根有 `manifest.json`,`icons/` `_locales/` `background.js` `popup.html` `options.html` 齐全。
+产出 `release/csi-extension-v0.6.0.zip`。自检:`unzip -l` 确认 zip 根有 `manifest.json`,`icons/` `_locales/` `background.js` `popup.html` `options.html` 齐全。
 
 ## 1. 开发者账号(一次性)
 
@@ -19,7 +19,7 @@ scripts/package-extension.sh
 
 ## 2. 上传 zip
 
-- [ ] Dashboard → **New Item** → 上传 `release/csi-extension-v0.5.0.zip`。
+- [ ] Dashboard → **New Item** → 上传 `release/csi-extension-v0.6.0.zip`。
 - [ ] 上传后确认 dashboard 无警告(权限说明、图标缺失等)。
 
 ## 3. Store listing(商品详情)tab
