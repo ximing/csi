@@ -113,7 +113,7 @@ export const zh = {
     readme: 'README',
     protocol: 'protocol.md',
     privacy: '隐私政策',
-    version: 'v0.5.0',
+    version: 'v0.6.0',
     tagline: 'Ctrl+Shift+I · AI 勘查浏览器案发现场',
   },
 }
