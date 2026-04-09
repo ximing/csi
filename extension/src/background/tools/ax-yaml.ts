@@ -63,12 +63,17 @@ const ELLIPSIS = '…';
 const TRUNCATED_HINT =
   'Re-snapshot with selector or mode=interactive.';
 
+export interface IframeInfo {
+  url: string;
+  isolated: boolean;
+}
+
 export function compactFromAx(
   nodes: AxNode[],
   mode: 'compact' | 'interactive',
   includeRoot = false,
   frameId?: string,
-  isolatedSrcs?: Set<string>,
+  frameInfoByNodeId?: Map<number, IframeInfo>,
 ): CompactNode[] {
   if (nodes.length === 0) return [];
   const byId = new Map<string, AxNode>();
@@ -78,8 +83,8 @@ export function compactFromAx(
   // that node would copy the title into nearestName and wipe matching text.
   // Unscoped: children only (same as full's formatChildren). Selector: include self.
   const formatted = includeRoot
-    ? formatNode(root, byId, '', frameId, isolatedSrcs)
-    : collectChildren(root, byId, '', normalizeRole(rawRole(root)), frameId, isolatedSrcs);
+    ? formatNode(root, byId, '', frameId, frameInfoByNodeId)
+    : collectChildren(root, byId, '', normalizeRole(rawRole(root)), frameId, frameInfoByNodeId);
   const roots = asList(formatted);
   return mode === 'interactive' ? flattenInteractive(roots) : roots;
 }
@@ -115,7 +120,7 @@ function formatNode(
   byId: Map<string, AxNode>,
   nearestName: string,
   frameId?: string,
-  isolatedSrcs?: Set<string>,
+  frameInfoByNodeId?: Map<number, IframeInfo>,
 ): CompactNode | CompactNode[] | null {
   const role = normalizeRole(rawRole(node));
   const name = axString(node.name?.value);
@@ -124,11 +129,11 @@ function formatNode(
   const isStructural = STRUCTURAL_ROLES.has(role);
 
   if (role === 'text' && name && nearestName.includes(name)) {
-    return collectChildren(node, byId, nextNearest, role, frameId, isolatedSrcs);
+    return collectChildren(node, byId, nextNearest, role, frameId, frameInfoByNodeId);
   }
 
   if (!isInteractive && !isStructural) {
-    return collectChildren(node, byId, nextNearest, role, frameId, isolatedSrcs);
+    return collectChildren(node, byId, nextNearest, role, frameId, frameInfoByNodeId);
   }
 
   const result: CompactNode = { role };
@@ -148,24 +153,26 @@ function formatNode(
   if (isAxTrue(propValue(node, 'disabled'))) result.disabled = true;
   if (isAxTrue(propValue(node, 'invalid'))) result.invalid = true;
 
-  if (role === 'iframe' || role === 'img') {
+  if (role === 'img') {
     const url = axString(propValue(node, 'url'));
     if (url) result.src = url.length > SRC_LIMIT ? url.slice(0, SRC_LIMIT) : url;
   }
 
   const isFrameRole = role === 'iframe' || role === 'frame';
   if (isFrameRole && node.backendDOMNodeId != null) {
-    // iframe/frame 也进 ref 表（协议 §4.1：snapshot({selector:"@eN"}) 进框入口）
+    // iframe/frame 也进 ref 表（协议 §4.1：snapshot({selector:"@eN"}) 进框入口）。
+    // AX iframe 节点无 url 属性，src 与 isolated 按帧 owner backendDOMNodeId 从帧清单取（协议 §4.1）。
     result.ref = `@${assignRef(node.backendDOMNodeId, role, name, frameId)}`;
-    const full = axString(propValue(node, 'url'));
-    if (full && isolatedSrcs?.has(full)) result.isolated = true;
+    const fi = frameInfoByNodeId?.get(node.backendDOMNodeId);
+    if (fi?.url) result.src = fi.url.length > SRC_LIMIT ? fi.url.slice(0, SRC_LIMIT) : fi.url;
+    if (fi?.isolated) result.isolated = true;
   }
 
   if (isInteractive) {
     result.ref = `@${assignRef(node.backendDOMNodeId!, role, name, frameId)}`;
   }
 
-  const children = collectChildren(node, byId, nextNearest, role, frameId, isolatedSrcs);
+  const children = collectChildren(node, byId, nextNearest, role, frameId, frameInfoByNodeId);
   const childList = asList(children);
   if (childList.length > 0) result.children = childList;
 
@@ -181,14 +188,14 @@ function collectChildren(
   nearestName: string,
   role: string,
   frameId?: string,
-  isolatedSrcs?: Set<string>,
+  frameInfoByNodeId?: Map<number, IframeInfo>,
 ): CompactNode | CompactNode[] | null {
   if (role === 'iframe' || role === 'frame' || !node.childIds?.length) return null;
   const children: CompactNode[] = [];
   for (const childId of node.childIds) {
     const child = byId.get(childId);
     if (!child) continue;
-    const formatted = formatNode(child, byId, nearestName, frameId, isolatedSrcs);
+    const formatted = formatNode(child, byId, nearestName, frameId, frameInfoByNodeId);
     if (!formatted) continue;
     if (Array.isArray(formatted)) children.push(...formatted);
     else children.push(formatted);

@@ -11,12 +11,12 @@ import { ensureAttached, sendCommand } from '../debugger-session';
 import { getCurrentTab } from '../tab-manager';
 import { assignRef, INTERACTIVE_ROLES, resetRefs } from '../refs';
 import { resolveObjectId, parseFrameArg } from './element';
-import { compactFromAx, renderYaml, type AxNode } from './ax-yaml';
+import { compactFromAx, renderYaml, type AxNode, type IframeInfo } from './ax-yaml';
 import {
   resolveFrame,
   frameById,
   crossOriginError,
-  isolatedSrcSet,
+  listAllFrames,
   contextIdForFrame,
   FRAME_GONE_ERROR,
   type FrameInfo,
@@ -97,10 +97,26 @@ export class SnapshotTool implements Tool {
       if (targetFrame) throw new Error(FRAME_GONE_ERROR);
       throw err;
     }
-    const isolatedSrcs = await isolatedSrcSet();
+    // iframe 行的 src/isolated 不来自 AX（iframe 节点无 url 属性）：按帧 owner
+    // backendDOMNodeId 建表，渲染时对号（协议 §4.1）。isolated 占位帧无 CDP frameId，跳过。
+    const frameInfoByNodeId = new Map<number, IframeInfo>();
+    for (const f of await listAllFrames()) {
+      if (!f.parentId || f.frameId.startsWith('isolated:')) continue;
+      try {
+        const { backendNodeId } = await sendCommand<{ backendNodeId: number }>(
+          'DOM.getFrameOwner',
+          { frameId: f.frameId },
+        );
+        frameInfoByNodeId.set(backendNodeId, { url: f.url, isolated: f.isolated });
+      } catch {
+        // 帧已卸载等：跳过
+      }
+    }
 
     let subtreeRoot: AxNode | undefined;
-    if (selector) {
+    // 进帧入口（selector 指向 iframe，backendNodeId 未设）要整帧树，不做子树过滤；
+    // 仅普通 selector 子树（backendNodeId 已设）才在 nodes 里找根（协议 §4.1）。
+    if (selector && backendNodeId != null) {
       subtreeRoot = nodes.find((n) => n.backendDOMNodeId === backendNodeId);
       if (!subtreeRoot) {
         throw new Error(`snapshot: element not found: ${selector}`);
@@ -139,7 +155,7 @@ export class SnapshotTool implements Tool {
       mode,
       Boolean(compactRoot),
       targetFrame?.frameId,
-      isolatedSrcs,
+      frameInfoByNodeId,
     );
     const rendered = renderYaml(compact, maxChars);
     return {
