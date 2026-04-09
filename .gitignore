@@ -14,3 +14,6 @@ release/
 
 # 本地 git worktree
 .worktrees/
+
+# 本地 Grok workflow 脚本
+.grok/workflows/
