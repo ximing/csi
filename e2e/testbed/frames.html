@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CSI Testbed Frames</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem }
+  iframe { display: block; width: 480px; height: 220px; border: 1px solid #999; margin: .5rem 0 1rem }
+</style>
+</head>
+<body>
+<h1>iframe 靶场</h1>
+
+<h2>同域 iframe</h2>
+<iframe id="same-frame" src="/frame.html" title="同域帧"></iframe>
+
+<h2>跨域 iframe（8932 端口 = 不同源）</h2>
+<iframe id="cross-frame" src="http://127.0.0.1:8932/frame.html" title="跨域帧"></iframe>
+</body>
+</html>

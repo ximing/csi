@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CSI Testbed</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.6 }
+  section { border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.5rem; margin-bottom: 1.5rem }
+  .flash { display: none; padding: .5rem 1rem; border-radius: 4px; margin-top: .5rem }
+  .flash.ok { display: block; background: #e6f6e6; color: #174517 }
+  .hover-menu .menu-body { display: none }
+  .hover-menu:hover .menu-body { display: block }
+  #delayed { margin-top: .5rem }
+  .spacer { height: 1500px; background: linear-gradient(#eee, #ddd) }
+</style>
+</head>
+<body>
+<h1>CSI 回归靶场</h1>
+<nav>
+  <a href="/frame.html">frame 页</a> ·
+  <a href="/second.html">第二页</a>
+</nav>
+
+<!-- 表单区：fill / click / key_type / send_keys / mouse_click -->
+<section id="form-area">
+  <h2>登录表单</h2>
+  <form id="login-form">
+    <label>用户名 <input id="username" name="username" aria-label="用户名" autocomplete="off"></label>
+    <label>密码 <input id="password" name="password" type="password" aria-label="密码"></label>
+    <label><input id="remember" type="checkbox" aria-label="记住我"> 记住我</label>
+    <select id="role" aria-label="角色">
+      <option value="user">普通用户</option>
+      <option value="admin">管理员</option>
+    </select>
+    <button type="submit" id="login-btn">登录</button>
+  </form>
+  <div id="login-flash" class="flash" role="status"></div>
+</section>
+
+<!-- 悬停区：hover -->
+<section>
+  <h2>悬停菜单</h2>
+  <div class="hover-menu" id="hover-menu">
+    <span id="hover-trigger">把鼠标放上来</span>
+    <div class="menu-body" id="hover-body">隐藏菜单内容</div>
+  </div>
+</section>
+
+<!-- 延迟元素：wait -->
+<section>
+  <h2>延迟出现</h2>
+  <button id="delay-btn">点我，1 秒后出现结果</button>
+  <div id="delayed-host"></div>
+</section>
+
+<!-- 网络请求：network -->
+<section>
+  <h2>网络请求</h2>
+  <button id="fetch-btn">发一个 fetch</button>
+  <pre id="fetch-result"></pre>
+</section>
+
+<!-- 上传：upload -->
+<section>
+  <h2>文件上传</h2>
+  <input type="file" id="file-input" aria-label="选择文件">
+  <div id="upload-result"></div>
+</section>
+
+<!-- 长滚动：scroll -->
+<section>
+  <h2>长滚动区</h2>
+  <div class="spacer"></div>
+  <div id="scroll-sentinel">到底了</div>
+</section>
+
+<script>
+document.getElementById('login-form').addEventListener('submit', (e) => {
+  e.preventDefault()
+  const u = document.getElementById('username').value
+  const p = document.getElementById('password').value
+  const r = document.getElementById('remember').checked
+  const role = document.getElementById('role').value
+  const flash = document.getElementById('login-flash')
+  flash.className = 'flash ok'
+  flash.textContent = `登录成功: ${u} / ${p} / remember=${r} / role=${role}`
+})
+
+document.getElementById('delay-btn').addEventListener('click', () => {
+  setTimeout(() => {
+    const d = document.createElement('div')
+    d.id = 'delayed'
+    d.textContent = '延迟内容已出现'
+    document.getElementById('delayed-host').appendChild(d)
+  }, 1000)
+})
+
+document.getElementById('fetch-btn').addEventListener('click', async () => {
+  const res = await fetch('/api/data.json')
+  const j = await res.json()
+  document.getElementById('fetch-result').textContent = JSON.stringify(j)
+})
+
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const f = e.target.files[0]
+  if (!f) return
+  document.getElementById('upload-result').textContent = `已选择: ${f.name} (${f.size} 字节)`
+})
+</script>
+</body>
+</html>

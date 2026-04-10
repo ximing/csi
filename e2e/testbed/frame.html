@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CSI Testbed Frame</title>
+</head>
+<body>
+<h1>帧内页面</h1>
+<label>帧内输入 <input id="frame-input" aria-label="帧内输入" autocomplete="off"></label>
+<button id="frame-btn">帧内按钮</button>
+<div id="frame-flash" role="status"></div>
+<script>
+document.getElementById('frame-btn').addEventListener('click', () => {
+  const v = document.getElementById('frame-input').value
+  document.getElementById('frame-flash').textContent = `帧内收到: ${v}`
+})
+</script>
+</body>
+</html>

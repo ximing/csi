@@ -12,6 +12,9 @@ daemon/csi
 # 上架打包产物（scripts/package-extension.sh）
 release/
 
+# e2e 证据产物（截图/PDF/上传夹具）
+e2e/artifacts/
+
 # 本地 git worktree
 .worktrees/
 
