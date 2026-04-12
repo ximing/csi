@@ -15,8 +15,8 @@ interface LangCtx {
 
 const Ctx = createContext<LangCtx>(null!)
 
-export function LangProvider({ children }: { children: ReactNode }) {
-  const [lang, setLang] = useState<Lang>('zh')
+export function LangProvider({ children, initialLang = 'zh' }: { children: ReactNode; initialLang?: Lang }) {
+  const [lang, setLang] = useState<Lang>(initialLang)
   useEffect(() => {
     document.documentElement.lang = lang
   }, [lang])

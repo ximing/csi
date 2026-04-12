@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ximing.github.io/csi/sitemap.xml

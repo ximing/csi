@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CSI og image 1200x630</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    position: relative;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    background:
+      radial-gradient(60% 130% at 12% 0%, rgba(91,157,255,.30) 0%, rgba(47,107,240,.10) 45%, rgba(47,107,240,0) 72%),
+      radial-gradient(55% 120% at 92% 110%, rgba(28,63,180,.5) 0%, rgba(28,63,180,0) 62%),
+      linear-gradient(155deg, #0b1634 0%, #081026 52%, #050b1c 100%);
+    color: #fff;
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(0deg, rgba(140,180,255,.05) 0 1px, transparent 1px 56px),
+      repeating-linear-gradient(90deg, rgba(140,180,255,.05) 0 1px, transparent 1px 56px);
+    -webkit-mask-image: radial-gradient(70% 90% at 38% 50%, #000 25%, transparent 100%);
+  }
+
+  .lens {
+    position: absolute;
+    right: -110px; top: 50%;
+    width: 560px; height: 560px;
+    transform: translateY(-58%);
+    opacity: .9;
+  }
+
+  .stage {
+    position: absolute; inset: 0;
+    display: flex; align-items: center;
+    padding: 0 80px;
+  }
+  .icon {
+    width: 190px; height: 190px;
+    filter: drop-shadow(0 18px 44px rgba(8,20,60,.62));
+    margin-right: 64px;
+    flex: none;
+  }
+  .copy { display: flex; flex-direction: column; }
+  .wordmark {
+    font-size: 132px; font-weight: 800;
+    letter-spacing: .12em;
+    line-height: .95;
+    background: linear-gradient(180deg, #ffffff 18%, #c2d8ff 100%);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+  }
+  .tagline {
+    margin-top: 24px;
+    font-size: 34px; font-weight: 600;
+    letter-spacing: .015em;
+    color: #d7e5ff;
+  }
+  .sub {
+    margin-top: 18px;
+    font-size: 20px; font-weight: 500;
+    letter-spacing: .06em;
+    color: #8fb0ea;
+  }
+  .sub .dot { color: #5b9dff; padding: 0 .45em; }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+
+  <svg class="lens" viewBox="0 0 620 620" fill="none">
+    <defs>
+      <linearGradient id="lgRing" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#9ec2ff" stop-opacity=".8"/>
+        <stop offset="1" stop-color="#3f6fe8" stop-opacity=".35"/>
+      </linearGradient>
+      <radialGradient id="lgGlass" cx=".38" cy=".32" r=".85">
+        <stop offset="0" stop-color="#5b9dff" stop-opacity=".22"/>
+        <stop offset=".6" stop-color="#2f6bf0" stop-opacity=".07"/>
+        <stop offset="1" stop-color="#2f6bf0" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <line x1="430" y1="430" x2="580" y2="580" stroke="url(#lgRing)" stroke-width="52" stroke-linecap="round"/>
+    <circle cx="285" cy="285" r="225" fill="url(#lgGlass)" stroke="url(#lgRing)" stroke-width="30"/>
+    <ellipse cx="285" cy="292" rx="118" ry="74" fill="#bcd4ff" fill-opacity=".16"/>
+    <circle cx="285" cy="292" r="42" fill="#7ea9ff" fill-opacity=".28"/>
+    <circle cx="285" cy="292" r="18" fill="#dce9ff" fill-opacity=".4"/>
+    <path d="M 165 235 A 150 150 0 0 1 255 148" stroke="#cfe0ff" stroke-opacity=".5" stroke-width="14" stroke-linecap="round"/>
+  </svg>
+
+  <div class="stage">
+    <img class="icon" src="../../../extension/icons/icon.svg" alt="">
+    <div class="copy">
+      <div class="wordmark">CSI</div>
+      <div class="tagline">Let AI agents drive your real Chrome browser</div>
+      <div class="sub">Ctrl+Shift+I<span class="dot">·</span>Crime Scene Investigation</div>
+    </div>
+  </div>
+</body>
+</html>

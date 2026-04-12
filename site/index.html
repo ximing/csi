@@ -1,14 +1,52 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="__HTML_LANG__">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="data:," />
-    <title>CSI — AI 勘查浏览器案发现场</title>
-    <meta name="description" content="让 AI 用你真实的登录态操控 Chrome——导航、点击、截图、读页面。" />
+
+    <title>__PAGE_TITLE__</title>
+    <meta name="description" content="__PAGE_DESC__" />
+
+    <link rel="canonical" href="__CANONICAL__" />
+    <link rel="alternate" hreflang="zh-CN" href="https://ximing.github.io/csi/" />
+    <link rel="alternate" hreflang="en" href="https://ximing.github.io/csi/en/" />
+    <link rel="alternate" hreflang="x-default" href="https://ximing.github.io/csi/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="CSI" />
+    <meta property="og:locale" content="__OG_LOCALE__" />
+    <meta property="og:locale:alternate" content="__OG_LOCALE_ALT__" />
+    <meta property="og:url" content="__OG_URL__" />
+    <meta property="og:title" content="CSI — Let AI agents drive your real Chrome browser" />
+    <meta property="og:description" content="Navigate, click, type, read pages, take screenshots, save PDFs — with your actual login sessions. No automation-flagged browser: the agent drives the Chrome you already use. 让 AI 用你真实的登录态操控 Chrome。" />
+    <meta property="og:image" content="https://ximing.github.io/csi/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CSI — Let AI agents drive your real Chrome browser" />
+    <meta name="twitter:description" content="AI browser automation for agents: control your real Chrome with actual login sessions — navigate, click, read, screenshot, save PDF. 让 AI 用真实登录态操控 Chrome。" />
+    <meta name="twitter:image" content="https://ximing.github.io/csi/og-image.png" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "CSI",
+      "url": "https://ximing.github.io/csi/",
+      "description": "Let AI agents control your real Chrome browser — navigate, click, type, read pages, take screenshots, save PDFs — using your actual login sessions.",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "macOS, Windows, Linux",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "codeRepository": "https://github.com/ximing/csi",
+      "author": { "@type": "Person", "name": "ximing", "url": "https://github.com/ximing" }
+    }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">__APP_HTML__</div>
+    <script>__INITIAL_LANG__</script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

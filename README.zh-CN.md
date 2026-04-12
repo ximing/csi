@@ -4,7 +4,7 @@
 
 **CSI** — Ctrl+Shift+I，每个程序员都按过的 DevTools 快捷键；也是 Crime Scene Investigation——AI 勘查浏览器案发现场。
 
-让 AI（Claude Code 及其它 agent）控制你**真实的 Chrome 浏览器**——导航、点击、输入、读取页面、截图、保存 PDF——使用你实际的登录态。不需要带自动化标记的浏览器，也不需要单独的 profile：agent 直接驱动你正在用的那台 Chrome。
+**给 AI agent 用的浏览器自动化(browser automation)工具。** 让 AI(Claude Code 及其它 agent)控制你**真实的 Chrome 浏览器**——导航、点击、输入、读取页面、截图、保存 PDF——使用你实际的登录态。不需要带自动化标记的浏览器,也不需要单独的 profile:agent 直接驱动你正在用的那台 Chrome。底层是本地 Go daemon 加 Chrome 扩展(MV3),通过 **Chrome DevTools Protocol (CDP)** 执行——相比 MCP 浏览器控制或 Playwright/Selenium,它是需要**真实登录态**(而非全新无头 profile)时的轻量替代。
 
 ## 架构
 
