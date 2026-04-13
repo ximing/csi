@@ -65,6 +65,13 @@ function Ok   ([string]$m) { Write-Host "    $([char]0x2713) $m" -ForegroundColo
 function Warn ([string]$m) { Write-Host "    ! $m" -ForegroundColor Yellow }
 function Die  ([string]$m) { Write-Host "    $([char]0x2717) $m" -ForegroundColor Red; exit 1 }
 
+# 耗时格式化：<60s 走 3.2s（浮点）或 3s（整数），>=60s 走 1m12s
+function Format-Elapsed ([double]$Sec) {
+    if ($Sec -ge 60) { "{0}m{1}s" -f [int]($Sec/60), [int]$Sec % 60 }
+    elseif ($Sec -eq [int]$Sec) { "{0}s" -f [int]$Sec }
+    else { "{0:F1}s" -f $Sec }
+}
+
 # ---------- help ----------
 
 if ($Help) {
@@ -125,18 +132,27 @@ Info "version  : $Version"
 $TmpDir = Join-Path $env:TEMP "csi-install-$([System.Guid]::NewGuid().Guid)"
 New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
 
+$script:DL_LAST_TIME = 0
 function Download ([string]$url, [string]$dest) {
+    # 交互式：临时切 Continue 让 IWR 显示进度条；非交互式 (CI/irm|iex 重定向) 走全局 SilentlyContinue
+    $interactive = -not [Console]::IsOutputRedirected
+    $oldPref = $ProgressPreference
+    if ($interactive) { $ProgressPreference = 'Continue' }
     # 简单重试：网络抖动时重试 2 次再放弃
     for ($i = 1; $i -le 3; $i++) {
         try {
+            $start = Get-Date
             Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing -TimeoutSec 60
+            $script:DL_LAST_TIME = ((Get-Date) - $start).TotalSeconds
+            $ProgressPreference = $oldPref
             return
         } catch {
-            if ($i -eq 3) { Die "download failed: $url" }
+            if ($i -eq 3) { $ProgressPreference = $oldPref; Die "download failed: $url" }
             Warn "download failed, retrying ($i/3)..."
             Start-Sleep -Seconds 3
         }
     }
+    $ProgressPreference = $oldPref
 }
 
 try {
@@ -149,7 +165,7 @@ try {
     Download "$DL/csi-windows-amd64.zip" $daemonZip
     Expand-Archive $daemonZip -DestinationPath $TmpDir -Force
     Move-Item (Join-Path $TmpDir 'csi.exe') $BinPath -Force
-    Ok "daemon: $BinPath"
+    Ok "daemon: $BinPath ($(Format-Elapsed $script:DL_LAST_TIME))"
 
     # ---------- 2. extension ----------
 
@@ -164,7 +180,7 @@ try {
         Download "$DL/csi-extension.zip" $extZip
         if (Test-Path $ExtDir) { Remove-Item $ExtDir -Recurse -Force }
         Expand-Archive $extZip -DestinationPath $ExtDir
-        Ok "extension: $ExtDir"
+        Ok "extension: $ExtDir ($(Format-Elapsed $script:DL_LAST_TIME))"
     }
 
     # ---------- 3. coding-agent skills ----------
@@ -172,7 +188,10 @@ try {
     function Install-Skill ([string]$TarName, [string]$DestDir) {
         $tar = Join-Path $TmpDir $TarName
         # tarball 只下载一次，多目标复用
-        if (-not (Test-Path $tar)) { Download "$DL/$TarName" $tar }
+        if (-not (Test-Path $tar)) {
+            Download "$DL/$TarName" $tar
+            Ok "  fetched $TarName ($(Format-Elapsed $script:DL_LAST_TIME))"
+        }
         if (Test-Path $DestDir) { Remove-Item $DestDir -Recurse -Force }
         New-Item -ItemType Directory -Path (Split-Path -Parent $DestDir) -Force | Out-Null
         # Windows 10+ 自带 bsdtar，可直接解 tar.gz
@@ -219,6 +238,7 @@ try {
         Info "enable later with:  $BinPath autostart on"
     } else {
         Step '[4/5] Login autostart'
+        $start = Get-Date
         $autoOk = $false
         try {
             & $BinPath autostart on
@@ -227,7 +247,7 @@ try {
             $autoOk = $false
         }
         if ($autoOk) {
-            Ok 'login autostart registered'
+            Ok "login autostart registered ($(Format-Elapsed ((Get-Date) - $start).TotalSeconds))"
         } else {
             Warn "failed to register login autostart - after reboot run: $BinPath autostart on"
         }
@@ -240,6 +260,7 @@ try {
         Info "start it later with:  $BinPath start"
     } else {
         Step '[5/5] Starting daemon'
+        $start = Get-Date
         $started = $false
         try {
             & $BinPath start
@@ -248,7 +269,7 @@ try {
             $started = $false
         }
         if ($started) {
-            Ok 'daemon is running'
+            Ok "daemon is running ($(Format-Elapsed ((Get-Date) - $start).TotalSeconds))"
         } else {
             Warn "daemon failed to start - check logs at $InstallDir\logs\daemon.log"
         }
