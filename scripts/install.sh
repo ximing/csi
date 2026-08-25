@@ -39,6 +39,16 @@ ok()   { printf "    %s✓%s %s\n" "$G" "$N" "$*"; }
 warn() { printf "    %s!%s %s\n" "$Y" "$N" "$*" >&2; }
 die()  { printf "    %s✗%s %s\n" "$R" "$N" "$*" >&2; exit 1; }
 
+# 耗时格式化：<60s 走 3.2s（浮点）或 3s（整数），>=60s 走 1m12s
+# awk 跨 GNU/BSD 都行，不依赖 bash 4+ 的 EPOCHREALTIME 或 GNU date 的 %N
+fmt_elapsed() { # seconds (float or int string)
+  awk -v t="$1" 'BEGIN{
+    if (t+0 >= 60)      printf "%dm%ds", int(t/60), int(t)%60
+    else if (t == int(t)) printf "%ds", int(t)
+    else                printf "%.1fs", t+0
+  }'
+}
+
 show_help() {
   cat <<EOF
 csi installer (macOS / Linux)
@@ -137,8 +147,18 @@ else
 fi
 info "version  : $VERSION"
 
+DL_LAST_TIME=""
 download() { # url dest
-  if ! curl -fsSL --retry 3 --connect-timeout 10 -o "$2" "$1"; then
+  # stderr 是 TTY 时显示 curl 进度条 (--progress-bar 走 stderr)；
+  # 否则用 -sS 静默 (CI / curl|bash 重定向)。下载耗时由 -w time_total 返回到 DL_LAST_TIME。
+  local progress=()
+  if [ -t 2 ]; then
+    progress=(--progress-bar)
+  else
+    progress=(-sS)
+  fi
+  if ! DL_LAST_TIME=$(curl -fL --retry 3 --connect-timeout 10 \
+        "${progress[@]}" -w '%{time_total}' -o "$2" "$1"); then
     die "download failed: $1"
   fi
 }
@@ -155,7 +175,7 @@ download "$DL/csi-$OS-$ARCH.tar.gz" "$TMP_DIR/daemon.tar.gz"
 tar -xzf "$TMP_DIR/daemon.tar.gz" -C "$TMP_DIR"
 mv "$TMP_DIR/csi" "$BIN_PATH"
 chmod +x "$BIN_PATH"
-ok "daemon: $BIN_PATH"
+ok "daemon: $BIN_PATH ($(fmt_elapsed "$DL_LAST_TIME"))"
 
 # ---------- 2. extension ----------
 
@@ -172,7 +192,7 @@ else
   rm -rf "$EXT_DIR"
   mkdir -p "$EXT_DIR"
   unzip -q "$TMP_DIR/extension.zip" -d "$EXT_DIR"
-  ok "extension: $EXT_DIR"
+  ok "extension: $EXT_DIR ($(fmt_elapsed "$DL_LAST_TIME"))"
 fi
 
 # ---------- 3. coding-agent skills ----------
@@ -191,6 +211,7 @@ agent_skills_base() { # agent → skills base dir
 install_skill() { # tar-name dest-dir（tarball 只下载一次，多目标复用）
   if [ ! -f "$TMP_DIR/$1" ]; then
     download "$DL/$1" "$TMP_DIR/$1"
+    ok "  fetched $1 ($(fmt_elapsed "$DL_LAST_TIME"))"
   fi
   rm -rf "$2"
   mkdir -p "$(dirname "$2")"
@@ -250,8 +271,9 @@ if [ "$NO_AUTOSTART" -eq 1 ]; then
   info "enable later with:  $BIN_PATH autostart on"
 else
   step "[4/5] Login autostart"
+  _start=$SECONDS
   if "$BIN_PATH" autostart on; then
-    ok "login autostart registered"
+    ok "login autostart registered ($(fmt_elapsed $((SECONDS - _start))))"
   else
     warn "failed to register login autostart — after reboot run: $BIN_PATH autostart on"
   fi
@@ -264,8 +286,9 @@ if [ "$NO_START" -eq 1 ]; then
   info "start it later with:  $BIN_PATH start"
 else
   step "[5/5] Starting daemon"
+  _start=$SECONDS
   if "$BIN_PATH" start; then
-    ok "daemon is running"
+    ok "daemon is running ($(fmt_elapsed $((SECONDS - _start))))"
   else
     warn "daemon failed to start — check logs at $INSTALL_DIR/logs/daemon.log"
   fi
