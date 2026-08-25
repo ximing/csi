@@ -66,10 +66,18 @@ function Warn ([string]$m) { Write-Host "    ! $m" -ForegroundColor Yellow }
 function Die  ([string]$m) { Write-Host "    $([char]0x2717) $m" -ForegroundColor Red; exit 1 }
 
 # 耗时格式化：<60s 走 3.2s（浮点）或 3s（整数），>=60s 走 1m12s
+# 分钟/秒用 Floor：PS 的 [int] 是银行家舍入，90s 会变成 2m30s。
+# 先算进变量再 -f：-f 优先级高于 %，直接写 `... -f $m, $s % 60` 会对格式化后的字符串取模。
 function Format-Elapsed ([double]$Sec) {
-    if ($Sec -ge 60) { "{0}m{1}s" -f [int]($Sec/60), [int]$Sec % 60 }
-    elseif ($Sec -eq [int]$Sec) { "{0}s" -f [int]$Sec }
-    else { "{0:F1}s" -f $Sec }
+    if ($Sec -ge 60) {
+        $m = [int][Math]::Floor($Sec / 60)
+        $s = [int][Math]::Floor($Sec % 60)
+        '{0}m{1}s' -f $m, $s
+    } elseif ($Sec -eq [Math]::Floor($Sec)) {
+        '{0}s' -f [int]$Sec
+    } else {
+        '{0:F1}s' -f $Sec
+    }
 }
 
 # ---------- help ----------
