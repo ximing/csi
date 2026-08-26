@@ -32,6 +32,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 - `action` (string, 必填)：工具名，见 §4。
 - `args` (object, 可选)：工具参数。
 - `session` (string, 可选)：会话名。同一任务始终用同一 session；缺省为 `"default"`。
+- 请求体整包上限 64MB（传输层，不按 action 分级）。超出则 `error` 为 `bad request body: ...`（HTTP 仍 200）。`fill.value` / `evaluate.code` / `cdp.params` 无字段级 maxLen，受此整包上限约束。
 
 处理流程：
 
