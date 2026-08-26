@@ -222,7 +222,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 | 14 | `cdp` | `method`*, `params` | 原始 CDP 返回 | 裸透传 escape hatch |
 | 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
-| 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` |
+| 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
 | 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}]}` | 仅当前 session |
 | 19 | `close_tab` | — | `{success, closed, reason?}` | 关当前标签 |
 | 20 | `close_session` | — | `{success, closed}` | 关 session 全部标签 |
@@ -270,5 +270,6 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - 驱动用户真实 Chrome（含已登录会话）。
 - `evaluate` / `cdp` 是页面内任意代码执行通道——skill 文档需提示。
 - `screenshot` / `save_as_pdf` 按 `args.path` 原样落盘（§5）：任何能 POST `/command` 的本地进程，都能让 daemon 以其自身权限写文件系统上的任意路径。daemon 与典型调用方同 UID；调用方自己也能写这些文件。这不是 confused deputy，也不超出「loopback 是隔离边界」的假设。v1 **不会**把 `path` 锁进 `$TMPDIR` 或某个 screenshots 基目录——那会破坏「存到项目目录」的产品需求。
+- `upload` 的 `files` 按调用方字面交给 Chrome `DOM.setFileInputFiles`（§4）：当前页的 file input 会按 HTML 文件控件语义拿到这些本地文件。这是产品能力（把用户指定的本地文件——包括项目文件——塞进网页上传框），不是路径遍历，也不是网页自己发起的读盘。调用方是能 POST `/command` 的本地主体；随机网页不能打 `/command`。daemon 与典型调用方同 UID，调用方自己也能读这些文件。v1 **不会**把 `files` 锁进 `~/Downloads`——那会破坏「上传项目文件」的产品需求。`cdp` 是裸透传，能发同一条 CDP 命令。
 
-明确不在 v1 范围内：非回环监听、加鉴权、对 `path` 做沙箱。
+明确不在 v1 范围内：非回环监听、加鉴权、对 `path` / `upload.files` 做沙箱。

@@ -227,7 +227,7 @@ var toolDefs = []toolDef{
 		description: "Set files on a file input element.",
 		props: map[string]any{
 			"selector": strProp("@eN ref (from snapshot) or CSS selector of the file input."),
-			"files":    strSliceProp("Absolute paths of files to upload."),
+			"files":    strSliceProp("Local file paths to attach, passed verbatim (prefer absolute). Not restricted to ~/Downloads."),
 		},
 		required: []string{"selector", "files"},
 	},

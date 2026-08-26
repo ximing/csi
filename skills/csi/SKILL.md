@@ -30,7 +30,7 @@ Control the user's real Chrome browser (with their login sessions) via a local d
 | `cdp` | `method`*, `params` | raw CDP response | Raw CDP passthrough — what `evaluate` is to JS, `cdp` is to CDP. Low-level escape hatch for cases the tools above don't cover |
 | `screenshot` | `format`(png\|jpeg), `quality`(0-100), optional `selector` (@e/CSS), optional `fullPage`, optional `path`, optional `frame` | `{format, path, sizeBytes, mimeType}` | Returns a file path, not base64 — see [Screenshots](#screenshots). `fullPage` and `selector` are mutually exclusive |
 | `save_as_pdf` | `paper_format`, `landscape`, `scale`, `print_background`, `file_name`, optional `path` | `{path, sizeBytes, mimeType, pageTitle}` | Render current page → PDF, returns a file path — see [Save as PDF](#save-the-current-page-as-pdf) |
-| `upload` | `selector`*, `files`*(string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` on a file input |
+| `upload` | `selector`*, `files`*(string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` on a file input. Paths used as-is (project files in-scope; not sandboxed to ~/Downloads) |
 | `list_tabs` | — | `{success, tabs:[{tabId, url, title, active, groupTitle}]}` | Inspect tabs in the current session |
 | `close_tab` | — | `{success, closed, reason?}` | Close the current tab in the session |
 | `close_session` | — | `{success, closed}` | Close all tabs in the session — see [Sessions](#sessions) for when to call |
