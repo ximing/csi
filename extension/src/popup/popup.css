@@ -35,12 +35,16 @@ h1 {
   display: inline-block;
 }
 
-.dot-on {
+.dot-connected {
   background: #22c55e;
 }
 
-.dot-off {
+.dot-disconnected {
   background: #9ca3af;
+}
+
+.dot-connecting {
+  background: #f59e0b;
 }
 
 label {

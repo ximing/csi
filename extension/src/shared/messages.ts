@@ -41,8 +41,11 @@ export interface StatusRequest {
   type: 'GET_STATUS';
 }
 
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
+
 export interface StatusResponse {
   connected: boolean;
+  state: ConnectionState;
   serverUrl: string;
   error?: string;
 }
@@ -70,6 +73,13 @@ export interface TestConnectionResponse {
 export interface SuccessResponse {
   success?: boolean;
   error?: string;
+}
+
+/** Sent by the background worker whenever the primary WebSocket state changes. */
+export interface ConnectionStateChangedMessage {
+  type: 'CONNECTION_STATE_CHANGED';
+  state: ConnectionState;
+  serverUrl: string;
 }
 
 export type RuntimeRequest =

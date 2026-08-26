@@ -11,6 +11,9 @@
   "statusDisconnected": {
     "message": "未连接"
   },
+  "statusConnecting": {
+    "message": "连接中…"
+  },
   "serverUrlLabel": {
     "message": "Daemon WebSocket 地址"
   },
@@ -27,7 +30,7 @@
     "message": "测试中…"
   },
   "testOk": {
-    "message": "连接成功"
+    "message": "服务可达"
   },
   "testFailed": {
     "message": "连接失败 — 请检查地址、网络、目标服务是否运行"

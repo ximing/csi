@@ -12,6 +12,9 @@
   "statusDisconnected": {
     "message": "Disconnected"
   },
+  "statusConnecting": {
+    "message": "Connecting…"
+  },
   "serverUrlLabel": {
     "message": "Daemon WebSocket URL"
   },
@@ -28,7 +31,7 @@
     "message": "Testing…"
   },
   "testOk": {
-    "message": "Connection OK"
+    "message": "Daemon reachable"
   },
   "testFailed": {
     "message": "Connection failed — check address, network, and that the daemon is running"

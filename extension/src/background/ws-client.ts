@@ -14,13 +14,12 @@ import {
   STORAGE_KEYS,
 } from '../shared/constants';
 import type {
+  ConnectionState,
   HelloPayload,
   ToolCallPayload,
   ToolResultPayload,
   WsEnvelope,
 } from '../shared/messages';
-
-type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
 interface DesiredState {
   shouldConnect: boolean;
@@ -30,6 +29,7 @@ interface DesiredState {
 export interface WsClientOptions {
   onToolCall: (name: string, args: Record<string, unknown>) => Promise<unknown>;
   tools: string[];
+  onConnectionStateChange?: (state: ConnectionState, serverUrl: string) => void;
 }
 
 function sameHost(a: string, b: string): boolean {
@@ -47,14 +47,20 @@ export class WsClient {
   private connectingTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onToolCall: WsClientOptions['onToolCall'];
   private readonly tools: string[];
+  private readonly onConnectionStateChange?: WsClientOptions['onConnectionStateChange'];
 
   constructor(options: WsClientOptions) {
     this.onToolCall = options.onToolCall;
     this.tools = options.tools;
+    this.onConnectionStateChange = options.onConnectionStateChange;
   }
 
   isConnected(): boolean {
     return this.state === 'connected';
+  }
+
+  getConnectionState(): ConnectionState {
+    return this.state;
   }
 
   getServerUrl(): string {
@@ -103,8 +109,10 @@ export class WsClient {
       if (this.state !== 'disconnected') this.teardown();
       return;
     }
+    const url = desired.url || DEFAULT_WS_URL;
+    if (this.state !== 'disconnected' && this.currentUrl !== url) this.teardown();
     if (this.state === 'connected' || this.state === 'connecting') return;
-    this.openSocket(desired.url || DEFAULT_WS_URL);
+    this.openSocket(url);
   }
 
   /** Probe a URL without disturbing the primary connection. */
@@ -139,8 +147,8 @@ export class WsClient {
   }
 
   private openSocket(url: string): void {
-    this.state = 'connecting';
     this.currentUrl = url;
+    this.setConnectionState('connecting');
     const socket = new WebSocket(url);
     this.socket = socket;
 
@@ -153,7 +161,7 @@ export class WsClient {
         socket.close();
         return;
       }
-      this.state = 'connected';
+      this.setConnectionState('connected');
       this.clearConnectingTimer();
       console.log('[ws] connected to', url);
       const payload: HelloPayload = {
@@ -174,7 +182,7 @@ export class WsClient {
     socket.addEventListener('close', () => {
       if (this.socket !== socket) return;
       this.socket = null;
-      this.state = 'disconnected';
+      this.setConnectionState('disconnected');
       this.clearConnectingTimer();
       console.log('[ws] disconnected');
     });
@@ -195,7 +203,13 @@ export class WsClient {
         // ignore
       }
     }
-    this.state = 'disconnected';
+    this.setConnectionState('disconnected');
+  }
+
+  private setConnectionState(state: ConnectionState): void {
+    if (this.state === state) return;
+    this.state = state;
+    this.onConnectionStateChange?.(state, this.currentUrl);
   }
 
   private clearConnectingTimer(): void {

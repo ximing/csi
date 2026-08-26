@@ -5,16 +5,22 @@
  */
 import { dispatchTool, registerAllTools, toolNames } from './registry';
 import { WsClient } from './ws-client';
-import type { ToolArgs } from '../shared/messages';
+import type { ConnectionStateChangedMessage, ToolArgs } from '../shared/messages';
 
 registerAllTools();
 
 const wsClient = new WsClient({
   onToolCall: (name, args) => dispatchTool(name, args as ToolArgs),
   tools: toolNames(),
+  onConnectionStateChange: (state, serverUrl) => {
+    const message: ConnectionStateChangedMessage = { type: 'CONNECTION_STATE_CHANGED', state, serverUrl };
+    // No popup is normally open, so ignoring its absent receiver is expected.
+    void chrome.runtime.sendMessage(message).catch(() => undefined);
+  },
 });
 
-void wsClient.start();
+const startup = wsClient.start();
+void startup.catch((err) => console.error('[ws] failed to start:', err));
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (wsClient.isReconcileAlarm(alarm.name)) {
@@ -27,8 +33,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
       switch (message?.type) {
         case 'GET_STATUS':
+          // A freshly woken service worker must reconcile persisted intent
+          // before reporting its state, otherwise the popup sees stale "disconnected".
+          await startup;
           sendResponse({
             connected: wsClient.isConnected(),
+            state: wsClient.getConnectionState(),
             serverUrl: wsClient.getServerUrl(),
           });
           break;

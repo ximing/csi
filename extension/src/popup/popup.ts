@@ -1,6 +1,8 @@
 import './popup.css';
 import { DEFAULT_WS_URL } from '../shared/constants';
 import type {
+  ConnectionState,
+  ConnectionStateChangedMessage,
   ConnectRequest,
   RuntimeRequest,
   StatusResponse,
@@ -33,16 +35,21 @@ function sendMessage<T>(message: RuntimeRequest): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
 }
 
-async function refreshStatus(): Promise<void> {
-  const status = await sendMessage<StatusResponse>({ type: 'GET_STATUS' });
-  const connected = !!status?.connected;
-  statusDot.className = connected ? 'dot dot-on' : 'dot dot-off';
-  statusText.textContent = i18n(connected ? 'statusConnected' : 'statusDisconnected');
-  if (status?.serverUrl) {
-    serverUrlInput.value = status.serverUrl;
+function renderStatus(state: ConnectionState, serverUrl: string): void {
+  statusDot.className = `dot dot-${state}`;
+  statusText.textContent = i18n(
+    state === 'connected' ? 'statusConnected' : state === 'connecting' ? 'statusConnecting' : 'statusDisconnected',
+  );
+  if (serverUrl) {
+    serverUrlInput.value = serverUrl;
   } else if (!serverUrlInput.value) {
     serverUrlInput.value = DEFAULT_WS_URL;
   }
+}
+
+async function refreshStatus(): Promise<void> {
+  const status = await sendMessage<StatusResponse>({ type: 'GET_STATUS' });
+  renderStatus(status?.state ?? 'disconnected', status?.serverUrl ?? '');
 }
 
 connectButton.addEventListener('click', async () => {
@@ -67,6 +74,7 @@ testButton.addEventListener('click', async () => {
     const result = await sendMessage<TestConnectionResponse>(request);
     testResult.className = result?.ok ? 'test-result ok' : 'test-result fail';
     testResult.textContent = i18n(result?.ok ? 'testOk' : 'testFailed');
+    await refreshStatus();
   } finally {
     testButton.disabled = false;
   }
@@ -74,6 +82,13 @@ testButton.addEventListener('click', async () => {
 
 applyStaticTexts();
 void refreshStatus();
+
+chrome.runtime.onMessage.addListener((message: unknown) => {
+  const stateChanged = message as Partial<ConnectionStateChangedMessage>;
+  if (stateChanged.type === 'CONNECTION_STATE_CHANGED' && stateChanged.state && stateChanged.serverUrl !== undefined) {
+    renderStatus(stateChanged.state, stateChanged.serverUrl);
+  }
+});
 
 document.getElementById('settings-link')!.addEventListener('click', (e) => {
   e.preventDefault();
