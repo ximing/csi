@@ -221,7 +221,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 | 11 | `hover` | `selector`*, `frame` | `{success, x, y, tag, text}` | Input.dispatchMouseEvent mouseMoved，不过 mousePressed。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 12 | `key_type` | `text`* | `{success, length}` | `Input.insertText` |
 | 13 | `send_keys` | `keys`* , `repeat`(1-100) | `{success, dispatched, os}` | 支持 `Enter`/`Escape`/`Tab`/`F1-F12`/单字母数字、修饰键 `Alt/Ctrl/Cmd/Meta/Shift/Mod`（Mod 自动解析）、空格分隔多段 |
-| 14 | `cdp` | `method`*, `params` | 原始 CDP 返回 | 裸透传 escape hatch |
+| 14 | `cdp` | `method`*, `params` | 规范化后的 CDP 结果（见 §4.2） | 命令 params 裸透传 escape hatch；返回不是字面「原始 CDP」 |
 | 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
 | 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
@@ -241,6 +241,24 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - `frame` 在七个工具上：`@e` 忽略 `frame`（以 ref 表 frameId 为准）；CSS / evaluate 的 `code` 无 `frame` 在顶层、有 `frame` 在该帧（跨域走跨域错误）。
 - `screenshot`：`fullPage` 与 `selector` 仍互斥；`fullPage + frame` clip 到该 iframe 元素在父页视口里的可见盒（不是子文档完整滚动高度）。
 - `wait`：`url` 仍看 tab URL；`text`/`selector` 在指定帧（或 `@e` 所在帧）轮询。
+
+### 4.2 `cdp` 返回形状
+
+`cdp` 的**命令方向**是裸透传：`method` + `params` 原样交给 `chrome.debugger.sendCommand`。**返回方向**不是字面「原始 CDP」——扩展把结果收成 JSON object，再放进所有工具共用的传输信封。不要把下面三层搞混：
+
+- HTTP `/command` 成功体：`{ "success": true, "data": <如下> }`（§2.1）。失败是 `{ "success": false, "error": "..." }`。
+- WS `tool_result`：`payload` 为 `{ "data": <如下> }` 或 `{ "error": "..." }`（§3.3）。
+- 上面两层是全部 21 个工具共用的传输信封。`<如下>` 才是本工具的「返回 data」。
+
+`data` 规则（扩展 `CdpTool`；daemon `PostProcess` 对 `cdp` 原样转发，**没有二次包装**）：
+
+| CDP 结果（`chrome.debugger.sendCommand` 的返回） | `data` |
+|---|---|
+| `null` / `undefined`（无返回的命令，如 `Page.bringToFront`） | `{}` |
+| 非数组 object | 原样 |
+| 数组或原始值（string / number / boolean） | `{ "value": <结果> }` |
+
+绝大多数 CDP 方法走「非数组 object 原样」（例如 `Runtime.evaluate` 得到 `{result:{type,value,...}}`）。`{value}` 包装只出现在结果本身是数组或原始值时，用来保证 `data` 始终是 JSON object。
 
 ## 5. 大结果后处理（daemon 侧）
 

@@ -191,7 +191,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		name:        "cdp",
-		description: "Raw Chrome DevTools Protocol passthrough on the current tab (escape hatch).",
+		description: "Raw Chrome DevTools Protocol command passthrough on the current tab (escape hatch). Returns the CDP result object as-is; empty/null becomes {}; arrays and primitives are wrapped as {value}. This is the tool data inside the HTTP {success,data} envelope; the daemon does not wrap again.",
 		props: map[string]any{
 			"method": strProp("CDP method, e.g. \"Page.captureScreenshot\"."),
 			"params": map[string]any{"type": "object", "description": "CDP method parameters."},
