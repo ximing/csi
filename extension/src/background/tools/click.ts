@@ -63,7 +63,7 @@ export class ClickTool implements Tool {
     }>('Runtime.evaluate', {
       expression: `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return { error: 'click: element not found: ${selector}' };
+        if (!el) return { error: 'click: element not found: ' + ${JSON.stringify(selector)} };
         el.scrollIntoView({ block: 'center' });
         el.click();
         return { success: true, tag: el.tagName, text: el.textContent?.slice(0, 100) };
