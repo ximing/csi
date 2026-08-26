@@ -237,8 +237,10 @@ git tag v0.1.0 && git push origin v0.1.0
 
 ## 安全说明
 
-- daemon 只绑 `127.0.0.1`；v1 没有鉴权——回环就是隔离边界。任何以你的用户身份运行的进程都能驱动你的浏览器。
+- daemon 只绑 `127.0.0.1`；v1 没有鉴权——回环就是隔离边界（本机 vs 网络，不是进程沙箱）。能 `POST /command` 的进程就能驱动你的浏览器。`/ws` 另外拒绝非 `chrome-extension://…` 的浏览器 Origin；空 Origin（curl、测试）仍放行。这不是鉴权——本机进程照样能连。抢到槽位的客户端只能收到 `tool_call`，不能驱动真扩展。
 - `evaluate` 和 `cdp` 是页面内的任意代码执行通道。这是设计能力，不是 bug——据此对待技能提示。
+- `screenshot` / `save_as_pdf` 按调用方给的 `path` 原样落盘（父目录自建、覆盖写）。没有路径沙箱：能 `POST /command` 的本地进程已经在 loopback 信任域里，自己也能写这些文件。`path` 请用绝对路径——相对路径相对的是 daemon 的 cwd，不是调用方的。详见 [docs/protocol.md](docs/protocol.md) §7。
+- `upload` 把调用方给的 `files` 路径原样交给 Chrome `DOM.setFileInputFiles`。没有 Downloads（或其它）路径沙箱：产品就是把用户指定的本地文件——包括项目文件——塞进网页 file input。随机网页不能 `POST /command`；若 AI 被诱导去上传私钥，那是 AI 客户端/用户的信任问题。详见 [docs/protocol.md](docs/protocol.md) §7。
 
 ## 许可
 

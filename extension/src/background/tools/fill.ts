@@ -108,7 +108,7 @@ export class FillTool implements Tool {
     }>('Runtime.evaluate', {
       expression: `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return { error: 'fill: element not found: ${selector}' };
+        if (!el) return { error: 'fill: element not found: ' + ${JSON.stringify(selector)} };
         ${fillSnippet('el', value)}
       })()`,
       returnByValue: true,

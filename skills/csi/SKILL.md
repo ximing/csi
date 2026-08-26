@@ -27,10 +27,10 @@ Control the user's real Chrome browser (with their login sessions) via a local d
 | `hover` | `selector`*, `frame` | `{success,x,y,tag,text}` | CSS :hover 菜单。不是 DOM mouseover |
 | `key_type` | `text`* | `{success, length}` | `Input.insertText` — types text at the focused element |
 | `send_keys` | `keys`*, `repeat`(1-100) | `{success, dispatched, os}` | `Enter`/`Escape`/`Tab`/`F1-F12`/single letters+digits, modifiers `Alt/Ctrl/Cmd/Meta/Shift/Mod` (`Mod` auto-resolves to Cmd on macOS, Ctrl elsewhere), space-separated combos — see [Special keys](#form-submit--special-keys) |
-| `cdp` | `method`*, `params` | raw CDP response | Raw CDP passthrough — what `evaluate` is to JS, `cdp` is to CDP. Low-level escape hatch for cases the tools above don't cover |
+| `cdp` | `method`*, `params` | CDP object as-is; `{}` if empty; `{value}` if array/primitive | Command passthrough (what `evaluate` is to JS). HTTP envelope is still `{success, data}` like every tool. `data` is always a JSON object: non-array objects unchanged, null/undefined → `{}`, arrays and primitives → `{value: ...}`. Daemon does not wrap again |
 | `screenshot` | `format`(png\|jpeg), `quality`(0-100), optional `selector` (@e/CSS), optional `fullPage`, optional `path`, optional `frame` | `{format, path, sizeBytes, mimeType}` | Returns a file path, not base64 — see [Screenshots](#screenshots). `fullPage` and `selector` are mutually exclusive |
 | `save_as_pdf` | `paper_format`, `landscape`, `scale`, `print_background`, `file_name`, optional `path` | `{path, sizeBytes, mimeType, pageTitle}` | Render current page → PDF, returns a file path — see [Save as PDF](#save-the-current-page-as-pdf) |
-| `upload` | `selector`*, `files`*(string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` on a file input |
+| `upload` | `selector`*, `files`*(string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` on a file input. Paths used as-is (project files in-scope; not sandboxed to ~/Downloads) |
 | `list_tabs` | — | `{success, tabs:[{tabId, url, title, active, groupTitle}]}` | Inspect tabs in the current session |
 | `close_tab` | — | `{success, closed, reason?}` | Close the current tab in the session |
 | `close_session` | — | `{success, closed}` | Close all tabs in the session — see [Sessions](#sessions) for when to call |
@@ -110,7 +110,7 @@ curl ... -d '{"action":"screenshot","args":{"selector":"@e123"}}'
 curl ... -d '{"action":"screenshot","args":{"fullPage":true}}'
 ```
 
-`fullPage` and `selector` are mutually exclusive — do not pass both. A caller-supplied `path` is honored verbatim (parent dirs created, existing file overwritten) — use a unique name to avoid clobbering. `save_as_pdf` follows the same rule.
+`fullPage` and `selector` are mutually exclusive — do not pass both. A caller-supplied `path` is honored verbatim (parent dirs created, existing file overwritten) — use a unique **absolute** path to avoid clobbering; relative paths resolve against the daemon's cwd, not yours. `save_as_pdf` follows the same rule.
 
 ## Prefer snapshot over CSS/JS selectors
 
@@ -186,9 +186,9 @@ Alternatively, dispatch a key event programmatically with `evaluate`:
 - `scale`: `1.0` (default), range `[0.1, 2.0]`
 - `print_background`: `true` (default) — keep background colors
 - `file_name`: override the output file name (default: sanitized page title + `.pdf`)
-- `path`: caller-supplied output path; if absent, daemon picks a default under OS temp dir
+- `path`: caller-supplied output path; if absent, daemon picks a default under OS temp dir. Prefer absolute; relative is vs the daemon cwd.
 
-`path` semantics match `screenshot`: written verbatim, parent dirs auto-created, existing files overwritten.
+`path` semantics match `screenshot`: written verbatim (including `..`), parent dirs auto-created, existing files overwritten.
 
 Decoded PDF cap is 100 MB. Above that the daemon refuses; reduce `scale` or split the page.
 

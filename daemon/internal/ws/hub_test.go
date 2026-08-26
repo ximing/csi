@@ -354,3 +354,75 @@ func TestHandshakeEmptyToolsAdvertised(t *testing.T) {
 		t.Fatalf("ExtensionTools=%v", got)
 	}
 }
+
+func TestOriginAllowed(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		origin string
+		want   bool
+	}{
+		{"", true},
+		{"chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef", true},
+		{"CHROME-EXTENSION://abcdefghijklmnopqrstuvwxyzabcdef", true},
+		{"chrome-extension://", false},
+		{"https://evil.example", false},
+		{"http://127.0.0.1:3000", false},
+		{"http://localhost:10088", false},
+		{"http://127.0.0.1:10088", false},
+		{"null", false},
+		{"file://", false},
+	}
+	for _, tc := range cases {
+		if got := originAllowed(tc.origin); got != tc.want {
+			t.Errorf("originAllowed(%q) = %v, want %v", tc.origin, got, tc.want)
+		}
+	}
+}
+
+func TestRejectWebOriginCannotKick(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	dialHello(t, wsURL)
+	waitFor(t, h.Connected, "first connection")
+	gen := h.currentGen()
+
+	hdr := http.Header{}
+	hdr.Set("Origin", "https://evil.example")
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, hdr)
+	if err == nil {
+		t.Fatal("web origin should be rejected")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("got resp=%v err=%v, want 403", resp, err)
+	}
+	if !h.Connected() {
+		t.Fatal("incumbent connection must survive rejected origin")
+	}
+	if got := h.currentGen(); got != gen {
+		t.Fatalf("gen = %d, want %d (no kick)", got, gen)
+	}
+}
+
+func TestChromeExtensionOriginCanHello(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	hdr := http.Header{}
+	hdr.Set("Origin", "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, hdr)
+	if err != nil {
+		t.Fatalf("extension origin dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	hello, _ := json.Marshal(map[string]any{"extensionVersion": "0.0.1"})
+	if err := conn.WriteJSON(Message{Type: MsgHello, Payload: hello}); err != nil {
+		t.Fatal(err)
+	}
+	var ack Message
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatal(err)
+	}
+	if ack.Type != MsgHelloAck {
+		t.Fatalf("ack type = %q, want %q", ack.Type, MsgHelloAck)
+	}
+	waitFor(t, h.Connected, "connected")
+}

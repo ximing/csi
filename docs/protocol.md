@@ -32,6 +32,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 - `action` (string, 必填)：工具名，见 §4。
 - `args` (object, 可选)：工具参数。
 - `session` (string, 可选)：会话名。同一任务始终用同一 session；缺省为 `"default"`。
+- 请求体整包上限 64MB（传输层，不按 action 分级）。超出则 `error` 为 `bad request body: ...`（HTTP 仍 200）。`fill.value` / `evaluate.code` / `cdp.params` 无字段级 maxLen，受此整包上限约束。
 
 处理流程：
 
@@ -126,6 +127,7 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 - 扩展连接 `ws://127.0.0.1:<port>/ws`。
 - 扩展在 `chrome.storage.local` 持久化连接意愿（`ws_should_connect`、`local_url`），service worker 被挂起后通过 `chrome.alarms`（周期 0.5 分钟（可在 options 页改为 30s/60s/关闭），名 `csi-reconcile`）做 reconcile：意愿为连接且当前未连接则重连。
 - daemon 侧同一时间**只接受一个扩展连接**：新连接须在 5 秒内发送 `hello` 完成握手，握手通过后才踢掉旧连接；首条消息非 `hello` 或超时直接关闭，不影响在位连接。
+- `/ws` 升级校验 Origin：空 Origin（非浏览器客户端：测试、curl、未来 direct_cdp）和 `chrome-extension://*` 放行；其它 Origin 拒绝升级（HTTP 403）。扩展 id 不固定（manifest 无 `key`，未打包每机不同），只认 scheme。popup/options 不直连 `/ws`（经 service worker）。这不是鉴权，挡的是浏览器网页，不是本机任意进程。
 - daemon 每 30s 发 `ping`，扩展回 `pong`（应用层，非 WS 控制帧）。daemon 对连接设读看门狗：2 倍 ping 间隔内未收到任何消息（`pong` 或其它消息均算活跃）即判定半死、主动断连，由扩展 reconcile 重连。
 
 ### 3.2 消息格式
@@ -219,10 +221,10 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 | 11 | `hover` | `selector`*, `frame` | `{success, x, y, tag, text}` | Input.dispatchMouseEvent mouseMoved，不过 mousePressed。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 12 | `key_type` | `text`* | `{success, length}` | `Input.insertText` |
 | 13 | `send_keys` | `keys`* , `repeat`(1-100) | `{success, dispatched, os}` | 支持 `Enter`/`Escape`/`Tab`/`F1-F12`/单字母数字、修饰键 `Alt/Ctrl/Cmd/Meta/Shift/Mod`（Mod 自动解析）、空格分隔多段 |
-| 14 | `cdp` | `method`*, `params` | 原始 CDP 返回 | 裸透传 escape hatch |
+| 14 | `cdp` | `method`*, `params` | 规范化后的 CDP 结果（见 §4.2） | 命令 params 裸透传 escape hatch；返回不是字面「原始 CDP」 |
 | 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
-| 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` |
+| 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
 | 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}]}` | 仅当前 session |
 | 19 | `close_tab` | — | `{success, closed, reason?}` | 关当前标签 |
 | 20 | `close_session` | — | `{success, closed}` | 关 session 全部标签 |
@@ -240,10 +242,29 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - `screenshot`：`fullPage` 与 `selector` 仍互斥；`fullPage + frame` clip 到该 iframe 元素在父页视口里的可见盒（不是子文档完整滚动高度）。
 - `wait`：`url` 仍看 tab URL；`text`/`selector` 在指定帧（或 `@e` 所在帧）轮询。
 
+### 4.2 `cdp` 返回形状
+
+`cdp` 的**命令方向**是裸透传：`method` + `params` 原样交给 `chrome.debugger.sendCommand`。**返回方向**不是字面「原始 CDP」——扩展把结果收成 JSON object，再放进所有工具共用的传输信封。不要把下面三层搞混：
+
+- HTTP `/command` 成功体：`{ "success": true, "data": <如下> }`（§2.1）。失败是 `{ "success": false, "error": "..." }`。
+- WS `tool_result`：`payload` 为 `{ "data": <如下> }` 或 `{ "error": "..." }`（§3.3）。
+- 上面两层是全部 21 个工具共用的传输信封。`<如下>` 才是本工具的「返回 data」。
+
+`data` 规则（扩展 `CdpTool`；daemon `PostProcess` 对 `cdp` 原样转发，**没有二次包装**）：
+
+| CDP 结果（`chrome.debugger.sendCommand` 的返回） | `data` |
+|---|---|
+| `null` / `undefined`（无返回的命令，如 `Page.bringToFront`） | `{}` |
+| 非数组 object | 原样 |
+| 数组或原始值（string / number / boolean） | `{ "value": <结果> }` |
+
+绝大多数 CDP 方法走「非数组 object 原样」（例如 `Runtime.evaluate` 得到 `{result:{type,value,...}}`）。`{value}` 包装只出现在结果本身是数组或原始值时，用来保证 `data` 始终是 JSON object。
+
 ## 5. 大结果后处理（daemon 侧）
 
 - `screenshot`：扩展返回 `{format, dataLength, data(base64)}`。daemon base64 解码后写入 `args.path`（父目录自动创建、覆盖写）；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>.<ext>`。最终响应 `{format, path, sizeBytes, mimeType}`。
 - `save_as_pdf`：扩展返回 `{data(base64), dataLength, pageTitle, requestedFileName}`。落盘规则同上；默认文件名取页面标题（清洗非法字符）+ `.pdf`。解码后 >100MB 拒绝并返回错误。
+- `path` 按调用方字面写入：不校验 `..`、不要求绝对路径、不限制基目录。相对路径相对 **daemon 进程的 cwd**（与调用方 cwd 无关；登录自启时 cwd 通常是 `/` 或 `$HOME`，不是项目目录）。调用方应传绝对路径。未提供 `path` 才落到 `$TMPDIR`。这是产品能力（要把截图/PDF 存到项目目录），不是路径遍历漏洞，威胁模型见 §7。
 
 ## 6. 版本与兼容
 
@@ -256,8 +277,20 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - 对 iframe 的 `@e` 再 snapshot 无法被 daemon 识别：0.5 扩展会拍到空壳，客户端应按 `/status.version` 与 `extension_tools` 规避。
 - 0.6.0 起同域 iframe 可进入；`isolated:true`（跨域 OOPIF、不透明源、sandbox 无 allow-same-origin 等）只列不进。
 
-## 7. 安全约束
+## 7. 安全约束（威胁模型）
+
+隔离边界：
 
 - daemon 仅监听 `127.0.0.1`。
-- 无认证（v1 从简）；依赖本机回环隔离。
-- `evaluate`/`cdp` 是任意代码执行通道——这是设计能力，skill 文档需提示。
+- 无认证（v1 从简）。回环隔离的是「本机 vs 网络」，不是进程沙箱，也不是「本用户 vs 本机其他用户」。
+- 能对 `127.0.0.1:<port>` 发 HTTP（`POST /command`）的主体，视为与 daemon 同一信任域。
+- `/ws` 对浏览器握手校验 Origin（§3.1）：空 Origin 与 `chrome-extension://*` 可连，网页 Origin 不能升级。这不是鉴权——本机非浏览器进程仍可连 `/ws`。网页即便连上也不能驱动真扩展：`tool_call` 只从 daemon 发往当前槽位（§3.3）；hello 后踢旧连接意味着网页占的是槽位本身（DoS / 伪造 `tool_result`），不是给真扩展下发 CDP。
+
+信任域内的能力均为设计，不是漏洞：
+
+- 驱动用户真实 Chrome（含已登录会话）。
+- `evaluate` / `cdp` 是页面内任意代码执行通道——skill 文档需提示。
+- `screenshot` / `save_as_pdf` 按 `args.path` 原样落盘（§5）：任何能 POST `/command` 的本地进程，都能让 daemon 以其自身权限写文件系统上的任意路径。daemon 与典型调用方同 UID；调用方自己也能写这些文件。这不是 confused deputy，也不超出「loopback 是隔离边界」的假设。v1 **不会**把 `path` 锁进 `$TMPDIR` 或某个 screenshots 基目录——那会破坏「存到项目目录」的产品需求。
+- `upload` 的 `files` 按调用方字面交给 Chrome `DOM.setFileInputFiles`（§4）：当前页的 file input 会按 HTML 文件控件语义拿到这些本地文件。这是产品能力（把用户指定的本地文件——包括项目文件——塞进网页上传框），不是路径遍历，也不是网页自己发起的读盘。调用方是能 POST `/command` 的本地主体；随机网页不能打 `/command`。daemon 与典型调用方同 UID，调用方自己也能读这些文件。v1 **不会**把 `files` 锁进 `~/Downloads`——那会破坏「上传项目文件」的产品需求。`cdp` 是裸透传，能发同一条 CDP 命令。
+
+明确不在 v1 范围内：非回环监听、加鉴权、对 `path` / `upload.files` 做沙箱。

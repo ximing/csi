@@ -119,6 +119,10 @@ done
 for cmd in curl tar uname; do
   command -v "$cmd" >/dev/null 2>&1 || die "required command not found: $cmd"
 done
+# unzip 只在装解压版扩展时需要；--no-extension 时跳过（PS 端用内置 Expand-Archive 无此检查）
+if [ "$NO_EXT" -eq 0 ]; then
+  command -v unzip >/dev/null 2>&1 || die "required command not found: unzip (or pass --no-extension to skip the unpacked extension)"
+fi
 
 # ---------- detect OS/arch ----------
 
@@ -185,8 +189,6 @@ if [ "$NO_EXT" -eq 1 ]; then
   info "  https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol"
 else
   step "[2/5] Installing Chrome extension"
-
-  command -v unzip >/dev/null 2>&1 || die "'unzip' not found — install it and re-run"
 
   download "$DL/csi-extension.zip" "$TMP_DIR/extension.zip"
   rm -rf "$EXT_DIR"

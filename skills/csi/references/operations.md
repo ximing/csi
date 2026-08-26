@@ -21,7 +21,7 @@ Directory layout under `~/.csi/`:
 
 Logs roll by day and are pruned automatically (default 3-day retention, 1–30 via Settings) — that's where to look when identifying anomalies from earlier runs.
 
-The daemon binds `127.0.0.1` only — it is never reachable from other machines. There is no authentication in v1; loopback binding is the isolation boundary.
+The daemon binds `127.0.0.1` only — it is never reachable from other machines. There is no authentication in v1; loopback binding is the isolation boundary (this machine vs the network). `screenshot` / `save_as_pdf` write the caller-supplied `path` as-is; prefer an absolute path. `upload` attaches caller-supplied `files` paths as-is (not limited to ~/Downloads).
 
 ## Recovery — what to do when a tool call fails
 

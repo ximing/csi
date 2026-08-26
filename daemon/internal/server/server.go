@@ -91,7 +91,7 @@ type commandResponse struct {
 
 func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	var req commandRequest
-	// upload 工具会带文件路径列表，请求体上限放宽到 64MB
+	// 整包传输层上限 64MB（协议 §2.1），不按 action 分级
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, commandResponse{Success: false, Error: "bad request body: " + err.Error()})
