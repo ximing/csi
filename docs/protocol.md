@@ -127,6 +127,7 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 - 扩展连接 `ws://127.0.0.1:<port>/ws`。
 - 扩展在 `chrome.storage.local` 持久化连接意愿（`ws_should_connect`、`local_url`），service worker 被挂起后通过 `chrome.alarms`（周期 0.5 分钟（可在 options 页改为 30s/60s/关闭），名 `csi-reconcile`）做 reconcile：意愿为连接且当前未连接则重连。
 - daemon 侧同一时间**只接受一个扩展连接**：新连接须在 5 秒内发送 `hello` 完成握手，握手通过后才踢掉旧连接；首条消息非 `hello` 或超时直接关闭，不影响在位连接。
+- `/ws` 升级校验 Origin：空 Origin（非浏览器客户端：测试、curl、未来 direct_cdp）和 `chrome-extension://*` 放行；其它 Origin 拒绝升级（HTTP 403）。扩展 id 不固定（manifest 无 `key`，未打包每机不同），只认 scheme。popup/options 不直连 `/ws`（经 service worker）。这不是鉴权，挡的是浏览器网页，不是本机任意进程。
 - daemon 每 30s 发 `ping`，扩展回 `pong`（应用层，非 WS 控制帧）。daemon 对连接设读看门狗：2 倍 ping 间隔内未收到任何消息（`pong` 或其它消息均算活跃）即判定半死、主动断连，由扩展 reconcile 重连。
 
 ### 3.2 消息格式
@@ -264,7 +265,8 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 
 - daemon 仅监听 `127.0.0.1`。
 - 无认证（v1 从简）。回环隔离的是「本机 vs 网络」，不是进程沙箱，也不是「本用户 vs 本机其他用户」。
-- 能对 `127.0.0.1:<port>` 发 HTTP（`POST /command`）或 WS 的主体，视为与 daemon 同一信任域。
+- 能对 `127.0.0.1:<port>` 发 HTTP（`POST /command`）的主体，视为与 daemon 同一信任域。
+- `/ws` 对浏览器握手校验 Origin（§3.1）：空 Origin 与 `chrome-extension://*` 可连，网页 Origin 不能升级。这不是鉴权——本机非浏览器进程仍可连 `/ws`。网页即便连上也不能驱动真扩展：`tool_call` 只从 daemon 发往当前槽位（§3.3）；hello 后踢旧连接意味着网页占的是槽位本身（DoS / 伪造 `tool_result`），不是给真扩展下发 CDP。
 
 信任域内的能力均为设计，不是漏洞：
 
