@@ -1,6 +1,7 @@
 /**
- * upload (protocol §4.14): DOM.setFileInputFiles on a file input matched by
+ * upload (protocol §4): DOM.setFileInputFiles on a file input matched by
  * CSS selector.
+ * files 按调用方字面传给 Chrome，不限制基目录（协议 §7）。
  */
 import type { ToolArgs } from '../../shared/messages';
 import type { Tool } from './types';

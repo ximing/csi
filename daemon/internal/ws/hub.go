@@ -12,6 +12,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -140,8 +142,23 @@ func (h *Hub) ExtensionTools() []string {
 }
 
 var upgrader = websocket.Upgrader{
-	// v1 无认证，仅依赖 127.0.0.1 回环隔离（协议 §7），不做 Origin 校验。
-	CheckOrigin: func(r *http.Request) bool { return true },
+	// 空 Origin 与 chrome-extension://* 放行；网页 Origin 拒绝（协议 §3.1）。
+	CheckOrigin: func(r *http.Request) bool {
+		return originAllowed(r.Header.Get("Origin"))
+	},
+}
+
+// originAllowed 空 Origin = 本机非浏览器客户端；chrome-extension 只认 scheme（id 不固定）。
+// gorilla 默认比 Origin.host 与 Request.Host，过不了 chrome-extension://。
+func originAllowed(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return strings.EqualFold(u.Scheme, "chrome-extension")
 }
 
 // HandleWS 处理 /ws 端点。首条消息必须是 hello，握手通过后才顶替旧连接。

@@ -191,7 +191,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		name:        "cdp",
-		description: "Raw Chrome DevTools Protocol passthrough on the current tab (escape hatch).",
+		description: "Raw Chrome DevTools Protocol command passthrough on the current tab (escape hatch). Returns the CDP result object as-is; empty/null becomes {}; arrays and primitives are wrapped as {value}. This is the tool data inside the HTTP {success,data} envelope; the daemon does not wrap again.",
 		props: map[string]any{
 			"method": strProp("CDP method, e.g. \"Page.captureScreenshot\"."),
 			"params": map[string]any{"type": "object", "description": "CDP method parameters."},
@@ -206,7 +206,7 @@ var toolDefs = []toolDef{
 			"quality":  intProp("JPEG quality 0-100 (jpeg only)."),
 			"selector": strProp("@eN ref or CSS selector to capture only that element."),
 			"fullPage": boolProp("Capture the full scrollable page. Mutually exclusive with selector."),
-			"path":     strProp("Output file path (default: a temp file)."),
+			"path":     strProp("Output file path, written verbatim (prefer absolute; relative is vs the daemon cwd). Default: a temp file."),
 			"frame":    strProp("Frame context for selector (frameId or URL substring). With fullPage, clips to the iframe's visible box in the parent viewport."),
 		},
 	},
@@ -219,7 +219,7 @@ var toolDefs = []toolDef{
 			"scale":            numProp("Scale factor, 0.1-2."),
 			"print_background": boolProp("Include background graphics."),
 			"file_name":        strProp("Output file name (default: page title)."),
-			"path":             strProp("Output directory or file path (default: a temp file)."),
+			"path":             strProp("Output file path, written verbatim (prefer absolute; relative is vs the daemon cwd). Default: a temp file."),
 		},
 	},
 	{
@@ -227,7 +227,7 @@ var toolDefs = []toolDef{
 		description: "Set files on a file input element.",
 		props: map[string]any{
 			"selector": strProp("@eN ref (from snapshot) or CSS selector of the file input."),
-			"files":    strSliceProp("Absolute paths of files to upload."),
+			"files":    strSliceProp("Local file paths to attach, passed verbatim (prefer absolute). Not restricted to ~/Downloads."),
 		},
 		required: []string{"selector", "files"},
 	},
