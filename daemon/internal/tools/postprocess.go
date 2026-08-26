@@ -98,6 +98,7 @@ func savePDF(args map[string]any, data any) (any, error) {
 }
 
 // writeFileWithParents 父目录自动创建、覆盖写（协议 §5）。
+// path 按字面写入，不校验、不改写；相对路径相对 daemon cwd。这是设计（协议 §7），不是沙箱。
 func writeFileWithParents(path string, data []byte) error {
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

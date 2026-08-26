@@ -110,7 +110,7 @@ curl ... -d '{"action":"screenshot","args":{"selector":"@e123"}}'
 curl ... -d '{"action":"screenshot","args":{"fullPage":true}}'
 ```
 
-`fullPage` and `selector` are mutually exclusive — do not pass both. A caller-supplied `path` is honored verbatim (parent dirs created, existing file overwritten) — use a unique name to avoid clobbering. `save_as_pdf` follows the same rule.
+`fullPage` and `selector` are mutually exclusive — do not pass both. A caller-supplied `path` is honored verbatim (parent dirs created, existing file overwritten) — use a unique **absolute** path to avoid clobbering; relative paths resolve against the daemon's cwd, not yours. `save_as_pdf` follows the same rule.
 
 ## Prefer snapshot over CSS/JS selectors
 
@@ -186,9 +186,9 @@ Alternatively, dispatch a key event programmatically with `evaluate`:
 - `scale`: `1.0` (default), range `[0.1, 2.0]`
 - `print_background`: `true` (default) — keep background colors
 - `file_name`: override the output file name (default: sanitized page title + `.pdf`)
-- `path`: caller-supplied output path; if absent, daemon picks a default under OS temp dir
+- `path`: caller-supplied output path; if absent, daemon picks a default under OS temp dir. Prefer absolute; relative is vs the daemon cwd.
 
-`path` semantics match `screenshot`: written verbatim, parent dirs auto-created, existing files overwritten.
+`path` semantics match `screenshot`: written verbatim (including `..`), parent dirs auto-created, existing files overwritten.
 
 Decoded PDF cap is 100 MB. Above that the daemon refuses; reduce `scale` or split the page.
 

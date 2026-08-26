@@ -237,8 +237,9 @@ git tag v0.1.0 && git push origin v0.1.0
 
 ## 安全说明
 
-- daemon 只绑 `127.0.0.1`；v1 没有鉴权——回环就是隔离边界。任何以你的用户身份运行的进程都能驱动你的浏览器。
+- daemon 只绑 `127.0.0.1`；v1 没有鉴权——回环就是隔离边界（本机 vs 网络，不是进程沙箱）。任何能连上这个端口的进程都能驱动你的浏览器。
 - `evaluate` 和 `cdp` 是页面内的任意代码执行通道。这是设计能力，不是 bug——据此对待技能提示。
+- `screenshot` / `save_as_pdf` 按调用方给的 `path` 原样落盘（父目录自建、覆盖写）。没有路径沙箱：能 `POST /command` 的本地进程已经在 loopback 信任域里，自己也能写这些文件。`path` 请用绝对路径——相对路径相对的是 daemon 的 cwd，不是调用方的。详见 [docs/protocol.md](docs/protocol.md) §7。
 
 ## 许可
 

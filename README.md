@@ -237,8 +237,9 @@ Port: default `10088`, override with the `CSI_PORT` environment variable (set th
 
 ## Security notes
 
-- The daemon binds `127.0.0.1` only; there is no authentication in v1 — loopback is the isolation boundary. Anything running as your user can drive your browser.
+- The daemon binds `127.0.0.1` only; there is no authentication in v1 — loopback is the isolation boundary (this machine vs the network, not a process sandbox). Anything that can reach that port can drive your browser.
 - `evaluate` and `cdp` are arbitrary code execution channels in the page. That is a designed capability, not a bug — treat skill prompts accordingly.
+- `screenshot` / `save_as_pdf` write the caller-supplied `path` as-is (parents created, existing files overwritten). There is no path sandbox: a local process that can `POST /command` is already in the loopback trust domain and can write those files itself. Prefer an absolute `path` — relative ones resolve against the daemon's cwd, which is not the client's. See [docs/protocol.md](docs/protocol.md) §7.
 
 ## License
 

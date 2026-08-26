@@ -244,6 +244,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 
 - `screenshot`：扩展返回 `{format, dataLength, data(base64)}`。daemon base64 解码后写入 `args.path`（父目录自动创建、覆盖写）；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>.<ext>`。最终响应 `{format, path, sizeBytes, mimeType}`。
 - `save_as_pdf`：扩展返回 `{data(base64), dataLength, pageTitle, requestedFileName}`。落盘规则同上；默认文件名取页面标题（清洗非法字符）+ `.pdf`。解码后 >100MB 拒绝并返回错误。
+- `path` 按调用方字面写入：不校验 `..`、不要求绝对路径、不限制基目录。相对路径相对 **daemon 进程的 cwd**（与调用方 cwd 无关；登录自启时 cwd 通常是 `/` 或 `$HOME`，不是项目目录）。调用方应传绝对路径。未提供 `path` 才落到 `$TMPDIR`。这是产品能力（要把截图/PDF 存到项目目录），不是路径遍历漏洞，威胁模型见 §7。
 
 ## 6. 版本与兼容
 
@@ -256,8 +257,18 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - 对 iframe 的 `@e` 再 snapshot 无法被 daemon 识别：0.5 扩展会拍到空壳，客户端应按 `/status.version` 与 `extension_tools` 规避。
 - 0.6.0 起同域 iframe 可进入；`isolated:true`（跨域 OOPIF、不透明源、sandbox 无 allow-same-origin 等）只列不进。
 
-## 7. 安全约束
+## 7. 安全约束（威胁模型）
+
+隔离边界：
 
 - daemon 仅监听 `127.0.0.1`。
-- 无认证（v1 从简）；依赖本机回环隔离。
-- `evaluate`/`cdp` 是任意代码执行通道——这是设计能力，skill 文档需提示。
+- 无认证（v1 从简）。回环隔离的是「本机 vs 网络」，不是进程沙箱，也不是「本用户 vs 本机其他用户」。
+- 能对 `127.0.0.1:<port>` 发 HTTP（`POST /command`）或 WS 的主体，视为与 daemon 同一信任域。
+
+信任域内的能力均为设计，不是漏洞：
+
+- 驱动用户真实 Chrome（含已登录会话）。
+- `evaluate` / `cdp` 是页面内任意代码执行通道——skill 文档需提示。
+- `screenshot` / `save_as_pdf` 按 `args.path` 原样落盘（§5）：任何能 POST `/command` 的本地进程，都能让 daemon 以其自身权限写文件系统上的任意路径。daemon 与典型调用方同 UID；调用方自己也能写这些文件。这不是 confused deputy，也不超出「loopback 是隔离边界」的假设。v1 **不会**把 `path` 锁进 `$TMPDIR` 或某个 screenshots 基目录——那会破坏「存到项目目录」的产品需求。
+
+明确不在 v1 范围内：非回环监听、加鉴权、对 `path` 做沙箱。
