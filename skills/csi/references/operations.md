@@ -57,9 +57,11 @@ Also do not "fix" version mismatches yourself:
 `GET http://127.0.0.1:10088/status` returns:
 
 - `running` (bool) — daemon listening on its port
+- `pid` (int) — daemon process id (start/stop use it for identity checks — don't kill it yourself)
 - `version` (string) — daemon build version
 - `extension_connected` (bool) — a WebSocket client (the browser extension) is attached
 - `extension_version` (string) — version reported by the extension in its `hello`, empty if none connected
+- `extension_tools` (string[] | null) — tool names the extension implements (null = pre-0.4 extension that didn't report)
 - `uptime_seconds` (int) — seconds since daemon start
 - `sessions` (string[]) — names of sessions with live tab state
 - `port` (int) — the port the daemon is bound to (10088 unless overridden)

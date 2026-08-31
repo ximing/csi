@@ -6,11 +6,13 @@
 
 ## 放置约束
 
-- `SKILL.md` 是主文件，frontmatter 的 `description` 决定触发时机，改动要克制但保持触发词覆盖（browser/webpage/screenshot 等）。
-- `SKILL.md` 里的工具表格必须与 `docs/protocol.md` §4 保持同步——加/改工具时这里是必改点之一。
-- `references/` 放按需加载的深度文档（如 `operations.md`），正文中用相对链接引用，不要把大段内容塞回 `SKILL.md`。
+- `SKILL.md` 是主文件，**预算 ≤1200 tokens（cl100k_base，CI 强制）**：只放 frontmatter 触发边界、默认工作流、session 规则、`@e` 优先原则、reference 路由表和 daemon 不可达时的单句恢复；细节一律下沉到 `references/`。
+- frontmatter 的 `description` 同时包含**正向触发**（browser/webpage/screenshot 等）与**排除边界**（只讨论概念不打开页面、headless/隔离 profile/纯 HTTP 抓取、代码审查里出现字样），两类都要保留。
+- `references/` 六个文件：`http-transport.md`（调用格式 + 错误信封 + **21 个工具的索引表**）、`tabs-and-sessions.md`、`interaction.md`、`frames.md`、`large-results.md`、`operations.md`。工具参数只写在对应 reference，不复制回 SKILL.md。
+- 工具清单一致性由 CI 强制：`docs/protocol.md` §4 = daemon `validTools` = MCP `toolDefs` = extension registry = `references/http-transport.md` 的工具索引表（`.github/workflows/skill-ci.yml`）。加/改工具时 `protocol.md` 先行，这五处一起改。
 
 ## 开发偏好
 
 - 写作对象是"使用技能的模型"，不是人类读者：指令要直接、可执行，避免营销化描述。
+- `references/` 内互相引用用相对文件名（如 `tabs-and-sessions.md`），SKILL.md 引用用 `references/xxx.md`；CI 会检查链接存在。
 - 改完后技能的实际生效位置是 `~/.claude/skills/csi/`，本地仓库这份是源；验证时记得同步或重装。
