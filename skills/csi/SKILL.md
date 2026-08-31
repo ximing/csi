@@ -31,21 +31,22 @@ Control the user's real Chrome browser (with their login sessions) via a local d
 | `screenshot` | `format`(png\|jpeg), `quality`(0-100), optional `selector` (@e/CSS), optional `fullPage`, optional `path`, optional `frame` | `{format, path, sizeBytes, mimeType}` | Returns a file path, not base64 — see [Screenshots](#screenshots). `fullPage` and `selector` are mutually exclusive |
 | `save_as_pdf` | `paper_format`, `landscape`, `scale`, `print_background`, `file_name`, optional `path` | `{path, sizeBytes, mimeType, pageTitle}` | Render current page → PDF, returns a file path — see [Save as PDF](#save-the-current-page-as-pdf) |
 | `upload` | `selector`*, `files`*(string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles` on a file input. Paths used as-is (project files in-scope; not sandboxed to ~/Downloads) |
-| `list_tabs` | — | `{success, tabs:[{tabId, url, title, active, groupTitle}]}` | Inspect tabs in the current session |
-| `close_tab` | — | `{success, closed, reason?}` | Close the current tab in the session |
-| `close_session` | — | `{success, closed}` | Close all tabs in the session — see [Sessions](#sessions) for when to call |
+| `list_tabs` | — | `{success, tabs:[{tabId, url, title, active, groupTitle}], currentTarget?}` | Owned tabs only; borrowed current is `currentTarget` |
+| `close_tab` | — | `{success, closed, reason?}` | Close the current **owned** tab; refuses borrowed user tabs |
+| `close_session` | — | `{success, closed}` | Close owned tabs only — see [Sessions](#sessions) for when to call |
 | `list_frames` | — | `{success, frames:[{frameId,parentId,url,name,isolated}]}` | 列当前 tab 全部帧（含顶层）。辅助工具：歧义排查、看 name/完整 URL/isolated。**不是**进框前置步骤 |
 
 `*` marks required args.
 
 ### Tabs and the current tab
 
-Single-tab tools (`snapshot`, `click`, `fill`, `screenshot`, `save_as_pdf`) act on the **current tab** — the one you most recently opened with `navigate` or selected with `find_tab`.
+Single-tab tools (`snapshot`, `click`, `fill`, `screenshot`, `save_as_pdf`) act on the **current tab** — the one you most recently opened with `navigate` or selected with `find_tab`. Do **not** pass Chrome `tabId` yourself; the daemon remembers it from the `session` string on every command.
 
-- **Opening pages**: use `newTab:true` when pages should coexist (comparing, cross-referencing); omit it to send the current tab to a new URL. On `chrome://` / `edge://` pages, `navigate` always opens a new tab.
+- **Opening pages**: use `newTab:true` when pages should coexist (comparing, cross-referencing); omit it to send the **session-owned** current tab to a new URL. If the current target is a **borrowed** user tab, `navigate` (even without `newTab`) **opens a new owned tab** and does not rewrite the user's URL. On `chrome://` / `edge://` pages, `navigate` always opens a new tab.
 - **Going back to an earlier tab**: call `find_tab` to make a tab **you opened earlier in this session** the current one again. Pass the tab's **full URL** — take it from `list_tabs` or the earlier `navigate` result. A bare root domain (`example.com`) may miss a `www.example.com` tab, so prefer the exact URL. By default `find_tab` searches **only this session's own tabs** — it never reaches into the user's other tabs or windows.
-- **Acting on a page the user already has open**: pass `active:true` ("use my open X tab" / "the X page I'm viewing"). It **borrows** the tab the user is currently viewing (returns `borrowed:true`); the borrowed tab is operated in place — it is not pulled into the session's tab group.
+- **Acting on a page the user already has open**: pass `active:true` ("use my open X tab" / "the X page I'm viewing"). It **borrows** the tab the user is currently viewing (returns `borrowed:true`); subsequent snapshot/click stay on that tab until you `navigate` or `find_tab` again. The borrowed tab is not pulled into the session's tab group and is not closed by `close_tab` / `close_session`.
 - If `find_tab` errors with "no tab matching … in this session", the page isn't open in this session — `navigate` with `newTab:true` instead.
+- If a call fails with `stale_target` (session tab was closed), **do not replay the original click**. `list_tabs` or snapshot the `nextTabId` from the error if present; otherwise `navigate` or `find_tab(active:true)`.
 
 ```bash
 curl -s -X POST http://127.0.0.1:10088/command \
