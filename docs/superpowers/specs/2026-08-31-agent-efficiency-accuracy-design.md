@@ -70,7 +70,7 @@ extension 当前只有 WebSocket 连接状态测试，没有覆盖 snapshot、AX
 
 1. 每次 CDP 命令显式携带目标 tabId，不从全局“当前 tab”读取。
 2. 每个 ref 只在一个 `tabId + documentEpoch` 中有效。
-3. 同一 tab 的工具调用严格串行；状态隔离完成前，所有 tab 全局串行。
+3. 同一 tab 的工具调用严格串行；不同 tab 在显式 TargetContext 与 cache 分区完成后允许并行。不经过「所有 tab 全局串行」过渡态，见 [目标隔离与并发模型](./2026-08-31-target-isolation-concurrency-design.md)。
 4. borrowed tab 可以是当前操作目标，但永远不是 session owned tab。
 5. `close_session` 只关闭 owned tab；不得关闭 borrowed tab。
 6. stale target 不自动重放原动作。daemon 可以清理状态，但非幂等操作必须由 Agent 决定是否重试。
@@ -79,6 +79,8 @@ extension 当前只有 WebSocket 连接状态测试，没有覆盖 snapshot、AX
 ---
 
 # 阶段 A：立即止血——全局串行执行
+
+> **取消，不实施。** 在 `WsClient` 上加全局工具队列会把不同 tab、不同 session 也串行化，是过度约束的止血，不是正确的并发模型。终态是阶段 B.5（同 tab 串行、异 tab 并行、跨 session 同 tab 按 tab 串行、daemon 同 session 整段 `Execute` 串行），直接落地，不经过本阶段。可实施规格见 [2026-08-31-target-isolation-concurrency-design.md](./2026-08-31-target-isolation-concurrency-design.md)。下文 A.1–A.3 仅保留为被否决方案的记录，不要按它写 PR。
 
 ## A.1 目的
 
@@ -127,9 +129,9 @@ Session {
 
 语义：
 
-- `navigate` 新建或复用 session tab 后，目标为 `owned`。
+- `navigate` 只复用 owned tab；当前目标为 borrowed 时必须新建 owned tab，不得 `Page.navigate` 用户 tab。新建或复用后目标为 `owned`。
 - `find_tab(active:false)` 命中 owned tab 后，目标为 `owned`。
-- `find_tab(active:true)` 命中用户 active tab 后，目标为 `borrowed`，但不加入 `ownedTabIds`。
+- `find_tab(active:true)` 命中用户 active tab 后：若该 tab 已在 `ownedTabIds` 中则为 `owned`；否则为 `borrowed`（不加入 `ownedTabIds`）。owned 列表只来自 `ownedTabIds`/`_tabIds`，不得回退到 current / `_tabId`。
 - `list_tabs.tabs` 只返回 owned tab。currentTarget 为 borrowed 时，响应增加独立字段
   `currentTarget:{tabId,borrowed:true,url,title}`，不能把它混入 `tabs`。
 - `close_tab` 遇到 borrowed target 时返回 `closed:false, reason:"borrowed target is not owned by this session"`。
@@ -210,6 +212,8 @@ Map<tabId, {
 - 不同 tab：允许并行。
 - 两个 session 同时 borrow 同一用户 tab：按 tab 串行。
 - daemon 同一 session：仍按 session 串行，避免响应完成顺序反转 currentTarget。
+
+**不要先做阶段 A 的全局队列再「细化」成本节。** 可实施规格（队列占用、锁范围、tab 解析、stale 不回退、最小 currentTarget、测试矩阵与 PR 切分）见 [2026-08-31-target-isolation-concurrency-design.md](./2026-08-31-target-isolation-concurrency-design.md)。
 
 ---
 
@@ -306,12 +310,19 @@ snapshot 增加可选 `match`，现有 `selector` 继续承担 scope 作用：
 
 不提供自由文本语义搜索；确定性 role/name/scope 足够覆盖同名控件和大表格定位。
 
-## D.3 snapshot 上限
+## D.3 snapshot 上限与 full 语义
+
+**语义原则：`full` 承诺的是「数据完整性」——节点、属性、层级不裁剪——而不是「无限字节内联」。** 数据完整性与投递通道是两件事：完整性永远拿得到，但超过模型上下文预算的部分改走 artifact 文件（D.4），与 screenshot/PDF 的「daemon 落盘、返回路径」（协议 §5）同一哲学。无限内联在大页面上是假命题：WS 有 64MB 传输上限，模型上下文也装不下数 MB 的 AX 树。真返回了只会被宿主静默截断——Agent 拿残缺数据当完整数据继续推理，错得无声无息，比显式引导更糟。
 
 - compact/interactive 暂时保持默认 24000 字符、范围 1000–80000。
 - match 后仍应用 `max_chars`。
-- full 不再无限输出：默认上限 80000 字符，超过时返回 `result_too_large`，提示使用 selector、match 或 compact。不得截断成非法 JSON。
+- full 树 ≤ 80000 字符：原样内联返回，与现状一致。
+- full 树 > 80000 字符：**自动转 artifact**（D.4），完整 JSON 由 daemon 落盘，返回 preview、path、sourceChars，并附引导语：多数任务用 `selector`/`match` 缩小范围更省。不得截断成非法 JSON，也**不**返回 `result_too_large`——「调用方要完整树」是可满足的请求，不是错误用法。与 evaluate/cdp（D.5）的超限行为对齐，Agent 只需学一套规则。
+- 转 artifact 不影响 ref 分配：refs 在树构建时已写入该 tab 的 store（含 full 模式的 iframe 节点），与结果是否内联无关。
+- `result_too_large` 只保留给真正无法投递的场景（WS 传输超限、写盘失败等）。
 - 返回同时提供 `source_chars` 与 `returned_chars`，避免当前 `chars` 无法表示截断前规模。
+
+命名说明：`full` 同时承担「完整树」和「唯一 JSON 结构化输出」两个含义，不少调用方选它是为了可解析而非真要整棵树。本期不改名；match（D.2）落地后，「为了定位元素而拍全树」的需求由确定性 match 覆盖，full 回归纯粹的完整性逃生口。
 
 ## D.4 通用 artifact 信封
 
@@ -524,17 +535,17 @@ CI 增加：
 
 严格按下面顺序推进，每阶段都可以独立验证：
 
-1. extension 全局工具队列，先止住 target 竞态。
-2. 协议先行：session currentTarget、borrowed 语义、stale/error code。
-3. daemon session 串行与 owned/currentTarget 状态实现。
-4. extension 显式 TargetContext、per-tab document epoch、ref/frame cache 隔离。
-5. 在状态隔离测试通过后，将全局队列细化为 per-tab 队列。
+1. 目标隔离与并发终态（**不是** extension 全局工具队列）：按 [2026-08-31-target-isolation-concurrency-design.md](./2026-08-31-target-isolation-concurrency-design.md) 的 PR Plan（协议 stale/borrowed → daemon session FIFO → 显式 tabId CDP → per-tab ref/frame → dispatcher per-tab 队列）。阶段 A 已取消。
+2. 协议先行：session currentTarget、borrowed 语义、stale/error code（若未包含在第 1 步的协议 PR 中）。
+3. daemon session 串行与 owned/currentTarget 状态实现（与第 1 步 daemon PR 对齐）。
+4. extension 显式 TargetContext、per-tab document epoch、ref/frame cache 隔离（与第 1 步 extension PR 对齐）。
+5. dispatcher per-tab 队列与 close_tab/close_session 获取规则（第 1 步最后一刀；**没有**「先全局队列再细化」）。
 6. 协议先行：snapshot match/context 与各工具结果预算。
 7. extension/daemon artifact、network 分页与 ring buffer、MCP 紧凑输出。
 8. 技能渐进拆分与 token CI。
 9. Codex MCP A/B；根据数据决定默认 transport。
 
-不要把阶段 A 的串行补丁与阶段 B/D 的协议重构塞进同一个提交。状态正确性、结果预算和技能重写分别评审，回归定位更清楚。
+不要把已取消的阶段 A 全局队列与阶段 B/D 的协议重构塞进同一个提交。状态正确性、结果预算和技能重写分别评审，回归定位更清楚。任何实现 PR 都不得夹带 `WsClient` 全局工具队列。
 
 ## 文件地图
 
@@ -544,7 +555,8 @@ CI 增加：
 - `daemon/internal/session/`：owned/currentTarget、session 串行、stale 清理。
 - `daemon/internal/tools/`：结构化错误与 artifact 后处理。
 - `daemon/internal/mcp/`：schema 同步、紧凑输出、artifact path 提示。
-- `extension/src/background/ws-client.ts`：阶段 A 全局队列。
+- `extension/src/background/ws-client.ts`：保持 `void handleToolCall`；**不要**加全局工具队列。
+- `extension/src/background/tab-queue.ts`（新）：per-tab promise 队列。详见 [目标隔离规格](./2026-08-31-target-isolation-concurrency-design.md)。
 - `extension/src/background/debugger-session.ts`：显式 tabId CDP 调用。
 - `extension/src/background/refs.ts`：per-tab/per-document ref store。
 - `extension/src/background/frames.ts`：per-tab frame/cache 生命周期。
@@ -557,7 +569,7 @@ CI 增加：
 
 ## 风险与回滚
 
-- 全局串行会降低并行吞吐，但可以独立回滚；正确性收益优先。
+- 不采用全局工具队列。异 tab / 异 session 并行的正确性由显式 TargetContext、per-tab 分区与 per-tab 队列保证；回滚时不要只撤分区而留下并行 dispatcher。
 - session 状态变化可能影响现有 tab group 行为，必须保留 owned tabs 的对外语义。
 - error 增加 code/details 必须保持旧 `error` 字符串，确保旧 HTTP 客户端继续工作。
 - snapshot 输出变化影响模型行为，必须用固定 eval 对比，不能只做字符串测试。
@@ -581,5 +593,6 @@ CI 增加：
 2. stale target 是否接受“清理状态但不自动重放动作”的规则。
 3. contextual interactive 的祖先角色与最多两层限制是否合适。
 4. network 50/500/2000 与 evaluate/cdp 12000/80000 的预算是否符合实际使用。
-5. 主技能 1,200 tokens 和 p50/p95 降幅是否适合作为验收门槛。
-6. Codex MCP 是否保持 A/B 实验，而不是直接设为默认。
+5. full 超限从原方案的 `result_too_large` 报错改为**自动转 artifact**（与 evaluate/cdp 对齐，见 D.3），是否接受。
+6. 主技能 1,200 tokens 和 p50/p95 降幅是否适合作为验收门槛。
+7. Codex MCP 是否保持 A/B 实验，而不是直接设为默认。

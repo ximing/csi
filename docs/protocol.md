@@ -52,14 +52,31 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 { "success": false, "error": "navigate: url is required" }
 ```
 
+可选字段 `code` / `details`（旧客户端忽略未知字段，继续读 `error`）：
+
+```json
+{
+  "success": false,
+  "error": "session target tab 123 is no longer available",
+  "code": "stale_target",
+  "details": { "tabId": 123, "session": "my-task", "nextTabId": 122 }
+}
+```
+
+`nextTabId` 仅 daemon 在清理失效 owned tab 之后填写；没有仍存活的 owned tab 时省略该字段。daemon **不**自动重放原工具。
+
 常见错误：
 
-| 场景 | error 内容 |
-|---|---|
-| 扩展未连接 | `extension not connected` |
-| 未知工具 | `unknown tool: xxx` |
-| 工具执行失败 | 扩展返回的原始错误消息 |
-| 执行超时 | `tool call timeout (120s)` |
+| 场景 | error 内容 | code |
+|---|---|---|
+| 扩展未连接 | `extension not connected` | — |
+| 未知工具 | `unknown tool: xxx` | — |
+| 工具执行失败 | 扩展返回的原始错误消息 | 见下 |
+| 执行超时 | `tool call timeout (120s)` | — |
+| 注入的非零 `_tabId` 对应 tab 已不存在 | `session target tab <id> is no longer available` | `stale_target` |
+| `_tabId===0` 且工具需要页面目标 | `session has no current tab; call navigate first, or find_tab(active:true) to borrow the user's tab` | `no_session_target` |
+| `@e` 在当前 tab 的 ref store 中不存在 | `<tool>: unknown ref "…". Run snapshot first to get refs.` | `unknown_ref` |
+| `@e` 所属 document epoch 已过期，或节点已替换 | `<tool>: stale ref "…". Page navigated; run snapshot again.` | `stale_ref` |
 
 ### 2.2 `GET /status`
 
@@ -178,29 +195,40 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 { "type": "tool_result", "responseToRequestId": "req-abc-1", "payload": { "error": "click: element not found: #x" } }
 ```
 
+失败 payload 允许可选 `code` / `details`（与 HTTP 信封一致）。无 `code` 时只发 `{error}`。
+
 - 工具默认超时 **120s**（可用 `POST /config` 修改 `tool_timeout_seconds`，5–600；navigate 内部页面加载超时 30s 由扩展自行处理）。
 - 扩展收到未知 `type` 时忽略并打日志。
 
 ### 3.4 daemon 注入的 session 内部字段
 
-daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, groupTitle: string}`。
+daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, borrowed: bool, groupTitle: string}`。
+
+同一 session 的 `POST /command` 按接收顺序 FIFO 执行完整生命周期（注入 → 调用扩展 → 按返回更新 session）。不同 session 可以并行。
 
 | 注入字段 | 类型 | 含义 |
 |---|---|---|
 | `_session` | string | 会话名（用于标签分组 `agent:<session>`） |
-| `_tabId` | int | 该 session 的"当前标签"（最近一次 navigate/find_tab 的 tabId）；**无当前标签时为 `0`**（0 不是合法 Chrome tabId，扩展按"无"处理） |
-| `_tabIds` | int[] | 该 session 拥有的全部 tabId；**无标签时为 `[]`** |
+| `_tabId` | int | 该 session 的**当前目标**（最近一次 `navigate` / `find_tab`，**包括** `active:true` 的借用）；**无当前目标时为 `0`**（0 不是合法 Chrome tabId） |
+| `_tabIds` | int[] | 该 session **拥有**的全部 tabId；**无 owned 标签时为 `[]`** |
+| `_borrowed` | bool | 当前 `_tabId` 是否 **不是** owned（`_tabId ∉ _tabIds`）。无当前目标时为 `false`。始终注入。owned 判定以 `_tabIds` 为准 |
 
-三个字段**始终注入**（缺省值 `0` / `[]`），扩展不得假设字段缺失。调用方传入的 `_` 前缀字段一律被 daemon 覆盖。
+四个字段**始终注入**（缺省值 `0` / `[]` / `false`），扩展不得假设字段缺失。调用方传入的 `_` 前缀字段一律被 daemon 覆盖。HTTP / MCP 调用方**不要**传 Chrome `tabId`；目标由 session 在 daemon 侧记住。
 
-工具返回中含有 `tabId` 时，daemon 更新 session 状态（记录/切换当前标签）。**例外：`find_tab(active:true)` 借用的标签（返回 `borrowed:true`）daemon 不得收编**——不记入 tabIds、不设为当前标签；借用标签只被当次/显式指定 `_tabId` 的工具就地操作，不出现在 `list_tabs`，不被 `close_tab`/`close_session` 关闭。`close_tab`/`close_session` 返回后 daemon 移除对应 tabId。
+工具返回中含有 `tabId` 时，daemon 更新当前目标。`find_tab` 返回 `borrowed:true` 时：**不**记入 `tabIds`，**但**设为当前目标（`_tabId`，`_borrowed:true`）。`borrowed` 的含义是命中 tab **不在**该 session 的 `tabIds` 中；`active:true` 命中用户正在看的 **owned** tab 时必须 `borrowed:false` 并走 owned 路径。`close_tab`/`close_session` 返回后 daemon 按下面规则更新 owned 集。
 
-扩展侧规则（与参考实现对齐）：
+扩展侧规则：
 
-- 单标签工具（snapshot/click/fill/...）作用于"当前标签"：优先 `_tabId`（**若该 id 已失效——如用户手动关闭——扩展必须静默回退**，不得报错），其次扩展内记录的最后操作标签，再次浏览器当前 active tab。
-- `navigate`：无当前标签或 `newTab:true` 时新建标签（`active:false`），否则在当前标签内跳转；`chrome://`/`edge://` 页面上一律新建，**新建的标签同样执行 attach + session 分组**，与其他新建分支一致。
-- `find_tab`：默认只在 `_tabIds` 内按 URL 域名匹配；`active:true` 时借用用户正在前台浏览的标签（返回 `borrowed:true`，不拉入分组）。
-- 标签分组：`navigate` 新建标签时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。
+- **owned 集只来自 `_tabIds`（过滤 `0`）。** 不得在 `_tabIds` 为空时把 `_tabId` 当作 owned。
+- 单标签工具（snapshot/click/fill/...）的目标就是注入的 `_tabId`（校验该 tab 仍存在之后）。**禁止**静默回退到 last-user / 当前窗口 active tab。
+- daemon 注入了非零 `_tabId` 而该 tab 已不存在：返回 `stale_target`，不得改打其它 tab。daemon 从 owned 集移除该 id（若在其中），若当前目标指向它则改到最后一个仍存活的 owned tab 或清空；**不**重放原工具。`details.nextTabId` 有则表示下一次 snapshot 可恢复到哪个 owned tab。
+- `_tabId === 0`：需要页面目标的工具返回 `no_session_target`。例外：`navigate`（无 **owned** 可复用时新建 owned tab）；`find_tab(active:true)`（按用户前台选）。
+- `navigate`：**只复用 owned 当前 tab**（`_tabId ∈ _tabIds` 且 tab 仍在且不是 `chrome://`/`edge://`）。当前目标为 borrowed、`newTab:true`、无 owned 可复用、或处于内部页时，一律 `tabs.create` 新 owned tab（`active:false`），**不得** `Page.navigate` / `reload` 用户 tab，不得把用户 tab 拉进 session 分组。随后当前目标切到这个新 owned tab。
+- `find_tab`：默认只在 `_tabIds` 内按 URL 域名匹配；`active:true` 时选用户正在前台浏览、且 URL 匹配的标签。命中非 owned → `borrowed:true`（不拉入分组，但是当前目标）；命中 owned → `borrowed:false`。
+- `close_tab`：当前目标 **不在** `_tabIds` 时返回 `{success:true, closed:false, reason:"borrowed target is not owned by this session"}`，不关 tab、不改 owned 集。`_tabId ∈ _tabIds` 时关闭该 tab（即使 `_borrowed` 误为 true）。
+- `close_session`：只关闭 `_tabIds`（owned）；即使当前目标是 borrowed，也只清 session 状态，不关用户 tab。空 `_tabIds` + 非零 `_tabId` 不得关掉那个 `_tabId`。
+- `list_tabs.tabs` 只列 owned。当前目标为 borrowed 时增加 `currentTarget:{tabId,borrowed:true,url,title}`，不得把 borrowed 混入 `tabs`。
+- 标签分组：`navigate` **新建 owned 标签**时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。不得对 borrowed tab 分组。
 
 ## 4. 工具清单（21 个）
 
@@ -208,8 +236,8 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 
 | # | name | args | 返回 data | 备注 |
 |---|---|---|---|---|
-| 1 | `navigate` | `url`*, `newTab`, `group_title` | `{success, url, tabId, frameId?}` | 等待 load 完成（30s 超时） |
-| 2 | `find_tab` | `url`*, `active` | `{success, url, tabId, borrowed}` | 见 §3.4 |
+| 1 | `navigate` | `url`*, `newTab`, `group_title` | `{success, url, tabId, frameId?}` | 等待 load 完成（30s 超时）。只复用 owned 当前 tab；当前为 borrowed 时一律新建 owned tab，不改写用户 tab |
+| 2 | `find_tab` | `url`*, `active` | `{success, url, tabId, borrowed}` | 见 §3.4。`borrowed:true` 当且仅当命中 tab 不在该 session 的 `tabIds` 中 |
 | 3 | `snapshot` | `mode`(compact/interactive/full，默认 compact), `selector`, `max_chars`(默认 24000，1000–80000), `frame`(frameId 或未截断 URL 子串) | `{url, title, mode, chars, truncated, tree}` | compact/interactive 的 tree 是 YAML 字符串；full 的 tree 是既有 JSON 数组。iframe 只输出一行不下行，但带 `[ref=@eN]`，跨域行带 `[isolated]`；`frame` 或指向 iframe 的 `selector` 进入该帧再拍。 |
 | 4 | `click` | `selector`*, `frame` | `{success, tag, text}` | DOM 级 `el.click()`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 5 | `fill` | `selector`*, `value`*, `frame` | `{success, tag, mode}` | input/textarea → `mode:"value"`；contenteditable → `mode:"contenteditable"`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
@@ -225,8 +253,8 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 | 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
 | 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
-| 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}]}` | 仅当前 session |
-| 19 | `close_tab` | — | `{success, closed, reason?}` | 关当前标签 |
+| 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}], currentTarget?}` | `tabs` 仅 owned；borrowed 当前目标走独立的 `currentTarget` |
+| 19 | `close_tab` | — | `{success, closed, reason?}` | 关当前 **owned** 标签；borrowed 目标 `closed:false` 且不关 tab |
 | 20 | `close_session` | — | `{success, closed}` | 关 session 全部标签 |
 | 21 | `list_frames` | — | `{success, frames:[{frameId,parentId,url,name,isolated}]}` | 含顶层帧（`parentId` 为 `""`）。`isolated:true` 的帧本期进不去；无 CDP frameId 的 isolated 帧用 `isolated:<url>` 占位。不含 targetId |
 
@@ -237,7 +265,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - 命中帧 isolated → `iframe: cross-origin frame "<url>" is not supported yet. If it is a full page, navigate to its URL.` 禁止返回成功空树。
 - 同域帧已卸载 / context 失效 → `iframe: frame is gone; run snapshot again`。
 - 进框 snapshot 返回 `{url, title, mode, chars, truncated, tree}`，`url`/`title` 用该帧的（title 没有就 `""`），`max_chars` 作用在该帧 YAML 上。只下一层。
-- ref 表：`RefEntry` 加可选 `frameId`（空 = 顶层）。整页 snapshot 与非 iframe 的 selector 子树 → reset（`@e1` 起）；进帧 snapshot → 不 reset，序号续编，父页旧 `@e` 保留。navigate / 关 tab / 主文档 commit 导航 → 清空 ref 表。
+- ref 表：按 tab 分区；`RefEntry` 加可选 `frameId`（空 = 顶层）与 `documentEpoch`。整页 snapshot 与非 iframe 的 selector 子树 → 只 reset **该 tab**（`@e1` 起）；进帧 snapshot → 不 reset，序号续编，父页旧 `@e` 保留。主文档 commit / reload / 关该 tab → 只影响该 tab。主文档 commit 提升该 tab 的 `documentEpoch`；消费 `@e` 时 epoch 不一致 → `stale_ref`。不同 tab 允许相同 `@e` 编号。任意其它 tab 关闭不得清空本 tab 的 ref。
 - `frame` 在七个工具上：`@e` 忽略 `frame`（以 ref 表 frameId 为准）；CSS / evaluate 的 `code` 无 `frame` 在顶层、有 `frame` 在该帧（跨域走跨域错误）。
 - `screenshot`：`fullPage` 与 `selector` 仍互斥；`fullPage + frame` clip 到该 iframe 元素在父页视口里的可见盒（不是子文档完整滚动高度）。
 - `wait`：`url` 仍看 tab URL；`text`/`selector` 在指定帧（或 `@e` 所在帧）轮询。
@@ -276,6 +304,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - `list_frames` 与工具参数 `frame` 自 0.6.0 引入；旧扩展由 daemon 按 §3.3 改写（`frame` 按参数闸）。
 - 对 iframe 的 `@e` 再 snapshot 无法被 daemon 识别：0.5 扩展会拍到空壳，客户端应按 `/status.version` 与 `extension_tools` 规避。
 - 0.6.0 起同域 iframe 可进入；`isolated:true`（跨域 OOPIF、不透明源、sandbox 无 allow-same-origin 等）只列不进。
+- 从本版本起，stale `_tabId` 由静默回退改为 `stale_target` 错误；`_tabId===0` 的单标签工具改为 `no_session_target`。旧 HTTP 客户端仍能读 `error` 字符串，但不再得到「碰巧打到用户当前页」的成功。`find_tab(active:true)` 的借用 tab 成为 session 当前目标（不进入 owned 列表）。
 
 ## 7. 安全约束（威胁模型）
 
