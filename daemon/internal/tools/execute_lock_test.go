@@ -12,13 +12,13 @@ import (
 )
 
 type captureBE struct {
-	mu     sync.Mutex
-	calls  []map[string]any
-	first  chan struct{}
+	mu       sync.Mutex
+	calls    []map[string]any
+	first    chan struct{}
 	inflight atomic.Int32
-	max    atomic.Int32
-	block  chan struct{}
-	mode   string // "fifo" | "overlap"
+	max      atomic.Int32
+	block    chan struct{}
+	mode     string // "fifo" | "overlap"
 }
 
 func (c *captureBE) Name() string    { return "capture" }
@@ -130,6 +130,68 @@ func TestDifferentSessionsOverlap(t *testing.T) {
 	}
 	close(be.block)
 	wg.Wait()
+}
+
+// 同 session 排队中的 Execute 响应 ctx 取消：立即返回、不进后端、不占 gate。
+func TestQueuedExecuteCtxCancel(t *testing.T) {
+	be := &captureBE{first: make(chan struct{}), block: make(chan struct{}), mode: "fifo"}
+	ex := NewExecutor(be, session.NewManager())
+
+	done1 := make(chan error, 1)
+	go func() {
+		_, err := ex.Execute(context.Background(), "navigate", "s", map[string]any{"url": "https://a.com"})
+		done1 <- err
+	}()
+	select {
+	case <-be.first:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first CallTool did not start")
+	}
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	done2 := make(chan error, 1)
+	go func() {
+		_, err := ex.Execute(ctx2, "navigate", "s", map[string]any{"url": "https://b.com"})
+		done2 <- err
+	}()
+	time.Sleep(50 * time.Millisecond) // 让第二个请求排进 FIFO
+	cancel2()
+
+	select {
+	case err := <-done2:
+		if err != context.Canceled {
+			t.Fatalf("queued Execute err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("canceled queued Execute did not return (still waiting on gate)")
+	}
+
+	// 被取消的请求不得进入后端。
+	be.mu.Lock()
+	n := len(be.calls)
+	be.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("canceled Execute reached CallTool, calls=%d", n)
+	}
+
+	// gate 未被取消的等待者占用：放行第一个后，第三个请求能正常执行。
+	done3 := make(chan error, 1)
+	go func() {
+		_, err := ex.Execute(context.Background(), "snapshot", "s", nil)
+		done3 <- err
+	}()
+	close(be.block)
+	if err := <-done1; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done3:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("gate stuck: third Execute never ran after canceled waiter")
+	}
 }
 
 func TestStaleTargetForgetsTab(t *testing.T) {

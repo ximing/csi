@@ -40,7 +40,7 @@ var validTools = map[string]bool{
 }
 
 // toolSince 记录各工具/参数引入版本：旧扩展未上报 tools 时按此表视为缺失；
-// "frame" 不是工具，是 0.6.0 起七个旧工具上的新参数闸（协议 §3.3、§4.1）。
+// "frame" 不是工具，是 0.6.0 起八个旧工具上的新参数闸（协议 §3.3、§4.1）。
 var toolSince = map[string]string{
 	"wait":        "0.4.0",
 	"scroll":      "0.4.0",
@@ -96,7 +96,10 @@ func (e *Executor) Execute(ctx context.Context, action, sess string, args map[st
 		return nil, err
 	}
 
-	release := e.Sessions.Acquire(sess)
+	release, err := e.Sessions.Acquire(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
 	defer release()
 
 	select {

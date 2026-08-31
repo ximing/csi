@@ -123,6 +123,19 @@ export function deleteTargetState(tabId: number): void {
   stores.delete(tabId);
 }
 
+/**
+ * 子帧跨文档导航后只作废该帧的 ref（协议 §4.1：主文档 commit 才提升 epoch）。
+ * 顶层 snapshot 里 iframe 内部节点的 ref 不带 frameId，靠 DOM.resolveNode
+ * 失败兜底成 stale_ref（安全失败，不会点错元素）。
+ */
+export function dropRefsForFrame(tabId: number, frameId: string): void {
+  const store = stores.get(tabId);
+  if (!store) return;
+  for (const [key, entry] of store.refs) {
+    if (entry.frameId === frameId) store.refs.delete(key);
+  }
+}
+
 export function staleRefError(toolName: string, selector: string, tabId: number): ToolError {
   return new ToolError(
     `${toolName}: stale ref "${selector}". Page navigated; run snapshot again.`,

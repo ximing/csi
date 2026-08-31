@@ -28,4 +28,24 @@ describe('frame context isolation', () => {
     expect(() => refs.consumeRef(10, 'click', '@e1')).toThrow(/stale ref/);
     expect(refs.consumeRef(20, 'click', '@e1').backendDOMNodeId).toBe(222);
   });
+
+  it('child frameNavigated does not bump the tab epoch (top-page refs stay valid)', () => {
+    refs.assignRef(10, 111, 'button', 'A');
+    fireDebuggerEvent(10, 'Page.frameNavigated', {
+      frame: { id: 'child-1', parentId: 'root' },
+    });
+    expect(refs.consumeRef(10, 'click', '@e1').backendDOMNodeId).toBe(111);
+  });
+
+  it('child frameNavigated drops only that frame’s refs', () => {
+    refs.assignRef(10, 111, 'button', 'top'); // @e1 顶层
+    refs.assignRef(10, 222, 'button', 'in-frame', 'child-1'); // @e2 子帧
+    refs.assignRef(10, 333, 'button', 'other-frame', 'child-2'); // @e3 另一子帧
+    fireDebuggerEvent(10, 'Page.frameNavigated', {
+      frame: { id: 'child-1', parentId: 'root' },
+    });
+    expect(refs.consumeRef(10, 'click', '@e1').backendDOMNodeId).toBe(111);
+    expect(() => refs.consumeRef(10, 'click', '@e2')).toThrow(/unknown ref/);
+    expect(refs.consumeRef(10, 'click', '@e3').backendDOMNodeId).toBe(333);
+  });
 });

@@ -37,6 +37,11 @@ var ErrNotConnected = errors.New("extension not connected")
 // ErrShuttingDown daemon 正在关闭（Close 唤醒在途调用时使用）。
 var ErrShuttingDown = errors.New("daemon shutting down")
 
+// DefaultMaxReadBytes WS 单消息读上限默认值（协议 §3.2）：160MiB。
+// 取值依据：协议 §5 的 PDF 落盘上限 100MB（解码后）经 base64 传输约 133MiB，
+// 再加 JSON 信封余量；再大就是失控结果（数百 MB 的 evaluate/cdp 字符串）。
+const DefaultMaxReadBytes int64 = 160 << 20
+
 // Message 顶层消息结构（协议 §3.2）。
 type Message struct {
 	Type                string          `json:"type"`
@@ -66,11 +71,12 @@ type Hub struct {
 	ToolTimeout      time.Duration // 工具调用超时，默认 120s（协议 §3.3）
 	PingInterval     time.Duration // 应用层 ping 间隔，默认 30s
 	HandshakeTimeout time.Duration // hello 握手超时，默认 5s
+	MaxReadBytes     int64         // WS 单消息读上限（协议 §3.2），默认 160MiB
 	Logger           *log.Logger
 
 	mu            sync.Mutex
 	conn          *websocket.Conn
-	closed        bool // Close() 后永久置位：握手中的连接也不得再进入
+	closed        bool   // Close() 后永久置位：握手中的连接也不得再进入
 	gen           uint64 // 连接代数，setConn 时递增
 	extVersion    string
 	daemonTools   []string
@@ -92,6 +98,7 @@ func New(daemonVersion string, logger *log.Logger) *Hub {
 		ToolTimeout:      120 * time.Second,
 		PingInterval:     30 * time.Second,
 		HandshakeTimeout: 5 * time.Second,
+		MaxReadBytes:     DefaultMaxReadBytes,
 		Logger:           logger,
 		pending:          make(map[string]pendingCall),
 	}
@@ -171,6 +178,8 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		h.Logger.Printf("ws upgrade failed: %v", err)
 		return
 	}
+	// 单消息读上限（协议 §3.2）：握手帧与业务帧共用同一上限。
+	conn.SetReadLimit(h.MaxReadBytes)
 	extVersion, tools, ok := h.handshake(conn)
 	if !ok {
 		conn.Close() // 未通过 hello 校验，不动在位连接
@@ -192,7 +201,7 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		"tools":         ackTools,
 	})
 	if err := h.writeJSON(conn, Message{Type: MsgHelloAck, Payload: ack}); err != nil {
-		h.connDone(conn, gen)
+		h.connDone(conn, gen, toolResultPayload{Error: ErrNotConnected.Error()})
 		return
 	}
 	go h.pingLoop(conn)
@@ -264,8 +273,11 @@ func (h *Hub) setConn(conn *websocket.Conn, extVersion string, tools *[]string) 
 
 // readLoop 读循环：pong / tool_result。首条 hello 已在握手阶段处理。
 func (h *Hub) readLoop(conn *websocket.Conn, gen uint64) {
+	// 连接退出时唤醒在途调用的失败载荷：默认报「未连接」；
+	// 读超上限时改写为 result_too_large（协议 §2.1/§3.2）。
+	fail := toolResultPayload{Error: ErrNotConnected.Error()}
 	// 清理 defer 先注册、recover 后注册：panic 时 recover 先执行，清理仍会执行。
-	defer h.connDone(conn, gen)
+	defer func() { h.connDone(conn, gen, fail) }()
 	defer func() {
 		if r := recover(); r != nil {
 			h.Logger.Printf("ws: panic in readLoop: %v", r)
@@ -275,6 +287,17 @@ func (h *Hub) readLoop(conn *websocket.Conn, gen uint64) {
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
+			if errors.Is(err, websocket.ErrReadLimit) {
+				// 超限帧截断后 WS 帧边界已不可恢复，连接必须关闭；
+				// 该连接的在途调用按协议 §2.1 以 result_too_large 干净失败，
+				// 扩展经 reconcile（协议 §3.1）重连后续调用不受影响。
+				h.Logger.Printf("ws: message exceeds %d byte read limit, failing pending calls with result_too_large", h.MaxReadBytes)
+				fail = toolResultPayload{
+					Error: fmt.Sprintf("result too large to deliver: ws transport limit exceeded (max %d bytes)", h.MaxReadBytes),
+					Code:  "result_too_large",
+				}
+				return
+			}
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
 				// pong 看门狗：半死连接主动断开，扩展侧 reconcile 会重连
@@ -320,7 +343,8 @@ func (h *Hub) readLoop(conn *websocket.Conn, gen uint64) {
 
 // connDone 连接退出清理：仅唤醒属于本连接代数的 pending，
 // 避免被踢的旧连接退出时误杀新连接已注册的在途调用。
-func (h *Hub) connDone(conn *websocket.Conn, gen uint64) {
+// fail 是唤醒在途调用时投递的失败载荷（普通断开报未连接，读超上限报 result_too_large）。
+func (h *Hub) connDone(conn *websocket.Conn, gen uint64, fail toolResultPayload) {
 	h.mu.Lock()
 	same := h.conn == conn
 	if same {
@@ -330,15 +354,20 @@ func (h *Hub) connDone(conn *websocket.Conn, gen uint64) {
 		h.extTools = nil
 	}
 	h.mu.Unlock()
-	h.sweepPending(gen, ErrNotConnected.Error())
+	h.sweepPendingResult(gen, fail)
 	conn.Close()
 	if same {
 		h.Logger.Printf("extension disconnected")
 	}
 }
 
-// sweepPending 唤醒并移除指定代数的所有在途调用。
+// sweepPending 唤醒并移除指定代数的所有在途调用（报 error 文案，无 code）。
 func (h *Hub) sweepPending(gen uint64, errMsg string) {
+	h.sweepPendingResult(gen, toolResultPayload{Error: errMsg})
+}
+
+// sweepPendingResult 唤醒并移除指定代数的所有在途调用，投递完整失败载荷（可带 code）。
+func (h *Hub) sweepPendingResult(gen uint64, res toolResultPayload) {
 	h.mu.Lock()
 	var chans []chan toolResultPayload
 	for id, pc := range h.pending {
@@ -349,7 +378,7 @@ func (h *Hub) sweepPending(gen uint64, errMsg string) {
 	}
 	h.mu.Unlock()
 	for _, ch := range chans {
-		ch <- toolResultPayload{Error: errMsg}
+		ch <- res
 	}
 }
 

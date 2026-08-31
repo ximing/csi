@@ -174,10 +174,19 @@ func artifactEnvelope(data string) map[string]any {
 	}
 }
 
+// artifactEnvelopeNamed 同 artifactEnvelope，但指定 suggestedName。
+// 走默认落盘路径（$TMPDIR/csi-<suggestedName>-<ts>）的并行测试必须用
+// 各自唯一的名字：时间戳只到毫秒，同名会同路径互相覆盖/删除。
+func artifactEnvelopeNamed(name, data string) map[string]any {
+	env := artifactEnvelope(data)
+	env["artifact"].(map[string]any)["suggestedName"] = name
+	return env
+}
+
 func TestArtifactPersistAndClientEnvelope(t *testing.T) {
 	t.Parallel()
 	content := `{"type":"object","value":{"big":true}}`
-	res, err := PostProcess("evaluate", map[string]any{}, artifactEnvelope(content))
+	res, err := PostProcess("evaluate", map[string]any{}, artifactEnvelopeNamed("persist-envelope.json", content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +207,7 @@ func TestArtifactPersistAndClientEnvelope(t *testing.T) {
 	if filepath.Dir(path) != filepath.Clean(os.TempDir()) {
 		t.Fatalf("path = %q, want under TMPDIR", path)
 	}
-	if !strings.HasPrefix(filepath.Base(path), "csi-csi-evaluate-result.json-") {
+	if !strings.HasPrefix(filepath.Base(path), "csi-persist-envelope.json-") {
 		t.Fatalf("path = %q, want csi-<suggestedName>-<ts>", path)
 	}
 
@@ -249,7 +258,7 @@ func TestArtifactExplicitPath(t *testing.T) {
 func TestArtifactSnapshotKeepsSourceChars(t *testing.T) {
 	t.Parallel()
 	// 协议 §4.3：snapshot full 转 artifact 时客户端响应附带 sourceChars
-	res, err := PostProcess("snapshot", map[string]any{}, artifactEnvelope("tree"))
+	res, err := PostProcess("snapshot", map[string]any{}, artifactEnvelopeNamed("snap-keep-sourcechars.json", "tree"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +269,7 @@ func TestArtifactSnapshotKeepsSourceChars(t *testing.T) {
 	defer os.Remove(d["path"].(string))
 
 	// 其它工具不带 sourceChars
-	res2, err := PostProcess("cdp", map[string]any{}, artifactEnvelope("tree"))
+	res2, err := PostProcess("cdp", map[string]any{}, artifactEnvelopeNamed("cdp-no-sourcechars.json", "tree"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +314,111 @@ func TestArtifactMissingData(t *testing.T) {
 	_, err := PostProcess("evaluate", map[string]any{}, env)
 	if err == nil || !strings.Contains(err.Error(), "artifact.data") {
 		t.Fatalf("err = %v, want missing data error", err)
+	}
+}
+
+// TestArtifactNetworkDetailKeepsMeta 协议 §4：network detail（body_mode:file）
+// 信封同层的 requestId/url/method/status/base64Encoded 必须随客户端响应保留——
+// 客户端拿到落盘文件要知道它属于哪个请求。
+func TestArtifactNetworkDetailKeepsMeta(t *testing.T) {
+	t.Parallel()
+	env := artifactEnvelopeNamed("network-detail-body.bin", "response-body")
+	env["requestId"] = "req-42"
+	env["url"] = "https://example.com/api"
+	env["method"] = "POST"
+	env["status"] = float64(200)
+	env["base64Encoded"] = false
+
+	res, err := PostProcess("network", map[string]any{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := res.(map[string]any)
+	defer os.Remove(d["path"].(string))
+
+	for k, want := range map[string]any{
+		"requestId":     "req-42",
+		"url":           "https://example.com/api",
+		"method":        "POST",
+		"status":        float64(200),
+		"base64Encoded": false,
+	} {
+		if d[k] != want {
+			t.Errorf("field %q = %v, want %v (sibling meta must survive persist)", k, d[k], want)
+		}
+	}
+	// network detail 的返回形状带 sourceChars（协议 §4 detail 行）
+	if d["sourceChars"] != float64(len("response-body")) {
+		t.Errorf("sourceChars = %v", d["sourceChars"])
+	}
+	if _, leaked := d["artifact"]; leaked {
+		t.Error("raw artifact leaked to client response")
+	}
+}
+
+// TestArtifactSnapshotFullKeepsPageMeta 协议 §4.3：snapshot full 转 artifact 时，
+// 信封同层的 url/title/mode/matches 必须保留——客户端要知道 artifact 属于哪个页面。
+func TestArtifactSnapshotFullKeepsPageMeta(t *testing.T) {
+	t.Parallel()
+	env := artifactEnvelopeNamed("snapshot-full-tree.json", "[]")
+	env["url"] = "https://example.com/"
+	env["title"] = "Example"
+	env["mode"] = "full"
+	env["chars"] = float64(10)
+	env["source_chars"] = float64(2)
+	env["returned_chars"] = float64(10)
+	env["matches"] = float64(3)
+
+	res, err := PostProcess("snapshot", map[string]any{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := res.(map[string]any)
+	defer os.Remove(d["path"].(string))
+
+	for k, want := range map[string]any{
+		"url":     "https://example.com/",
+		"title":   "Example",
+		"mode":    "full",
+		"matches": float64(3),
+	} {
+		if d[k] != want {
+			t.Errorf("field %q = %v, want %v", k, d[k], want)
+		}
+	}
+	if d["sourceChars"] != float64(2) {
+		t.Errorf("sourceChars = %v, want 2", d["sourceChars"])
+	}
+}
+
+// TestCdpResultWithUnrelatedArtifactFieldNotHijacked 协议 §4.2：cdp 结果原样透传，
+// 其中合法出现的同名 artifact 字段不符合 §3.5 信封形状时不得被劫持进落盘。
+func TestCdpResultWithUnrelatedArtifactFieldNotHijacked(t *testing.T) {
+	t.Parallel()
+	cases := map[string]map[string]any{
+		"artifact 是字符串": {"artifact": "not-an-envelope"},
+		"artifact 是数字":  {"artifact": float64(1)},
+		"artifact 对象但无 encoding": {"artifact": map[string]any{
+			"data":     "x",
+			"mimeType": "text/plain",
+		}},
+		"artifact 是 nil": {"artifact": nil},
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			res, err := PostProcess("cdp", map[string]any{}, in)
+			if err != nil {
+				t.Fatalf("err = %v, want passthrough without hijack", err)
+			}
+			d, ok := res.(map[string]any)
+			if !ok {
+				t.Fatalf("res = %v, want original map", res)
+			}
+			if len(d) != len(in) {
+				t.Fatalf("res keys = %v, want passthrough of %v", d, in)
+			}
+		})
 	}
 }
 

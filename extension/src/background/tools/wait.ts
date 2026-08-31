@@ -5,8 +5,9 @@
 import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';
 import { sendCommand } from '../debugger-session';
-import { isRefSelector, lookupRef } from '../refs';
-import { parseFrameArg, resolveObjectId } from './element';
+import { consumeRef, isRefSelector } from '../refs';
+import { ToolError } from '../tool-error';
+import { parseFrameArg, resolveRefNode } from './element';
 import { resolveFrame, contextIdForFrame } from '../frames';
 
 type WaitKind = 'text' | 'selector' | 'url';
@@ -40,10 +41,10 @@ export class WaitTool implements Tool {
     );
 
     const currentId = target.tabId;
-    if (picked.kind === 'selector' && isRefSelector(picked.value) && !lookupRef(currentId, picked.value)) {
-      throw new Error(
-        `wait: unknown ref "${picked.value}". Run snapshot first, or wait on a CSS selector / text instead.`,
-      );
+    // 未知/过期 @e 立刻失败，带 code 的 ToolError（unknown_ref/stale_ref），
+    // 与 click/snapshot 等工具的错误契约一致（协议 §3.3、§4 wait「@e 不在 ref 表则立刻失败」）。
+    if (picked.kind === 'selector' && isRefSelector(picked.value)) {
+      consumeRef(currentId, this.name, picked.value);
     }
 
     // frameArg 在进循环之前解析成 frameId（resolveFrame 的错误要立刻抛，不能被轮询吃掉）。
@@ -90,7 +91,10 @@ export class WaitTool implements Tool {
       if (kind === 'url') return await checkUrl(currentId, value);
       if (kind === 'text') return await checkText(currentId, value, frameId);
       return await checkSelector(currentId, value, frameId);
-    } catch {
+    } catch (err) {
+      // ToolError（轮询中途导航导致的 stale_ref 等）是确定性失败，原样上抛，
+      // 不能吞成超时；其余错误按导航途中的瞬时不可用处理，视为未命中继续轮询。
+      if (err instanceof ToolError) throw err;
       return false;
     }
   }
@@ -155,11 +159,11 @@ async function checkText(tabId: number, needle: string, frameId?: string): Promi
 async function checkSelector(tabId: number, selector: string, frameId?: string): Promise<boolean> {
   let objectId: string | undefined;
   if (isRefSelector(selector)) {
-    try {
-      objectId = await resolveObjectId('wait', selector, tabId);
-    } catch {
-      return false;
-    }
+    // consumeRef 的 unknown_ref/stale_ref 是确定性失败（ToolError 经 check 原样透出）；
+    // 节点已从文档移除只是未命中（gone:true 下即命中成功），不能上抛成 stale_ref。
+    const resolved = await resolveRefNode('wait', selector, tabId);
+    if (!resolved.objectId) return false;
+    objectId = resolved.objectId;
   } else {
     const params: Record<string, unknown> = {
       expression: `document.querySelector(${JSON.stringify(selector)})`,

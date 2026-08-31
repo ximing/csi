@@ -419,6 +419,46 @@ describe('dispatchTool concurrency rules (spec 用例 3/4/6/13b/15/17)', () => {
     }
   });
 
+  // TOCTOU（场景 A）：resolveTabTarget 探针通过后排队的间隙 tab 被关，
+  // attach 失败必须包装成 stale_target（带 details.tabId/session），不是裸错。
+  it('tab closed between probe and attach throws stale_target with details', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const blocker = tabQueue.enqueueTab(10, () => gate);
+
+    const p = dispatchTool('snapshot', { _tabId: 10, _tabIds: [10], _session: 's' });
+    const assertion = expect(p).rejects.toMatchObject({
+      code: 'stale_target',
+      details: { tabId: 10, session: 's' },
+    });
+
+    // 等 probe（tabs.get）与 enqueue 完成后再移除 tab，模拟探针通过后被关。
+    await new Promise((r) => setTimeout(r, 0));
+    fireRemoved(10);
+    release();
+
+    await assertion;
+    await blocker;
+  });
+
+  // 场景 B：borrowed 的 chrome:// 受限页 tabs.get 永远成功、attach 永远失败。
+  // 协议暂无对应 code：保持无 code，但错误信息必须带 tab 上下文且可读，
+  // 绝不能误报 stale_target（tab 明明存在，ForgetTab 语义不适用）。
+  it('restricted page target fails attach with readable error, not stale_target', async () => {
+    addTab({ id: 30, url: 'chrome://settings', title: 'Settings', status: 'complete' });
+    try {
+      await dispatchTool('snapshot', { _tabId: 30, _tabIds: [], _session: 's' });
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain('cannot attach debugger to session target tab 30');
+      expect((err as Error).message).toContain('chrome://');
+      expect((err as { code?: string }).code).toBeUndefined();
+    }
+  });
+
   // 用例 17：newTab:true 且 _tabId=10（owned）→ 不占 10 的队列；enqueue 键是 tabs.create 的新 id。
   it('navigate newTab:true with owned current enqueues on the new tab, not the current one', async () => {
     const spy = vi.spyOn(tabQueue, 'enqueueTab');

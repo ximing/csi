@@ -2,6 +2,7 @@
 package session
 
 import (
+	"context"
 	"sort"
 	"sync"
 )
@@ -40,14 +41,17 @@ func (m *Manager) get(name string) *Session {
 }
 
 // Acquire 按 session 名 FIFO 锁住完整 Execute（协议 §3.4）。
-// 先短持 m.mu 取 gate，再 fifo.Lock，避免 /status 的 Names() 被长工具卡住。
-func (m *Manager) Acquire(name string) func() {
+// 先短持 m.mu 取 gate，再 fifo.LockCtx，避免 /status 的 Names() 被长工具卡住。
+// 排队期间 ctx 取消则不入临界区，返回 ctx.Err()（release 为 nil，不可调用）。
+func (m *Manager) Acquire(ctx context.Context, name string) (func(), error) {
 	m.mu.Lock()
 	s := m.get(name)
 	g := s.gate
 	m.mu.Unlock()
-	g.Lock()
-	return func() { g.Unlock() }
+	if err := g.LockCtx(ctx); err != nil {
+		return nil, err
+	}
+	return func() { g.Unlock() }, nil
 }
 
 // Inject 按协议 §3.4 向 args 注入 _session/_tabId/_tabIds/_borrowed。
@@ -86,15 +90,13 @@ func (m *Manager) Update(name, tool string, data any) {
 	switch tool {
 	case "close_tab":
 		closed, _ := d["closed"].(bool)
-		reason, _ := d["reason"].(string)
 		if closed {
 			forgetTabLocked(s, s.CurrentTabID)
 			return
 		}
-		if reason == "borrowed target is not owned by this session" {
-			return
-		}
-		if reason == "tab already closed" {
+		// 对账只看结构化 code（协议 §3.4）：already_closed 才移出 owned 集；
+		// not_owned / close_failed 下 tab 可能仍在，绝不能 forget。
+		if code, _ := d["code"].(string); code == "already_closed" {
 			forgetTabLocked(s, s.CurrentTabID)
 		}
 	case "close_session":

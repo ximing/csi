@@ -125,8 +125,27 @@ export async function dispatchTool(name: string, args: ToolArgs): Promise<unknow
 
   if (TAB_AIMED.has(name)) {
     const tabId = await resolveTabTarget(args);
+    const session = typeof args._session === 'string' ? args._session : 'default';
     return enqueueTab(tabId, async () => {
-      await ensureAttached(tabId);
+      try {
+        await ensureAttached(tabId);
+      } catch (err) {
+        // TOCTOU：resolveTabTarget 的 tabs.get 探针通过后、本任务真正跑到
+        // attach 之前，tab 仍可能被用户关掉 → 与探针失败同语义，报 stale_target
+        // （daemon 据此 ForgetTab 并补 nextTabId，协议 §3.4）。
+        try {
+          await chrome.tabs.get(tabId);
+        } catch {
+          throw new ToolError(`session target tab ${tabId} is no longer available`, 'stale_target', {
+            tabId,
+            session,
+          });
+        }
+        // tab 存在但不可 attach（chrome:// 等受限页）：协议暂无对应 code，
+        // 保持无 code 的裸错，但补齐 tab 上下文让错误可读。
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`cannot attach debugger to session target tab ${tabId}: ${msg}`);
+      }
       const ctx: TargetContext = { tabId, documentEpoch: currentEpoch(tabId) };
       return tool.execute(args, ctx);
     });

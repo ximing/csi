@@ -39,9 +39,10 @@ Interactive elements come with `[ref=@eN]`. Use refs directly with `click` / `fi
 
 ## wait
 
-Args: exactly one of `text` / `selector` / `url`; plus `gone`, `timeout_ms` (default 15000, max 120000), `interval_ms` → `{success, waitedMs, matched}`.
+Args: exactly one of `text` / `selector` / `url`; plus `gone`, `timeout_ms` (default 15000, max 120000), `interval_ms`, `frame` → `{success, waitedMs, matched}`.
 
 - One call polls inside the extension — never write a bash `while` loop plus `evaluate`.
+- `frame` scopes `text`/`selector` polling to that frame (frameId or URL substring); `url` always matches the tab URL. `@e` refs carry their own frame — don't pass `frame` with them.
 - `timeout_ms` must stay below the daemon tool timeout (120 s default).
 - On timeout, read the last URL in the error message, then `snapshot` to see where the page actually went — a timeout is a failure, not a soft pass.
 - An `@e` selector not in this tab's ref table fails immediately — re-snapshot.

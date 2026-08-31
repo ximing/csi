@@ -4,8 +4,8 @@
 import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';
 import { sendCommand } from '../debugger-session';
-import { consumeRef, isRefSelector, staleRefError } from '../refs';
-import { parseFrameArg } from './element';
+import { isRefSelector } from '../refs';
+import { parseFrameArg, resolveObjectId } from './element';
 import { resolveFrame, contextIdForFrame } from '../frames';
 
 const CLICK_FN = `function() {
@@ -31,20 +31,13 @@ export class ClickTool implements Tool {
   }
 
   private async clickByRef(tabId: number, selector: string): Promise<unknown> {
-    const entry = consumeRef(tabId, 'click', selector);
-    const { object } = await sendCommand<{ object?: { objectId?: string } }>(
-      tabId,
-      'DOM.resolveNode',
-      { backendNodeId: entry.backendDOMNodeId },
-    );
-    if (!object?.objectId) {
-      throw staleRefError('click', selector, tabId);
-    }
+    // 与 element.ts 同一解析路径：死 iframe 的 ref 抛 FRAME_GONE，不漂移成通用 stale_ref。
+    const objectId = await resolveObjectId(this.name, selector, tabId);
     const result = await sendCommand<{
       exceptionDetails?: { text: string };
       result: { value?: unknown };
     }>(tabId, 'Runtime.callFunctionOn', {
-      objectId: object.objectId,
+      objectId,
       functionDeclaration: CLICK_FN,
       returnByValue: true,
     });

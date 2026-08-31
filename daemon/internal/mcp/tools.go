@@ -87,8 +87,8 @@ var toolDefs = []toolDef{
 		name:        "snapshot",
 		description: "Capture the accessibility tree of the current page; interactive elements are tagged with @eN refs usable as selectors.",
 		props: map[string]any{
-			"mode":      strEnumProp("Snapshot verbosity. compact=YAML with structure+refs (default); interactive=refs only; full=JSON tree (>80000 chars is saved to a file).", "compact", "interactive", "full"),
-			"selector":  strProp("Limit the snapshot to this element (@e ref or CSS)."),
+			"mode":     strEnumProp("Snapshot verbosity. compact=YAML with structure+refs (default); interactive=refs only; full=JSON tree (>80000 chars is saved to a file).", "compact", "interactive", "full"),
+			"selector": strProp("Limit the snapshot to this element (@e ref or CSS)."),
 			"match": map[string]any{
 				"type":        "object",
 				"description": "Deterministic output filter by role/name, e.g. {\"role\":\"button\",\"name\":\"Delete\"}. name required; exact defaults true (pass false for substring).",

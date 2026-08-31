@@ -3,8 +3,29 @@
  * CDP RemoteObject, and for scrolling elements into view.
  */
 import { sendCommand } from '../debugger-session';
-import { consumeRef, isRefSelector, staleRefError } from '../refs';
+import { consumeRef, isRefSelector, staleRefError, type RefEntry } from '../refs';
 import { contextIdForFrame, FRAME_GONE_ERROR } from '../frames';
+
+export interface ResolvedRefNode {
+  objectId?: string;
+  entry: RefEntry;
+}
+
+/**
+ * consumeRef（unknown_ref/stale_ref 照旧抛 ToolError）+ DOM.resolveNode。
+ * 节点已不在文档中（同文档移除、帧已卸载）时不抛，objectId 为空，语义由调用方定。
+ */
+export async function resolveRefNode(
+  toolName: string,
+  selector: string,
+  tabId: number,
+): Promise<ResolvedRefNode> {
+  const entry = consumeRef(tabId, toolName, selector);
+  const { object } = await sendCommand<{ object?: { objectId?: string } }>(tabId, 'DOM.resolveNode', {
+    backendNodeId: entry.backendDOMNodeId,
+  });
+  return { objectId: object?.objectId, entry };
+}
 
 export async function resolveObjectId(
   toolName: string,
@@ -26,15 +47,12 @@ export function parseFrameArg(toolName: string, raw: unknown): string | undefine
 }
 
 async function objectIdFromRef(toolName: string, selector: string, tabId: number): Promise<string> {
-  const entry = consumeRef(tabId, toolName, selector);
-  const { object } = await sendCommand<{ object?: { objectId?: string } }>(tabId, 'DOM.resolveNode', {
-    backendNodeId: entry.backendDOMNodeId,
-  });
-  if (!object?.objectId) {
+  const { objectId, entry } = await resolveRefNode(toolName, selector, tabId);
+  if (!objectId) {
     if (entry.frameId) throw new Error(FRAME_GONE_ERROR);
     throw staleRefError(toolName, selector, tabId);
   }
-  return object.objectId;
+  return objectId;
 }
 
 async function objectIdFromCss(

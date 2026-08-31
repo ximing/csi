@@ -454,6 +454,114 @@ func TestChromeExtensionOriginCanHello(t *testing.T) {
 	waitFor(t, h.Connected, "connected")
 }
 
+// WS 单消息超读上限（协议 §3.2）：daemon 以 code=result_too_large 的 *ToolError
+// 唤醒该连接的在途调用并断开连接（不是无声断连），扩展重连后新调用正常。
+func TestOversizedFrameFailsPendingWithResultTooLarge(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	h.MaxReadBytes = 1 << 10 // 测试用 1KB 上限
+
+	conn := dialHello(t, wsURL)
+	waitFor(t, h.Connected, "connected")
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := h.CallTool(context.Background(), "evaluate", nil)
+		errCh <- err
+	}()
+	waitFor(t, func() bool { return h.pendingLen() == 1 }, "pending registered")
+
+	// 发一个超过读上限的 tool_result 帧（内容无所谓，frame header 即触发拒收）
+	big := strings.Repeat("x", 4<<10)
+	payload, _ := json.Marshal(map[string]any{"data": map[string]any{"blob": big}})
+	if err := conn.WriteJSON(Message{
+		Type:                MsgToolResult,
+		ResponseToRequestID: "req-whatever",
+		Payload:             payload,
+	}); err != nil {
+		t.Fatalf("write oversized frame: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		var te *ToolError
+		if !errors.As(err, &te) {
+			t.Fatalf("err type %T %v, want *ToolError", err, err)
+		}
+		if te.Code != "result_too_large" {
+			t.Fatalf("code = %q, want result_too_large", te.Code)
+		}
+		if !strings.HasPrefix(te.Message, "result too large to deliver: ws transport limit exceeded") {
+			t.Fatalf("message = %q, want protocol §2.1 wording", te.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending call not failed after oversized frame")
+	}
+
+	// 连接被关闭（超限帧破坏帧边界，不可恢复），hub 报未连接
+	waitFor(t, func() bool { return !h.Connected() }, "connection closed after oversized frame")
+
+	// 扩展 reconcile 重连后：新连接上的调用正常完成，不受旧连接超限影响
+	c2 := dialHello(t, wsURL)
+	waitFor(t, h.Connected, "reconnected")
+	go func() {
+		var msg Message
+		if err := c2.ReadJSON(&msg); err != nil {
+			return
+		}
+		if msg.Type != MsgToolCall {
+			return
+		}
+		payload, _ := json.Marshal(map[string]any{"data": json.RawMessage(`{"ok":true}`)})
+		_ = c2.WriteJSON(Message{Type: MsgToolResult, ResponseToRequestID: msg.RequestID, Payload: payload})
+	}()
+	res, err := h.CallTool(context.Background(), "snapshot", nil)
+	if err != nil {
+		t.Fatalf("call on reconnected conn: %v", err)
+	}
+	if string(res) != `{"ok":true}` {
+		t.Fatalf("res = %s", res)
+	}
+}
+
+// 读上限内的消息不受影响：略低于上限的 tool_result 正常投递。
+func TestFrameUnderReadLimitPasses(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	h.MaxReadBytes = 1 << 20
+
+	conn := dialHello(t, wsURL)
+	waitFor(t, h.Connected, "connected")
+
+	errCh := make(chan error, 1)
+	var res json.RawMessage
+	go func() {
+		var err error
+		res, err = h.CallTool(context.Background(), "evaluate", nil)
+		errCh <- err
+	}()
+
+	var msg Message
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("read tool_call: %v", err)
+	}
+	payload, _ := json.Marshal(map[string]any{"data": map[string]any{"blob": strings.Repeat("y", 512<<10)}})
+	if err := conn.WriteJSON(Message{Type: MsgToolResult, ResponseToRequestID: msg.RequestID, Payload: payload}); err != nil {
+		t.Fatalf("write tool_result: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("call: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CallTool did not return")
+	}
+	if !strings.Contains(string(res), "yyy") {
+		t.Fatalf("res = %.80s...", res)
+	}
+}
+
 // CallTool 把 tool_result payload 的可选 code/details 解析成 *ToolError
 // 传给调用方；无 code 的普通错误仍是裸 error（协议 §3.3）。
 func TestCallToolParsesToolErrorCodeDetails(t *testing.T) {

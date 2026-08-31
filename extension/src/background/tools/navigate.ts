@@ -8,6 +8,7 @@ import { ensureAttached, sendCommand } from '../debugger-session';
 import { addToSessionGroup } from '../tab-group';
 import { enqueueTab } from '../tab-queue';
 import { sessionTabIds } from '../session-tabs';
+import { bumpEpoch } from '../refs';
 import { ToolError } from '../tool-error';
 
 const LOAD_TIMEOUT_MS = 30_000;
@@ -52,13 +53,20 @@ export class NavigateTool implements Tool {
       return enqueueTab(tabId, async () => {
         await ensureAttached(tabId);
         let frameId: string | undefined;
-        const sameUrl = existing!.url === url || existing!.url === `${url}/`;
+        // sameUrl 按任务执行时的当前 url 判定：排队期间页面可能已被并发导航，
+        // 用过期 url 决定 reload vs navigate 会 reload 错误页面却返回请求的 url。
+        const currentUrl = (await chrome.tabs.get(tabId)).url ?? '';
+        const sameUrl = currentUrl === url || currentUrl === `${url}/`;
         if (sameUrl) {
           await sendCommand(tabId, 'Page.reload', { ignoreCache: true });
         } else {
           const nav = await sendCommand<{ frameId: string }>(tabId, 'Page.navigate', { url });
           frameId = nav.frameId;
         }
+        // 同步使旧 ref 失效：MV3 SW 可能丢 Page.frameNavigated（frames.ts 里
+        // context 刷新 disable/enable workaround 就是同款症状），事件驱动兜底之外
+        // 在成功路径上 bump；事件随后到达再 bump 一次无害（同 tab 串行，无双拍）。
+        bumpEpoch(tabId, sameUrl ? 'reload' : 'navigate');
         await this.waitForLoad(tabId);
         return { success: true, url, tabId, frameId };
       });

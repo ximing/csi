@@ -1,7 +1,7 @@
 // 0.6.0 同域 iframe（协议 §4.1）：帧发现、isolated 判定、default-world contextId 表。按 tab 分区。
 
 import { forgetAttached, sendCommand } from './debugger-session';
-import { bumpEpoch, deleteTargetState } from './refs';
+import { bumpEpoch, deleteTargetState, dropRefsForFrame } from './refs';
 import { dropTabQueue } from './tab-queue';
 
 export interface FrameInfo {
@@ -208,12 +208,17 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   } else if (method === 'Runtime.executionContextsCleared') {
     clearContextsForTab(tabId);
   } else if (method === 'Page.frameNavigated') {
-    const frame = (params as { frame?: { parentId?: string } }).frame;
+    const frame = (params as { frame?: { id?: string; parentId?: string } }).frame;
     if (frame && !frame.parentId) {
       bumpEpoch(tabId, 'navigate');
       clearContextsForTab(tabId);
-    } else if (frame?.parentId) {
-      bumpEpoch(tabId, 'navigate');
+    } else if (frame?.parentId && frame.id) {
+      // 子帧导航（同文档导航走 Page.navigatedWithinDocument，不到这里）：只作废
+      // 该帧的 context 与该帧的 ref。不 bump 全 tab epoch——否则懒加载/自刷新
+      // iframe 会把顶页 refs 全部误判 stale，snapshot→click 陷入重拍循环
+      // （协议 §4.1：主文档 commit 才提升 epoch）。
+      contextByFrame.delete(contextKey(tabId, frame.id));
+      dropRefsForFrame(tabId, frame.id);
     }
   }
 });

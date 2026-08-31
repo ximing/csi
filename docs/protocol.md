@@ -79,7 +79,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 | `@e` 所属 document epoch 已过期，或节点已替换 | `<tool>: stale ref "…". Page navigated; run snapshot again.` | `stale_ref` |
 | 结果无法投递（WS 传输超限、落盘写盘失败等） | `result too large to deliver: <reason>` | `result_too_large` |
 
-`result_too_large` 只用于**无法投递**的场景；snapshot full / network detail / evaluate / cdp 的内容超预算**不**走此 code——自动转 artifact（§3.5/§5），因为「调用方要完整内容」是可满足的请求，不是错误用法。错误文案以稳定英文 `result too large to deliver` 开头；`reason` 形如 `ws transport limit exceeded` / `failed to persist artifact: <os error>`。
+`result_too_large` 只用于**无法投递**的场景；snapshot full / network detail / evaluate / cdp 的内容超预算**不**走此 code——自动转 artifact（§3.5/§5），因为「调用方要完整内容」是可满足的请求，不是错误用法。错误文案以稳定英文 `result too large to deliver` 开头；`reason` 形如 `ws transport limit exceeded` / `failed to persist artifact: <os error>`。WS 传输上限的具体数值与两侧行为见 §3.2。
 
 ### 2.2 `GET /status`
 
@@ -160,6 +160,11 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 
 `requestId` 仅在请求/响应类消息中必填。
 
+**单消息字节上限：160MiB（167772160 字节），双向适用。** 取值依据：§5 的 PDF 落盘上限 100MB（解码后）经 base64 传输约 133MiB，再加 JSON 信封余量；超过这个量级的只有失控结果（如 evaluate/cdp 返回数百 MB 字符串）。超限处理：
+
+- daemon 对每条连接设读上限（握手帧与业务帧同一上限）。读到超限帧时 WS 帧边界已不可恢复：daemon 以 `result_too_large`（错误文案前缀 `result too large to deliver: ws transport limit exceeded`，§2.1）唤醒**该连接上全部在途 `tool_call`**，随后关闭连接；扩展经 reconcile（§3.1）重连，后续调用不受影响。
+- 扩展在发送 `tool_result` 前自检序列化后的 UTF-8 字节数，超限则改发 `{error, code:"result_too_large"}`（同上文案前缀），连接保持不断。字节数按 UTF-8 计（JS `string.length` 是 UTF-16 码元数，多字节字符需换算）。
+
 ### 3.3 消息类型
 
 | 方向 | type | payload | 说明 |
@@ -228,7 +233,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - `_tabId === 0`：需要页面目标的工具返回 `no_session_target`。例外：`navigate`（无 **owned** 可复用时新建 owned tab）；`find_tab(active:true)`（按用户前台选）。
 - `navigate`：**只复用 owned 当前 tab**（`_tabId ∈ _tabIds` 且 tab 仍在且不是 `chrome://`/`edge://`）。当前目标为 borrowed、`newTab:true`、无 owned 可复用、或处于内部页时，一律 `tabs.create` 新 owned tab（`active:false`），**不得** `Page.navigate` / `reload` 用户 tab，不得把用户 tab 拉进 session 分组。随后当前目标切到这个新 owned tab。
 - `find_tab`：默认只在 `_tabIds` 内按 URL 域名匹配；`active:true` 时选用户正在前台浏览、且 URL 匹配的标签。命中非 owned → `borrowed:true`（不拉入分组，但是当前目标）；命中 owned → `borrowed:false`。
-- `close_tab`：当前目标 **不在** `_tabIds` 时返回 `{success:true, closed:false, reason:"borrowed target is not owned by this session"}`，不关 tab、不改 owned 集。`_tabId ∈ _tabIds` 时关闭该 tab（即使 `_borrowed` 误为 true）。
+- `close_tab`：当前目标 **不在** `_tabIds`（含 `_tabId === 0`）时返回 `{success:true, closed:false, code:"not_owned"}`，不关 tab、不改 owned 集。`_tabId ∈ _tabIds` 时关闭该 tab（即使 `_borrowed` 误为 true），成功返回 `{success:true, closed:true}`。`closed:false` 时必带机器可读 `code`：`not_owned`（borrowed 或无目标，不动作）、`already_closed`（tab 已不存在，daemon 将其移出 owned 集）、`close_failed`（关闭动作失败且 tab 仍在，daemon **不得**改动 owned 集）。`reason` 仅为人类可读说明；daemon 对账只看 `closed` 与 `code`，**不**做英文字符串匹配。
 - `close_session`：只关闭 `_tabIds`（owned）；即使当前目标是 borrowed，也只清 session 状态，不关用户 tab。空 `_tabIds` + 非零 `_tabId` 不得关掉那个 `_tabId`。
 - `list_tabs.tabs` 只列 owned。当前目标为 borrowed 时增加 `currentTarget:{tabId,borrowed:true,url,title}`，不得把 borrowed 混入 `tabs`。
 - 标签分组：`navigate` **新建 owned 标签**时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。不得对 borrowed tab 分组。
@@ -286,7 +291,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
 | 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
 | 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}], currentTarget?}` | `tabs` 仅 owned；borrowed 当前目标走独立的 `currentTarget` |
-| 19 | `close_tab` | — | `{success, closed, reason?}` | 关当前 **owned** 标签；borrowed 目标 `closed:false` 且不关 tab |
+| 19 | `close_tab` | — | `{success, closed, code?, reason?}` | 关当前 **owned** 标签；`closed:false` 时 `code` ∈ `not_owned`/`already_closed`/`close_failed`（§3.4），daemon 仅对 `already_closed` 移出 owned 集 |
 | 20 | `close_session` | — | `{success, closed}` | 关 session 全部标签 |
 | 21 | `list_frames` | — | `{success, frames:[{frameId,parentId,url,name,isolated}]}` | 含顶层帧（`parentId` 为 `""`）。`isolated:true` 的帧本期进不去；无 CDP frameId 的 isolated 帧用 `isolated:<url>` 占位。不含 targetId |
 

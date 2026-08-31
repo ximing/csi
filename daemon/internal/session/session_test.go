@@ -1,8 +1,10 @@
 package session
 
 import (
+	"context"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestInjectDefaults(t *testing.T) {
@@ -100,14 +102,14 @@ func TestNavigateDoesNotAdoptBorrowedTab(t *testing.T) {
 	}
 }
 
-func TestCloseTabBorrowedReasonDoesNotClear(t *testing.T) {
+func TestCloseTabNotOwnedDoesNotClear(t *testing.T) {
 	t.Parallel()
 	m := NewManager()
 	m.Update("s", "navigate", map[string]any{"success": true, "tabId": float64(10)})
 	m.Update("s", "find_tab", map[string]any{"success": true, "borrowed": true, "tabId": float64(99)})
 	m.Update("s", "close_tab", map[string]any{
 		"success": true, "closed": false,
-		"reason": "borrowed target is not owned by this session",
+		"code": "not_owned", "reason": "borrowed target is not owned by this session",
 	})
 	snap := m.Snapshot("s")
 	if snap.CurrentTabID != 99 || !snap.Borrowed || !reflect.DeepEqual(snap.TabIDs, []int{10}) {
@@ -121,11 +123,26 @@ func TestCloseTabAlreadyClosedForgets(t *testing.T) {
 	m.Update("s", "navigate", map[string]any{"success": true, "tabId": float64(10)})
 	m.Update("s", "navigate", map[string]any{"success": true, "tabId": float64(11)})
 	m.Update("s", "close_tab", map[string]any{
-		"success": true, "closed": false, "reason": "tab already closed",
+		"success": true, "closed": false, "code": "already_closed",
 	})
 	snap := m.Snapshot("s")
 	if !reflect.DeepEqual(snap.TabIDs, []int{10}) || snap.CurrentTabID != 10 {
 		t.Fatalf("already-closed should ForgetTab, snap = %+v", snap)
+	}
+}
+
+// close_failed：关闭动作失败、tab 仍开着，绝不能把它移出 owned 集（协议 §3.4）。
+func TestCloseTabCloseFailedDoesNotForget(t *testing.T) {
+	t.Parallel()
+	m := NewManager()
+	m.Update("s", "navigate", map[string]any{"success": true, "tabId": float64(10)})
+	m.Update("s", "navigate", map[string]any{"success": true, "tabId": float64(11)})
+	m.Update("s", "close_tab", map[string]any{
+		"success": true, "closed": false, "code": "close_failed",
+	})
+	snap := m.Snapshot("s")
+	if !reflect.DeepEqual(snap.TabIDs, []int{10, 11}) || snap.CurrentTabID != 11 {
+		t.Fatalf("close_failed must not ForgetTab, snap = %+v", snap)
 	}
 }
 
@@ -204,5 +221,100 @@ func TestFifoOrder(t *testing.T) {
 	f.Unlock()
 	if <-order != 1 || <-order != 2 {
 		t.Fatal("fifo woke waiters out of order")
+	}
+}
+
+// 取消的等待者：不再占用 gate、从队列摘除，且不阻塞/不吞掉后续授权。
+func TestFifoLockCtxCancel(t *testing.T) {
+	t.Parallel()
+	f := &fifo{}
+	f.Lock()
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	err1 := make(chan error, 1)
+	go func() { err1 <- f.LockCtx(ctx1) }()
+
+	// 等 waiter1 入队后再排 waiter2。
+	waitLen := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			f.mu.Lock()
+			n := len(f.wait)
+			f.mu.Unlock()
+			if n == want {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("wait queue never reached len %d", want)
+	}
+	waitLen(1)
+
+	got2 := make(chan struct{})
+	go func() {
+		if err := f.LockCtx(context.Background()); err != nil {
+			t.Errorf("waiter2 LockCtx: %v", err)
+		}
+		close(got2)
+		f.Unlock()
+	}()
+	waitLen(2)
+
+	cancel1()
+	select {
+	case err := <-err1:
+		if err != context.Canceled {
+			t.Fatalf("waiter1 err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("canceled waiter1 did not return")
+	}
+	waitLen(1) // waiter1 已摘除，队列只剩 waiter2
+
+	// 授权必须落到 waiter2，不被已取消的 waiter1 吞掉。
+	f.Unlock()
+	select {
+	case <-got2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("grant leaked: waiter2 never acquired after waiter1 canceled")
+	}
+
+	// gate 最终空闲，可再获取。
+	if err := f.LockCtx(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.Unlock()
+}
+
+// 取消与授权竞态：ctx 已取消但 Unlock 已把授权发出时，授权优先（返回 nil），
+// 调用方照常 Unlock，授权不泄漏。
+func TestFifoLockCtxCancelAfterGrant(t *testing.T) {
+	t.Parallel()
+	for i := 0; i < 200; i++ {
+		f := &fifo{}
+		f.Lock()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- f.LockCtx(ctx) }()
+		// 等 waiter 入队。
+		for {
+			f.mu.Lock()
+			n := len(f.wait)
+			f.mu.Unlock()
+			if n == 1 {
+				break
+			}
+		}
+		f.Unlock() // 授权与 cancel 竞态
+		cancel()
+		if err := <-done; err == nil {
+			f.Unlock() // 授权优先路径：收下了就必须放掉
+		}
+		// 无论哪条路径赢，gate 最终都必须空闲可再取。
+		if err := f.LockCtx(context.Background()); err != nil {
+			t.Fatalf("iter %d: gate stuck after cancel/grant race", i)
+		}
+		f.Unlock()
 	}
 }

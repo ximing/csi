@@ -93,7 +93,13 @@ export function installChrome(): void {
         },
       },
       debugger: {
-        attach: async () => undefined,
+        attach: async (debuggee: { tabId: number }) => {
+          const tab = tabs.get(debuggee.tabId);
+          if (!tab) throw new Error(`No tab with given id: ${debuggee.tabId}.`);
+          if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('edge://')) {
+            throw new Error(`Cannot access a ${tab.url.slice(0, tab.url.indexOf(':'))}:// URL`);
+          }
+        },
         detach: async () => undefined,
         sendCommand: async (debuggee: { tabId: number }, method: string) => {
           debuggerCalls.push({ tabId: debuggee.tabId, method, t: Date.now() });

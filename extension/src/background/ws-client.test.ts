@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { WsClient } from './ws-client';
+import { utf8ByteLengthExceeds, WsClient } from './ws-client';
 
 type Listener = (event?: unknown) => void;
 
@@ -183,5 +183,88 @@ describe('WsClient connection state', () => {
     const results = socket.sentToolResults();
     expect(results).toHaveLength(1);
     expect((results[0] as { responseToRequestId?: string }).responseToRequestId).toBe('r1');
+  });
+
+  it('replies result_too_large instead of sending an oversized tool_result (protocol §3.2/§2.1)', async () => {
+    const client = new WsClient({
+      onToolCall: async () => ({ blob: 'x'.repeat(4096) }),
+      tools: [],
+      maxMessageBytes: 1024,
+    });
+
+    await client.connect('ws://127.0.0.1:10088/ws');
+    const socket = FakeWebSocket.instances[0]!;
+    socket.emit('open');
+
+    socket.emitMessage({ type: 'tool_call', requestId: 'r1', payload: { name: 'evaluate', args: {} } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const results = socket.sentToolResults() as {
+      responseToRequestId: string;
+      payload: { error?: string; code?: string };
+    }[];
+    expect(results).toHaveLength(1);
+    expect(results[0]!.responseToRequestId).toBe('r1');
+    expect(results[0]!.payload.code).toBe('result_too_large');
+    expect(results[0]!.payload.error).toMatch(/^result too large to deliver: ws transport limit exceeded/);
+    // 发出的每一帧都不超上限
+    for (const raw of socket.sent) {
+      expect(new TextEncoder().encode(raw).length).toBeLessThanOrEqual(1024);
+    }
+  });
+
+  it('counts multi-byte characters by UTF-8 bytes, not UTF-16 code units', async () => {
+    // 150 个 CJK 字符 = 150 码元 ≤ 300，但 UTF-8 450 字节 > 300：必须走精确测量拦截
+    const client = new WsClient({
+      onToolCall: async () => ({ text: '中'.repeat(150) }),
+      tools: [],
+      maxMessageBytes: 300,
+    });
+
+    await client.connect('ws://127.0.0.1:10088/ws');
+    const socket = FakeWebSocket.instances[0]!;
+    socket.emit('open');
+
+    socket.emitMessage({ type: 'tool_call', requestId: 'r1', payload: { name: 'evaluate', args: {} } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const results = socket.sentToolResults() as { payload: { code?: string } }[];
+    expect(results).toHaveLength(1);
+    expect(results[0]!.payload.code).toBe('result_too_large');
+  });
+
+  it('sends tool_result unchanged when under the byte limit', async () => {
+    const client = new WsClient({
+      onToolCall: async () => ({ blob: 'x'.repeat(512) }),
+      tools: [],
+      maxMessageBytes: 4096,
+    });
+
+    await client.connect('ws://127.0.0.1:10088/ws');
+    const socket = FakeWebSocket.instances[0]!;
+    socket.emit('open');
+
+    socket.emitMessage({ type: 'tool_call', requestId: 'r1', payload: { name: 'evaluate', args: {} } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const results = socket.sentToolResults() as { payload: { data?: { blob: string } } }[];
+    expect(results).toHaveLength(1);
+    expect(results[0]!.payload.data?.blob).toHaveLength(512);
+  });
+});
+
+describe('utf8ByteLengthExceeds', () => {
+  it('accepts when 3x code units fit within the limit', () => {
+    expect(utf8ByteLengthExceeds('abc', 9)).toBe(false);
+  });
+
+  it('rejects when code units alone exceed the limit', () => {
+    expect(utf8ByteLengthExceeds('a'.repeat(11), 10)).toBe(true);
+  });
+
+  it('measures exactly in the middle band (multi-byte chars)', () => {
+    // 4 个 CJK 字符：4 码元、12 字节。limit=10 → 超；limit=12 → 不超
+    expect(utf8ByteLengthExceeds('中'.repeat(4), 10)).toBe(true);
+    expect(utf8ByteLengthExceeds('中'.repeat(4), 12)).toBe(false);
   });
 });

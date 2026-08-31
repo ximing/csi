@@ -1,5 +1,7 @@
 /**
  * close_tab (protocol §4.19): close the session's current *owned* tab.
+ * closed:false carries a machine-readable code (§3.4) — not_owned /
+ * already_closed / close_failed; the daemon reconciles on code only.
  */
 import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';
@@ -14,26 +16,49 @@ export class CloseTabTool implements Tool {
   async execute(args: ToolArgs, _target: TargetContext): Promise<unknown> {
     const tabId = args._tabId;
     if (tabId == null || tabId === 0) {
-      return { success: true, closed: false, reason: 'session has no tab' };
+      return { success: true, closed: false, code: 'not_owned', reason: 'session has no tab' };
     }
     if (!isOwnedTab(args, tabId)) {
       return {
         success: true,
         closed: false,
+        code: 'not_owned',
         reason: 'borrowed target is not owned by this session',
       };
     }
 
     return enqueueTab(tabId, async () => {
-      try {
-        await ungroupClosedTabs([tabId], sessionTabIds(args));
-        await chrome.tabs.remove(tabId);
-        return { success: true, closed: true };
-      } catch {
-        return { success: true, closed: false, reason: 'tab already closed' };
-      } finally {
+      // Best-effort：内部已吞错，永不 reject，也绝不掩盖 remove 的真实结果。
+      await ungroupClosedTabs([tabId], sessionTabIds(args));
+
+      // tab 确认不在了才清 per-tab 状态；close_failed 时 tab 仍在，refs/queue 保留。
+      const cleanup = (): void => {
         dropTabQueue(tabId);
         deleteTargetState(tabId);
+      };
+
+      try {
+        await chrome.tabs.remove(tabId);
+        cleanup();
+        return { success: true, closed: true };
+      } catch (err) {
+        // remove 拒绝分两种：tab 已不在（already_closed，daemon 对账移除）
+        // 与瞬时失败 tab 仍在（close_failed，daemon 不得 forget）。
+        const gone = await chrome.tabs.get(tabId).then(
+          () => false,
+          () => true,
+        );
+        if (gone) {
+          cleanup();
+          return { success: true, closed: false, code: 'already_closed', reason: 'tab already closed' };
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          success: true,
+          closed: false,
+          code: 'close_failed',
+          reason: `failed to close tab: ${message}`,
+        };
       }
     });
   }
