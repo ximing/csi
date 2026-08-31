@@ -211,6 +211,33 @@ func TestHubClose(t *testing.T) {
 	}
 }
 
+// Close() 与进行中的握手竞争：Close 之后才完成 hello 的连接不得被接纳，
+// 否则会产生未被本次 Close 清扫的 pending。
+func TestCloseDuringHandshake(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+
+	conn := dial(t, wsURL) // 只拨号，不发 hello，停在握手阶段
+	h.Close()
+
+	hello, _ := json.Marshal(map[string]any{"extensionVersion": "0.0.1"})
+	if err := conn.WriteJSON(Message{Type: MsgHello, Payload: hello}); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+
+	// 握手"成功"但 daemon 已关闭：连接必须被关闭，而不是装回 Hub
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("connection should be closed after Close, got a message")
+	}
+	if h.Connected() {
+		t.Fatal("hub must stay disconnected after Close")
+	}
+	if h.currentGen() != 0 {
+		t.Fatalf("gen = %d, want 0 (no connection admitted)", h.currentGen())
+	}
+}
+
 // 未发 hello 的连接不能顶替在位连接：首条消息非 hello 被直接关闭，
 // 在位连接仍 Connected、代数不变。
 func TestNoHelloCannotKick(t *testing.T) {

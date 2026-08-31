@@ -66,7 +66,7 @@ func (t toolDef) inputSchema() map[string]any {
 var toolDefs = []toolDef{
 	{
 		name:        "navigate",
-		description: "Navigate the browser to a URL and wait for page load (reuses the session's current tab unless newTab is true).",
+		description: "Navigate the browser to a URL and wait for page load. Reuses the session's owned current tab unless newTab is true or the current target is a borrowed user tab (then opens a new owned tab; never rewrites the user's URL).",
 		props: map[string]any{
 			"url":         strProp("URL to navigate to."),
 			"newTab":      boolProp("Open in a new background tab instead of reusing the current tab."),
@@ -76,7 +76,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		name:        "find_tab",
-		description: "Find an open tab by URL domain within the session's tabs and make it the session's current tab.",
+		description: "Find an open tab by URL domain within the session's tabs and make it the session's current tab. active:true borrows the user's foreground tab (current target, not added to the session group) unless that tab is already owned (borrowed:false).",
 		props: map[string]any{
 			"url":    strProp("URL or domain to match against the session's tabs."),
 			"active": boolProp("Borrow the tab the user is currently viewing (not added to the session group)."),
@@ -238,12 +238,12 @@ var toolDefs = []toolDef{
 	},
 	{
 		name:        "close_tab",
-		description: "Close the session's current tab.",
+		description: "Close the session's current owned tab. Refuses (closed:false) if the current target is a borrowed user tab.",
 		props:       map[string]any{},
 	},
 	{
 		name:        "close_session",
-		description: "Close all tabs of the session.",
+		description: "Close all tabs owned by the session (_tabIds). Does not close a borrowed user tab, even if it is the current target.",
 		props:       map[string]any{},
 	},
 	{

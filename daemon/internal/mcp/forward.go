@@ -31,6 +31,8 @@ type commandResponse struct {
 	Success bool            `json:"success"`
 	Data    json.RawMessage `json:"data"`
 	Error   string          `json:"error"`
+	Code    string          `json:"code"`
+	Details map[string]any  `json:"details"`
 }
 
 func (f *forwarder) httpClient() *http.Client {
@@ -66,6 +68,14 @@ func (f *forwarder) handler(def toolDef) mcpsdk.ToolHandler {
 			errMsg := strings.TrimSpace(resp.Error)
 			if errMsg == "" {
 				errMsg = "unknown error from daemon"
+			}
+			if resp.Code != "" {
+				errMsg += "\ncode: " + resp.Code
+			}
+			if len(resp.Details) > 0 {
+				if b, err := json.Marshal(resp.Details); err == nil {
+					errMsg += "\ndetails: " + string(b)
+				}
 			}
 			return errorResult(errMsg), nil
 		}

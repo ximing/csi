@@ -231,6 +231,9 @@ func TestSessionDefaultAndInjection(t *testing.T) {
 	t.Parallel()
 	srv, ts := newTestServer(t)
 	ext := connectExt(t, ts, func(name string, args map[string]any) (any, string) {
+		if name == "close_tab" {
+			return map[string]any{"success": true, "closed": true}, ""
+		}
 		return map[string]any{"success": true, "tabId": 7}, ""
 	})
 	waitFor(t, srv.Hub.Connected, "extension connected")
@@ -254,7 +257,7 @@ func TestSessionDefaultAndInjection(t *testing.T) {
 		t.Fatalf("close_tab resp = %v", resp)
 	}
 	snap := srv.Sessions.Snapshot("default")
-	if len(snap.TabIDs) != 0 || snap.LastTabID != 0 {
+	if len(snap.TabIDs) != 0 || snap.CurrentTabID != 0 {
 		t.Fatalf("after close_tab: %+v (want empty)", snap)
 	}
 }

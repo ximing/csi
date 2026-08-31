@@ -3,6 +3,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"csi/daemon/internal/backend"
 	"csi/daemon/internal/session"
+	"csi/daemon/internal/ws"
 )
 
 // 协议 §4 的 21 个工具名。
@@ -94,20 +96,56 @@ func (e *Executor) Execute(ctx context.Context, action, sess string, args map[st
 		return nil, err
 	}
 
+	release := e.Sessions.Acquire(sess)
+	defer release()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// 1. 注入 session 内部字段（协议 §3.4）
 	args = e.Sessions.Inject(sess, args)
 
 	// 2. 调用后端执行
 	data, err := e.Backend.CallTool(ctx, action, args)
 	if err != nil {
+		var te *ws.ToolError
+		if errors.As(err, &te) && te.Code == "stale_target" {
+			tabId := detailTabID(te)
+			next := e.Sessions.ForgetTab(sess, tabId)
+			if te.Details == nil {
+				te.Details = map[string]any{}
+			}
+			te.Details["session"] = sess
+			if next != 0 {
+				te.Details["nextTabId"] = next
+			}
+			return nil, te
+		}
 		return nil, err
 	}
 
 	// 3. 按返回更新 session 状态（用原始返回，含 tabId）
 	e.Sessions.Update(sess, action, data)
 
-	// 4. 大结果后处理（协议 §5：截图/PDF 落盘）
+	// 4. 大结果后处理（协议 §5：截图/PDF 落盘）。留在 session 锁内。
 	return PostProcess(action, args, data)
+}
+
+func detailTabID(te *ws.ToolError) int {
+	if te.Details == nil {
+		return 0
+	}
+	switch n := te.Details["tabId"].(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	default:
+		return 0
+	}
 }
 
 // checkExtension 对照扩展清单；未实现则不转发，返回升级提示（协议 §3.3）。

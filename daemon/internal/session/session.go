@@ -8,9 +8,12 @@ import (
 
 // Session 单个会话的标签状态。
 type Session struct {
-	TabIDs     []int  // 该 session 拥有的全部 tabId
-	LastTabID  int    // 当前标签（最近一次 navigate/find_tab 的 tabId）
-	GroupTitle string // navigate 时指定的 group_title
+	TabIDs       []int  // 该 session 拥有的全部 tabId
+	CurrentTabID int    // 当前目标（owned 或 borrowed）；0 = 无
+	Borrowed     bool   // CurrentTabID 是否为借用（不在 TabIDs 中）
+	GroupTitle   string // navigate 时指定的 group_title
+
+	gate *fifo
 }
 
 // Manager 管理全部 session。
@@ -27,33 +30,47 @@ func NewManager() *Manager {
 func (m *Manager) get(name string) *Session {
 	s, ok := m.sessions[name]
 	if !ok {
-		s = &Session{}
+		s = &Session{gate: &fifo{}}
 		m.sessions[name] = s
+	}
+	if s.gate == nil {
+		s.gate = &fifo{}
 	}
 	return s
 }
 
-// Inject 按协议 §3.4 向 args 注入 _session/_tabId/_tabIds。
+// Acquire 按 session 名 FIFO 锁住完整 Execute（协议 §3.4）。
+// 先短持 m.mu 取 gate，再 fifo.Lock，避免 /status 的 Names() 被长工具卡住。
+func (m *Manager) Acquire(name string) func() {
+	m.mu.Lock()
+	s := m.get(name)
+	g := s.gate
+	m.mu.Unlock()
+	g.Lock()
+	return func() { g.Unlock() }
+}
+
+// Inject 按协议 §3.4 向 args 注入 _session/_tabId/_tabIds/_borrowed。
 // 调用方传入的 _ 前缀字段一律被覆盖。返回新的 args map（不改调用方的 map）。
 func (m *Manager) Inject(name string, args map[string]any) map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	s := m.get(name)
-	// navigate 携带 group_title 时记录到 session
 	if gt, ok := args["group_title"].(string); ok && gt != "" {
 		s.GroupTitle = gt
 	}
 
-	out := make(map[string]any, len(args)+3)
+	out := make(map[string]any, len(args)+4)
 	for k, v := range args {
 		out[k] = v
 	}
 	out["_session"] = name
-	out["_tabId"] = s.LastTabID
+	out["_tabId"] = s.CurrentTabID
 	tabIDs := make([]int, len(s.TabIDs))
 	copy(tabIDs, s.TabIDs)
 	out["_tabIds"] = tabIDs
+	out["_borrowed"] = s.Borrowed
 	return out
 }
 
@@ -68,34 +85,82 @@ func (m *Manager) Update(name, tool string, data any) {
 
 	switch tool {
 	case "close_tab":
-		// 关闭当前标签：移除 lastTabId
-		if success {
-			s.TabIDs = removeInt(s.TabIDs, s.LastTabID)
-			s.LastTabID = 0
-			if n := len(s.TabIDs); n > 0 {
-				s.LastTabID = s.TabIDs[n-1]
-			}
+		closed, _ := d["closed"].(bool)
+		reason, _ := d["reason"].(string)
+		if closed {
+			forgetTabLocked(s, s.CurrentTabID)
+			return
+		}
+		if reason == "borrowed target is not owned by this session" {
+			return
+		}
+		if reason == "tab already closed" {
+			forgetTabLocked(s, s.CurrentTabID)
 		}
 	case "close_session":
-		// 关闭 session 全部标签
 		if success {
 			s.TabIDs = nil
-			s.LastTabID = 0
+			s.CurrentTabID = 0
+			s.Borrowed = false
+		}
+	case "navigate":
+		if tid, ok := toInt(d["tabId"]); ok && tid > 0 {
+			if tid == s.CurrentTabID && s.Borrowed {
+				// 扩展错误地把用户 tab 收编进来：拒绝写入 owned。
+				return
+			}
+			adoptOwned(s, tid)
+		}
+	case "find_tab":
+		if tid, ok := toInt(d["tabId"]); ok && tid > 0 {
+			borrowed, _ := d["borrowed"].(bool)
+			if borrowed && containsInt(s.TabIDs, tid) {
+				adoptOwned(s, tid)
+				return
+			}
+			if borrowed {
+				s.CurrentTabID = tid
+				s.Borrowed = true
+				return
+			}
+			adoptOwned(s, tid)
 		}
 	default:
-		// find_tab 借用用户前台标签（borrowed:true）时不收编：
-		// 不记 tabIds、不切当前标签（协议 §3.4）。
 		if borrowed, _ := d["borrowed"].(bool); borrowed {
-			break
+			return
 		}
-		// 返回中含 tabId 时记录并切换当前标签
 		if tid, ok := toInt(d["tabId"]); ok && tid > 0 {
-			if !containsInt(s.TabIDs, tid) {
-				s.TabIDs = append(s.TabIDs, tid)
-			}
-			s.LastTabID = tid
+			adoptOwned(s, tid)
 		}
 	}
+}
+
+// ForgetTab 从 owned 集移除失效 tab；若当前目标指向它则回退到最后一个 owned 或 0。
+// 返回新的 CurrentTabID（0 表示没有 next）。不重放原工具。
+func (m *Manager) ForgetTab(name string, tabId int) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return forgetTabLocked(m.get(name), tabId)
+}
+
+func forgetTabLocked(s *Session, tabId int) int {
+	s.TabIDs = removeInt(s.TabIDs, tabId)
+	if s.CurrentTabID == tabId {
+		s.CurrentTabID = 0
+		s.Borrowed = false
+		if n := len(s.TabIDs); n > 0 {
+			s.CurrentTabID = s.TabIDs[n-1]
+		}
+	}
+	return s.CurrentTabID
+}
+
+func adoptOwned(s *Session, tid int) {
+	if !containsInt(s.TabIDs, tid) {
+		s.TabIDs = append(s.TabIDs, tid)
+	}
+	s.CurrentTabID = tid
+	s.Borrowed = false
 }
 
 // Names 返回全部 session 名（排序，供 /status 使用）。
@@ -115,9 +180,12 @@ func (m *Manager) Snapshot(name string) Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.get(name)
-	cp := *s
-	cp.TabIDs = append([]int(nil), s.TabIDs...)
-	return cp
+	return Session{
+		TabIDs:       append([]int(nil), s.TabIDs...),
+		CurrentTabID: s.CurrentTabID,
+		Borrowed:     s.Borrowed,
+		GroupTitle:   s.GroupTitle,
+	}
 }
 
 func toInt(v any) (int, bool) {

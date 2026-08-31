@@ -45,10 +45,12 @@ type Message struct {
 	Payload             json.RawMessage `json:"payload,omitempty"`
 }
 
-// toolResultPayload tool_result 的 payload：{data} 或 {error}。
+// toolResultPayload tool_result 的 payload：{data} 或 {error}，可选 code/details（协议 §3.3）。
 type toolResultPayload struct {
-	Data  json.RawMessage `json:"data"`
-	Error string          `json:"error"`
+	Data    json.RawMessage `json:"data"`
+	Error   string          `json:"error"`
+	Code    string          `json:"code"`
+	Details map[string]any  `json:"details"`
 }
 
 // pendingCall 在途的 tool_call，带连接代数：
@@ -68,6 +70,7 @@ type Hub struct {
 
 	mu            sync.Mutex
 	conn          *websocket.Conn
+	closed        bool // Close() 后永久置位：握手中的连接也不得再进入
 	gen           uint64 // 连接代数，setConn 时递增
 	extVersion    string
 	daemonTools   []string
@@ -174,6 +177,10 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	gen := h.setConn(conn, extVersion, tools)
+	if gen == 0 {
+		conn.Close() // Close() 与握手并发：daemon 已关闭，拒绝接入
+		return
+	}
 	h.Logger.Printf("extension hello, version=%q", extVersion)
 	// 握手完成，转入 pong 看门狗：每读到一条消息续期读超时
 	_ = conn.SetReadDeadline(time.Now().Add(h.pongWait()))
@@ -225,9 +232,15 @@ func (h *Hub) pongWait() time.Duration {
 }
 
 // setConn 握手通过后换绑新连接并递增代数，返回新连接的代数。
+// daemon 已 Close 时返回 0，调用方须直接关闭该连接——防止 Close 之后
+// 迟到的握手把连接装回来，产生未被本次 Close 清扫的 pending。
 // tools 非 nil 视为扩展上报了清单（可为空）；nil 表示未上报。
 func (h *Hub) setConn(conn *websocket.Conn, extVersion string, tools *[]string) uint64 {
 	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return 0
+	}
 	h.gen++
 	gen := h.gen
 	old := h.conn
@@ -340,9 +353,15 @@ func (h *Hub) sweepPending(gen uint64, errMsg string) {
 	}
 }
 
-// Close 关闭当前扩展连接并唤醒所有在途调用（报 "daemon shutting down"）。幂等。
+// Close 关闭当前扩展连接并唤醒所有在途调用（报 "daemon shutting down"）。
+// 永久置位 closed：之后的握手一律拒绝接入。幂等。
 func (h *Hub) Close() {
 	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return
+	}
+	h.closed = true
 	conn := h.conn
 	h.conn = nil
 	h.extVersion = ""
@@ -422,6 +441,9 @@ func (h *Hub) CallTool(ctx context.Context, name string, args map[string]any) (j
 	select {
 	case res := <-ch:
 		if res.Error != "" {
+			if res.Code != "" || res.Details != nil {
+				return nil, &ToolError{Message: res.Error, Code: res.Code, Details: res.Details}
+			}
 			return nil, errors.New(res.Error)
 		}
 		return res.Data, nil
