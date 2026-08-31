@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"csi/daemon/internal/ws"
 )
 
 // maxPDFSize PDF 落盘大小上限（协议 §5：100MB）。
@@ -15,6 +17,12 @@ const maxPDFSize = 100 << 20
 
 // PostProcess 大结果后处理（协议 §5）。非大结果工具原样返回。
 func PostProcess(action string, args map[string]any, data any) (any, error) {
+	// artifact 信封与工具名无关（协议 §3.5）：data 顶层带 artifact 对象即转落盘。
+	if d, ok := data.(map[string]any); ok {
+		if _, ok := d["artifact"]; ok {
+			return saveArtifact(action, args, d)
+		}
+	}
 	switch action {
 	case "screenshot":
 		return saveScreenshot(args, data)
@@ -23,6 +31,62 @@ func PostProcess(action string, args map[string]any, data any) (any, error) {
 	default:
 		return data, nil
 	}
+}
+
+// saveArtifact artifact 信封后处理（协议 §3.5/§5）：扩展返回
+// {artifact:{encoding:"utf8", mimeType, suggestedName, data}, preview, sourceChars}，
+// daemon 把 artifact.data 落盘，客户端只收到
+// {truncated:true, preview, path, sizeBytes, mimeType}（snapshot 按 §4.3 附加 sourceChars）。
+// 原始 artifact.data 永不进入 HTTP/MCP 响应。
+func saveArtifact(action string, args map[string]any, d map[string]any) (any, error) {
+	art, _ := d["artifact"].(map[string]any)
+	if art == nil {
+		return nil, fmt.Errorf("%s: malformed artifact envelope", action)
+	}
+	// 协议 §3.5 固定 encoding 为 "utf8"（utf8 字符串直接写字节）；其它取值协议未定义，不猜。
+	if enc, _ := art["encoding"].(string); enc != "utf8" {
+		return nil, fmt.Errorf("%s: unsupported artifact encoding %q (protocol §3.5 is utf8)", action, enc)
+	}
+	content, ok := art["data"].(string)
+	if !ok {
+		return nil, fmt.Errorf("%s: artifact.data missing or not a string", action)
+	}
+	mimeType, _ := art["mimeType"].(string)
+	suggestedName, _ := art["suggestedName"].(string)
+	preview, _ := d["preview"].(string)
+
+	path, _ := args["path"].(string)
+	if path == "" {
+		// 默认 $TMPDIR/csi-<suggestedName>-<ts>（协议 §5）。
+		name := sanitizeFilename(suggestedName)
+		if name == "" {
+			name = "artifact"
+		}
+		path = filepath.Join(os.TempDir(),
+			fmt.Sprintf("csi-%s-%d", name, time.Now().UnixMilli()))
+	}
+	raw := []byte(content)
+	if err := writeFileWithParents(path, raw); err != nil {
+		// 落盘失败属于无法投递，按协议 §2.1 返回 result_too_large。
+		return nil, &ws.ToolError{
+			Message: "result too large to deliver: failed to persist artifact: " + err.Error(),
+			Code:    "result_too_large",
+		}
+	}
+	out := map[string]any{
+		"truncated": true, // 协议 §5：内联被省略、完整内容在 path，不是数据缺失
+		"preview":   preview,
+		"path":      path,
+		"sizeBytes": len(raw),
+		"mimeType":  mimeType,
+	}
+	// snapshot full 转 artifact 时按协议 §4.3 附带 sourceChars（裁剪前规模）。
+	if action == "snapshot" {
+		if sc, ok := d["sourceChars"]; ok {
+			out["sourceChars"] = sc
+		}
+	}
+	return out, nil
 }
 
 // saveScreenshot 扩展返回 {format, dataLength, data(base64)}，

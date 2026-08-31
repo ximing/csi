@@ -174,7 +174,7 @@ func TestForwardSuccess(t *testing.T) {
 		t.Fatalf("unexpected error result: %s", resultText(res))
 	}
 	text := resultText(res)
-	if !strings.Contains(text, `"tabId": 123`) {
+	if !strings.Contains(text, `"tabId":123`) {
 		t.Errorf("result missing data, got: %s", text)
 	}
 	if got.Action != "navigate" {
@@ -281,5 +281,40 @@ func TestSaveAsPDFReadHint(t *testing.T) {
 	text := resultText(res)
 	if !strings.Contains(text, "/tmp/page.pdf") || !strings.Contains(text, "Read tool") {
 		t.Errorf("save_as_pdf result should mention path and Read tool, got: %s", text)
+	}
+}
+
+// TestCompactOutput 成功 data 输出为紧凑 JSON（设计 D.5：无缩进、无多余换行）。
+func TestCompactOutput(t *testing.T) {
+	fake, _ := fakeDaemon(t, `{"success":true,"data":{"success":true,"url":"https://example.com","tabId":123}}`)
+	srv := NewServer(fake.URL)
+
+	res := callTool(t, srv, "navigate", map[string]any{"url": "https://example.com"})
+	if res.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(res))
+	}
+	text := resultText(res)
+	want := `{"success":true,"url":"https://example.com","tabId":123}`
+	if text != want {
+		t.Errorf("compact output = %q, want %q", text, want)
+	}
+}
+
+// TestArtifactReadHint artifact 客户端信封（truncated+preview+path）也附带一行 Read 提示。
+func TestArtifactReadHint(t *testing.T) {
+	fake, _ := fakeDaemon(t, `{"success":true,"data":{"truncated":true,"preview":"{...","path":"/tmp/csi-evaluate-result.json-1","sizeBytes":42,"mimeType":"application/json"}}`)
+	srv := NewServer(fake.URL)
+
+	res := callTool(t, srv, "evaluate", map[string]any{"code": "1"})
+	if res.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(res))
+	}
+	text := resultText(res)
+	if !strings.Contains(text, "Read tool") {
+		t.Errorf("artifact result should mention Read tool, got: %s", text)
+	}
+	// 提示保持一行，不重复 path（设计 D.5）：path 只应出现在紧凑 data 里一次。
+	if strings.Count(text, "/tmp/csi-evaluate-result.json-1") != 1 {
+		t.Errorf("path should appear exactly once, got: %s", text)
 	}
 }

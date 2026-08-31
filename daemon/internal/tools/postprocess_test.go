@@ -2,10 +2,13 @@ package tools
 
 import (
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"csi/daemon/internal/ws"
 )
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
@@ -154,6 +157,154 @@ func TestSanitizeFilename(t *testing.T) {
 		if got := sanitizeFilename(in); got != want {
 			t.Errorf("sanitizeFilename(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// artifactEnvelope 构造一份协议 §3.5 的内部 artifact 信封。
+func artifactEnvelope(data string) map[string]any {
+	return map[string]any{
+		"artifact": map[string]any{
+			"encoding":      "utf8",
+			"mimeType":      "application/json",
+			"suggestedName": "csi-evaluate-result.json",
+			"data":          data,
+		},
+		"preview":     "...\n... preview truncated",
+		"sourceChars": float64(len(data)),
+	}
+}
+
+func TestArtifactPersistAndClientEnvelope(t *testing.T) {
+	t.Parallel()
+	content := `{"type":"object","value":{"big":true}}`
+	res, err := PostProcess("evaluate", map[string]any{}, artifactEnvelope(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := res.(map[string]any)
+
+	// 写盘文件内容完整
+	path := d["path"].(string)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Fatalf("file content = %q, want %q", got, content)
+	}
+	defer os.Remove(path)
+
+	// 默认路径：$TMPDIR/csi-<suggestedName>-<ts>（协议 §5）
+	if filepath.Dir(path) != filepath.Clean(os.TempDir()) {
+		t.Fatalf("path = %q, want under TMPDIR", path)
+	}
+	if !strings.HasPrefix(filepath.Base(path), "csi-csi-evaluate-result.json-") {
+		t.Fatalf("path = %q, want csi-<suggestedName>-<ts>", path)
+	}
+
+	// 客户端信封恰好五个字段（协议 §5），且不出现原始 data/artifact
+	want := map[string]any{
+		"truncated": true,
+		"preview":   "...\n... preview truncated",
+		"path":      path,
+		"sizeBytes": len(content),
+		"mimeType":  "application/json",
+	}
+	if len(d) != len(want) {
+		t.Fatalf("client envelope keys = %v, want %v", d, want)
+	}
+	for k, v := range want {
+		if d[k] != v {
+			t.Errorf("field %q = %v, want %v", k, d[k], v)
+		}
+	}
+	if _, leaked := d["artifact"]; leaked {
+		t.Error("raw artifact leaked to client response")
+	}
+	if _, leaked := d["data"]; leaked {
+		t.Error("raw data leaked to client response")
+	}
+}
+
+func TestArtifactExplicitPath(t *testing.T) {
+	t.Parallel()
+	out := filepath.Join(t.TempDir(), "a", "b", "result.json")
+	res, err := PostProcess("network", map[string]any{"path": out}, artifactEnvelope("body-bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := res.(map[string]any)
+	if d["path"] != out {
+		t.Fatalf("path = %v, want %s", d["path"], out)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "body-bytes" {
+		t.Fatalf("content = %q", got)
+	}
+}
+
+func TestArtifactSnapshotKeepsSourceChars(t *testing.T) {
+	t.Parallel()
+	// 协议 §4.3：snapshot full 转 artifact 时客户端响应附带 sourceChars
+	res, err := PostProcess("snapshot", map[string]any{}, artifactEnvelope("tree"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := res.(map[string]any)
+	if d["sourceChars"] != float64(4) {
+		t.Fatalf("sourceChars = %v, want 4", d["sourceChars"])
+	}
+	defer os.Remove(d["path"].(string))
+
+	// 其它工具不带 sourceChars
+	res2, err := PostProcess("cdp", map[string]any{}, artifactEnvelope("tree"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := res2.(map[string]any)["sourceChars"]; ok {
+		t.Error("cdp artifact envelope should not carry sourceChars")
+	}
+	defer os.Remove(res2.(map[string]any)["path"].(string))
+}
+
+func TestArtifactWriteFailureIsResultTooLarge(t *testing.T) {
+	t.Parallel()
+	// 父目录撞上一个已存在的文件：MkdirAll 必失败
+	base := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(base, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := PostProcess("evaluate", map[string]any{"path": filepath.Join(base, "out.json")}, artifactEnvelope("x"))
+	if err == nil || !strings.HasPrefix(err.Error(), "result too large to deliver") {
+		t.Fatalf("err = %v, want result_too_large wording", err)
+	}
+	// 协议 §2.1：落盘失败带 code=result_too_large
+	var te *ws.ToolError
+	if !errors.As(err, &te) || te.Code != "result_too_large" {
+		t.Fatalf("err = %v, want ToolError{Code: result_too_large}", err)
+	}
+}
+
+func TestArtifactRejectsNonUtf8Encoding(t *testing.T) {
+	t.Parallel()
+	env := artifactEnvelope("x")
+	env["artifact"].(map[string]any)["encoding"] = "base64"
+	_, err := PostProcess("evaluate", map[string]any{}, env)
+	if err == nil || !strings.Contains(err.Error(), "encoding") {
+		t.Fatalf("err = %v, want unsupported encoding error", err)
+	}
+}
+
+func TestArtifactMissingData(t *testing.T) {
+	t.Parallel()
+	env := artifactEnvelope("x")
+	delete(env["artifact"].(map[string]any), "data")
+	_, err := PostProcess("evaluate", map[string]any{}, env)
+	if err == nil || !strings.Contains(err.Error(), "artifact.data") {
+		t.Fatalf("err = %v, want missing data error", err)
 	}
 }
 

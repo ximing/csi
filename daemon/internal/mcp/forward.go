@@ -81,11 +81,9 @@ func (f *forwarder) handler(def toolDef) mcpsdk.ToolHandler {
 		}
 
 		text := formatData(resp.Data)
-		// screenshot/save_as_pdf 返回文件路径（协议 §5）：提示用 Read 工具查看。
-		if def.name == "screenshot" || def.name == "save_as_pdf" {
-			if path := dataPath(resp.Data); path != "" {
-				text += fmt.Sprintf("\n\nFile saved to: %s\nUse the Read tool to view this file.", path)
-			}
+		// screenshot/save_as_pdf/artifact 返回文件路径（协议 §5）：一行查看提示，不重复 path（设计 D.5）。
+		if hasFileResult(def.name, resp.Data) {
+			text += "\n\nFull content saved to the file at the \"path\" above; use the Read tool to view it."
 		}
 		return &mcpsdk.CallToolResult{
 			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: text}},
@@ -156,26 +154,39 @@ func validateRequired(def toolDef, args map[string]any) error {
 	return nil
 }
 
-// formatData 将 data 序列化为 JSON 文本。
+// formatData 将 data 序列化为紧凑 JSON 文本（设计 D.5：不再 pretty-print）。
 func formatData(data json.RawMessage) string {
 	if len(data) == 0 {
 		return `{"success":true}`
 	}
 	var buf bytes.Buffer
-	if json.Indent(&buf, data, "", "  ") == nil {
+	if json.Compact(&buf, data) == nil {
 		return buf.String()
 	}
 	return string(data)
 }
 
-// dataPath 从 data 中提取 path 字段。
-func dataPath(data json.RawMessage) string {
+// hasFileResult 判断结果是否指向落盘文件，需要追加 Read 工具提示：
+// screenshot/save_as_pdf 始终按协议 §5 返回 path；artifact 后处理（协议 §3.5/§5）
+// 的客户端信封是 {truncated:true, preview, path, sizeBytes, mimeType}。
+func hasFileResult(tool string, data json.RawMessage) bool {
 	var m map[string]any
 	if json.Unmarshal(data, &m) != nil {
-		return ""
+		return false
 	}
-	p, _ := m["path"].(string)
-	return p
+	if path := m["path"]; path == nil {
+		return false
+	}
+	if _, ok := m["path"].(string); !ok {
+		return false
+	}
+	if tool == "screenshot" || tool == "save_as_pdf" {
+		return true
+	}
+	// artifact 信封：truncated:true + preview。
+	truncated, _ := m["truncated"].(bool)
+	_, hasPreview := m["preview"].(string)
+	return truncated && hasPreview
 }
 
 func errorResult(msg string) *mcpsdk.CallToolResult {
