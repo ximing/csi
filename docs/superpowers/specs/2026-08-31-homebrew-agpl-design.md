@@ -18,15 +18,15 @@ CSI daemon 今天靠 `scripts/install.sh` / `install.ps1` 从 GitHub Release 拉
 ## 目标
 
 1. 仓库许可证改为 **AGPL-3.0-only**（OSI/DFSG 里常用 copyleft 中最严的一档；允许商用，改过再分发或作为网络服务提供必须开源）。
-2. 本仓库提供一份可审的 `Formula/csi.rb`：源码构建、`csi serve` + KeepAlive、caveats 写 `brew services start csi`。
-3. 向 `Homebrew/homebrew-core` 投稿，目标用户命令是 `brew install csi`（无 `ximing/` 前缀）。合入前用本仓库 tap 过渡。
+2. 正式通道是个人 tap **`ximing/homebrew-csi`**：`brew tap ximing/csi && brew install csi`。tap 里的 formula 是**二进制版**（装 Release 预编译包），由 release workflow 从 `scripts/homebrew/csi.rb.tmpl` 渲染并自动推送（已于 2026-08-31 落地并实测 v0.6.0 可装）。
+3. 向 `Homebrew/homebrew-core` 投稿降级为**远期可选**：core 的知名度门槛（≥30 forks / ≥30 watchers / ≥75 stars）是 `brew audit --new` 的硬检查，本仓库目前远不达标，短期内必然被拒。真到投稿时，core 需源码构建，届时按本规格 §Formula 的源码版另写一份，与 tap 的二进制版并存。
 4. brew 托管的 daemon：`csi stop` / `csi restart` 拒绝并指向 `brew services`；`POST /restart` 只退出、让 launchd 拉起，避免双进程。
 5. curl 安装器、Windows、`csi autostart` 语义不变。brew 只装 daemon。
 
 成功标准：
 
 - `LICENSE` 为 GNU AGPL v3 全文；README / 根 `package.json` 写 `AGPL-3.0-only`；不再出现「商用请开 issue」。
-- `Formula/csi.rb` 能在 tap 下 `brew install --build-from-source` 产出 `csi version` 匹配 `version.go`。
+- `brew tap ximing/csi && brew install csi` 产出 `csi version` 匹配 `version.go`（v0.6.0 已实测）。
 - `CSI_BREW_SERVICE=1` 下 `POST /restart` 不 spawn 第二个 `serve`；`/status` 带 `supervisor: "brew-services"`；此时 `csi stop` / `csi restart` 非 0 退出。
 - README 用表格写清 brew vs curl 两条生命周期。技能：不可达仍先 `csi start`；看到 brew 提示则让用户跑 `brew services start`，agent 不执行 `brew services stop/restart`。
 - 不改工具清单；安全边界仍是 `127.0.0.1`、v1 无鉴权。
@@ -34,7 +34,7 @@ CSI daemon 今天靠 `scripts/install.sh` / `install.ps1` 从 GitHub Release 拉
 
 ## 非目标
 
-- 不保证 Homebrew 一定把公式收入 core（知名度、CI、Go 版本由他们审）。本仓库做到可审并准备 PR 底稿。
+- 不追求近期进 homebrew-core：知名度门槛是 `brew audit --new` 的硬检查（仓库当前 3 stars / 1 fork，必挂），等数据达标再说。本仓库只需保证 tap 通道可用。
 - 不把 Chrome 扩展或技能打进 formula（core 公式不能依赖 cask；扩展继续商店 / sideload）。
 - 不在 `post_install` 里 `brew services start`（core 会拒；装完由用户跑 caveats 里那一行）。
 - 不改 Windows 安装器语义；不删除 `~/.csi/bin` 旧二进制。
@@ -79,30 +79,23 @@ CSI daemon 今天靠 `scripts/install.sh` / `install.ps1` 从 GitHub Release 拉
 
 Windows 只有安装器。Linux Homebrew 与 macOS 共用同一份 formula。
 
-合入 core 之前：
+正式通道（`ximing/homebrew-csi` 仓库已建，短名可用）：
 
 ```bash
-brew tap ximing/csi https://github.com/ximing/csi
-brew install csi
-brew services start csi
-```
-
-必须带 URL：短名 `brew tap ximing/csi` 会去克隆不存在的 `ximing/homebrew-csi`。
-
-合入 core 之后，文档改成：
-
-```bash
+brew tap ximing/csi
 brew install csi
 brew services start csi
 ```
 
 `install.sh` / `install.ps1` 保留，作 Windows、技能、sideload 扩展、以及没有 Homebrew 的环境的通道。
 
+将来若真的进了 core，文档再改成免 tap 的 `brew install csi`。
+
 ## Formula
 
-本仓库 `Formula/csi.rb` 是 tap 用的公式，也是向 homebrew-core 投稿的底稿。core 侧路径可能是 `Formula/c/csi.rb`（按字母分目录）；内容与本仓库对齐，不要维护两套语义。
+tap（`ximing/homebrew-csi`）里跑的是**二进制 formula**：`url` 指向 Release 预编译包，模板在本仓库 `scripts/homebrew/csi.rb.tmpl`，release.yml 的 `tap` job 渲染推送，不要手工改 tap 仓库。
 
-要点：
+下面这份**源码构建**要点只作为将来向 homebrew-core 投稿时的底稿（core 强制源码构建，与 tap 二进制版并存，不互相替代）：
 
 - `homepage` `https://github.com/ximing/csi`
 - `url` GitHub tag **源码**包：`https://github.com/ximing/csi/archive/refs/tags/v<version>.tar.gz`，`sha256` 钉死。禁止 Release 预编译 `csi-darwin-*.tar.gz`。
@@ -135,7 +128,7 @@ end
 3. 扩展：Chrome 商店（或 sideload `~/.csi/extension`）
 4. 若本机以前用过 curl 安装器：先停掉旧进程（`csi stop` 或 `~/.csi/bin/csi stop`），再 `brew services start csi`，避免抢 `10088`
 
-向 core 投稿：在可审 tag（已是 AGPL）之后，对 `Homebrew/homebrew-core` 开 PR，本地先 `brew audit --new --formula csi`。收不收、bottle 由他们 CI 决定。core 未合入时 README 写 tap；合入后改短名。
+向 core 投稿（远期，知名度达标后再议）：对 `Homebrew/homebrew-core` 开 PR，用上面的源码构建版，本地先 `brew audit --new --formula csi`（其中 notability 检查要求 ≥30 forks / ≥30 watchers / ≥75 stars，达标前不必尝试）。收不收、bottle 由他们 CI 决定。
 
 ## brew 生命周期与 daemon 行为
 
@@ -207,7 +200,7 @@ Go（`cd daemon && go test ./... && go vet ./...`）：
 - `csi stop` / `csi restart`：对带 `supervisor` 的假 `/status` 拒绝且不杀进程。
 - brew `serve` 启动路径调用 `autostart.Disable`：用 fake，禁止测到本机 `~/Library/LaunchAgents`。
 
-Formula：能跑则 `brew audit --formula Formula/csi.rb`（或 `--new`）；至少保证 Ruby 语法能加载。`test do` 只覆盖 `csi version`。
+Formula：模板 `scripts/homebrew/csi.rb.tmpl` 至少保证渲染后 `ruby -c` 通过（release.yml 的 tap job 已内置此校验）。`test do` 只覆盖 `csi version`。
 
 禁止：单测对本机 `brew services start/stop`、`csi autostart on/off`、长期占用 `10088`。
 
@@ -217,7 +210,7 @@ Formula：能跑则 `brew audit --formula Formula/csi.rb`（或 `--new`）；至
 2. `docs/protocol.md` §2.2 加上可选 `supervisor`（协议先行）。
 3. daemon：env、`/status`、Restarter、stop/restart 拒绝、brew serve 时 `autostart.Disable`、usage/version 许可证行。
 4. `LICENSE` + README + `package.json`。
-5. `Formula/csi.rb` + 技能 / CLAUDE 文档。
-6. 版本字符串 bump 到首个 AGPL 发版号，打**新** tag（不改写旧 Release）。之后再向 homebrew-core 开 PR（可另一次操作；不阻塞本仓库分支合并）。
+5. 技能 / CLAUDE 文档。（tap formula 自动化已于 2026-08-31 先行落地：`scripts/homebrew/csi.rb.tmpl` + release.yml `tap` job → `ximing/homebrew-csi`。）
+6. 版本字符串 bump 到首个 AGPL 发版号，打**新** tag（不改写旧 Release），同时给模板补 `license "AGPL-3.0-only"` 行（模板里有 TODO 标注）。
 
 零协议工具变更：四处工具表不必因本规格改动。`supervisor` 只出现在 `/status` 与协议 §2.2。
