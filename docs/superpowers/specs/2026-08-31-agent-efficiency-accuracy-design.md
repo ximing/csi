@@ -393,10 +393,10 @@ artifact 只是内部 WS/daemon 契约；HTTP/MCP 客户端不接收原始 `data
 `skills/csi/SKILL.md` 的目标上限为 1,200 tokens。主文件只保留：
 
 1. 准确触发边界。
-2. 默认工作流：`navigate → snapshot → @e → action → wait`。
-3. 一个 task 复用一个 session。
-4. 优先 `@e`，evaluate/cdp 是逃生口。
-5. 根据场景加载 reference 的路由表。
+2. **21 个工具的目标分组索引**（工具名 + 一句话用途 + 对应 reference），兼作按需加载的路由表——工具索引不能缺，否则 Agent 看不到工具面，只剩工作流叙事。
+3. 默认工作流一行：`navigate → snapshot → @e → action → wait`。
+4. 一个 task 复用一个 session。
+5. 优先 `@e`，evaluate/cdp 是逃生口。
 6. daemon 不可达时的单句恢复入口。
 
 ## E.2 reference 布局
