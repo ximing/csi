@@ -28,7 +28,7 @@ Single-tab tools (`snapshot`, `click`, `fill`, `screenshot`, `save_as_pdf`, …)
 `find_tab` args: `url`*, `active` (bool) → `{success, url, tabId, borrowed}`.
 
 - **Going back to a tab you opened earlier**: pass the tab's **full URL** (from `list_tabs` or the earlier `navigate` result). A bare root domain (`example.com`) may miss `www.example.com`. By default `find_tab` searches **only this session's own tabs** — it never reaches into the user's other tabs. Error "no tab matching … in this session" means it isn't open here — `navigate` with `newTab:true` instead.
-- **Acting on a page the user already has open**: pass `active:true` ("use my open X tab"). It **borrows** the tab the user is currently viewing — result has `borrowed:true` — and makes it the session's current target. Subsequent snapshot/click stay on it until you `navigate` or `find_tab` again. The borrowed tab is **not** pulled into the session's tab group and is **never** closed by `close_tab` / `close_session`.
+- **Acting on a page the user already has open**: pass `active:true` ("use my open X tab"). It targets the tab the user is currently viewing. If that tab is **not owned by this session**, it becomes a **borrowed** target — result has `borrowed:true`; subsequent snapshot/click stay on it until you `navigate` or `find_tab` again, and it is **not** pulled into the session's tab group nor closed by `close_tab` / `close_session`. **Edge case**: if the user's foreground tab happens to be one this session already owns, the result is `borrowed:false` and everything behaves as the normal owned path (it stays in the group and can be closed).
 
 ```bash
 curl -s -X POST http://127.0.0.1:10088/command \

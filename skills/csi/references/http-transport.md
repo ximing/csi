@@ -14,7 +14,7 @@ Content-Type: application/json
 ```
 
 - `action` (required): tool name — see the index below.
-- `args` (optional): tool arguments. Never include `_`-prefixed keys (`_session`, `_tabId`, `_tabIds`) — the daemon injects and overwrites them.
+- `args` (optional): tool arguments. Never include `_`-prefixed keys — the daemon always injects and overwrites all four: `_session` (session name), `_tabId` (current target, `0` = none), `_tabIds` (owned tabs, `[]` = none), `_borrowed` (whether the current `_tabId` is **not** owned, i.e. `_tabId ∉ _tabIds`; `false` when there is no current target — owned-ness is judged by `_tabIds` alone).
 - `session` (optional, top level — not inside `args`): the task's session name; defaults to `"default"`. Always set it explicitly (see `tabs-and-sessions.md`).
 - Request body cap is 64 MB total — large `fill.value` / `evaluate.code` / `cdp.params` are bounded by this.
 
