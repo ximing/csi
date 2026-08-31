@@ -81,6 +81,29 @@ irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | ie
 
 Both installers accept the same flags: `--no-extension` / `-NoExtension` (skip the unpacked zip; also `CSI_NO_EXTENSION=1`), `--no-start` / `-NoStart` (don't start the daemon), `--no-autostart` / `-NoAutostart` (don't register login autostart; also `CSI_NO_AUTOSTART=1`; re-running the installer turns autostart back on even after `csi autostart off`), `--no-skill` / `-NoSkill` (skip skills entirely), `--agents codex,cursor` / `-Agents codex,cursor` (pick skill targets — see [Coding Agent Skills](#coding-agent-skills)), `-y` / `-Yes` (don't prompt before overwriting an existing skill install). Pin a specific release with `CSI_VERSION=v0.1.0`.
 
+### Option C — Homebrew (macOS / Linux, daemon only)
+
+If you live in Homebrew, the daemon is available from our tap — prebuilt binary, managed by `brew services` with KeepAlive (restarts on crash, starts at login):
+
+```bash
+brew tap ximing/csi
+brew install csi
+brew services start csi
+```
+
+Notes:
+
+- The formula installs **only the daemon**. Get the extension from the Chrome Web Store (Option A, steps 1 & 3), and the skills via your agent's plugin command (see [Coding Agent Skills](#coding-agent-skills)).
+- Stop / restart with `brew services stop|restart csi` — a plain `csi stop` won't stick: KeepAlive brings the daemon right back.
+- Already running a curl-installed daemon? Stop it first (`csi stop`, or `~/.csi/bin/csi stop`) so the two don't fight over port `10088`.
+
+| | curl installer (Options A/B) | Homebrew (Option C) |
+|---|---|---|
+| Installs | daemon + skills (+ extension zip) | daemon only |
+| Binary | `~/.csi/bin/csi` | Homebrew prefix |
+| Start / stop | `csi start` / `csi stop` | `brew services start|stop csi` |
+| Login persistence | `csi autostart` (no KeepAlive) | `brew services` KeepAlive |
+
 **Drive the browser:**
 
 ```bash

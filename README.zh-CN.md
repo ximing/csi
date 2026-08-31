@@ -81,6 +81,29 @@ irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | ie
 
 两个安装器接受相同的旗标：`--no-extension` / `-NoExtension`（跳过解压版 zip；也可用 `CSI_NO_EXTENSION=1`），`--no-start` / `-NoStart`（不启动 daemon），`--no-autostart` / `-NoAutostart`（不注册登录自启；也可用 `CSI_NO_AUTOSTART=1`；再跑一次安装器会把曾经 `csi autostart off` 过的自启重新打开），`--no-skill` / `-NoSkill`（完全跳过技能），`--agents codex,cursor` / `-Agents codex,cursor`（选择技能安装目标，见[编程 Agent Skills](#编程-agent-skills)），`-y` / `-Yes`（覆盖已存在的技能安装前不再询问）。用 `CSI_VERSION=v0.1.0` 固定某个 release。
 
+### 方式 C — Homebrew（macOS / Linux，仅 daemon）
+
+习惯用 Homebrew 的话，daemon 可以从我们的 tap 安装 —— 预编译二进制，由 `brew services` 托管（KeepAlive：崩溃自动拉起 + 登录自启）：
+
+```bash
+brew tap ximing/csi
+brew install csi
+brew services start csi
+```
+
+说明：
+
+- formula **只装 daemon**。扩展走 Chrome 应用商店（方式 A 第 1、3 步）；技能用各 Agent 的插件命令安装（见[编程 Agent Skills](#编程-agent-skills)）。
+- 停止 / 重启用 `brew services stop|restart csi` —— 直接 `csi stop` 停不住，KeepAlive 会把 daemon 立刻拉回来。
+- 本机已有 curl 安装器装的 daemon 在跑？先 `csi stop`（或 `~/.csi/bin/csi stop`）再启动，避免两个进程抢 `10088` 端口。
+
+| | curl 安装器（方式 A/B） | Homebrew（方式 C） |
+|---|---|---|
+| 装什么 | daemon + 技能（+ 扩展 zip） | 仅 daemon |
+| 二进制位置 | `~/.csi/bin/csi` | Homebrew prefix |
+| 启动 / 停止 | `csi start` / `csi stop` | `brew services start|stop csi` |
+| 登录保活 | `csi autostart`（无 KeepAlive） | `brew services` KeepAlive |
+
 **驱动浏览器：**
 
 ```bash
