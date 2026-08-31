@@ -1,0 +1,38 @@
+name: skill-ci
+
+# skill 渐进拆分的三道闸：
+# 1) SKILL.md token 预算（cl100k_base ≤ 1200）
+# 2) 技能内本地 reference 链接全部存在
+# 3) 协议 §4 / daemon validTools / MCP toolDefs / extension registry / 技能工具索引 五处一致
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  skill-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: scripts/skill-ci/package-lock.json
+
+      - name: Install pinned skill-ci deps
+        run: npm ci --prefix scripts/skill-ci --ignore-scripts
+
+      - name: SKILL.md token budget (cl100k_base, <= 1200)
+        run: node scripts/skill-ci/check-tokens.mjs
+
+      - name: Skill reference links exist
+        run: node scripts/skill-ci/check-links.mjs
+
+      - name: Tool list consistency (protocol, daemon, extension, skills)
+        run: node scripts/skill-ci/check-tools.mjs
