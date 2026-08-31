@@ -7,9 +7,8 @@
  * 返回的是根视口 CSS 像素，Input.dispatchMouseEvent 也以根视口为原点）。
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
 import { isRefSelector } from '../refs';
 import { parseFrameArg, resolveObjectId, scrollIntoView } from './element';
 import { resolveFrame } from '../frames';
@@ -20,24 +19,22 @@ const NO_BOX_ERROR =
 export class MouseClickTool implements Tool {
   readonly name = 'mouse_click';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const selector = args.selector as string | undefined;
     if (!selector) throw new Error('mouse_click: selector is required (CSS selector or @e ref)');
-    await ensureAttached((await getCurrentTab()).id!);
-
     const frameArg = parseFrameArg(this.name, args.frame);
     // @e 忽略 frame（ref 自带帧）；CSS 才解析
     const frameId =
       frameArg && !isRefSelector(selector)
-        ? (await resolveFrame(frameArg)).frameId
+        ? (await resolveFrame(target.tabId, frameArg)).frameId
         : undefined;
 
-    const objectId = await resolveObjectId(this.name, selector, frameId);
-    await scrollIntoView(objectId);
+    const objectId = await resolveObjectId(this.name, selector, target.tabId, frameId);
+    await scrollIntoView(target.tabId, objectId);
 
     let boxModel: { model?: { content?: number[] } };
     try {
-      boxModel = await sendCommand('DOM.getBoxModel', { objectId });
+      boxModel = await sendCommand(target.tabId, 'DOM.getBoxModel', { objectId });
     } catch (err) {
       throw new Error(`${NO_BOX_ERROR} (CDP: ${(err as Error).message})`);
     }
@@ -47,14 +44,14 @@ export class MouseClickTool implements Tool {
     const x = (content[0]! + content[2]! + content[4]! + content[6]!) / 4;
     const y = (content[1]! + content[3]! + content[5]! + content[7]!) / 4;
 
-    await sendCommand('Input.dispatchMouseEvent', {
+    await sendCommand(target.tabId, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved',
       x,
       y,
       button: 'none',
       buttons: 0,
     });
-    await sendCommand('Input.dispatchMouseEvent', {
+    await sendCommand(target.tabId, 'Input.dispatchMouseEvent', {
       type: 'mousePressed',
       x,
       y,
@@ -62,7 +59,7 @@ export class MouseClickTool implements Tool {
       buttons: 1,
       clickCount: 1,
     });
-    await sendCommand('Input.dispatchMouseEvent', {
+    await sendCommand(target.tabId, 'Input.dispatchMouseEvent', {
       type: 'mouseReleased',
       x,
       y,
@@ -73,7 +70,7 @@ export class MouseClickTool implements Tool {
 
     const info = await sendCommand<{
       result: { value?: { tag?: string; text?: string } };
-    }>('Runtime.callFunctionOn', {
+    }>(target.tabId, 'Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: `function() { return { tag: this.tagName, text: (this.textContent || '').slice(0, 100) }; }`,
       returnByValue: true,

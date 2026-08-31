@@ -25,6 +25,8 @@ export interface ToolCallPayload {
 export interface ToolResultPayload {
   data?: unknown;
   error?: string;
+  code?: string;
+  details?: Record<string, unknown>;
 }
 
 /** Tool args are free-form plus the daemon-injected session fields (§3.4). */
@@ -32,6 +34,7 @@ export interface ToolArgs {
   _session?: string;
   _tabId?: number;
   _tabIds?: number[];
+  _borrowed?: boolean;
   [key: string]: unknown;
 }
 

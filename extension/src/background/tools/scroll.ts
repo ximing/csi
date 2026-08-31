@@ -4,9 +4,8 @@
  * window via Runtime.evaluate. Always returns window scroll position.
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
 import { resolveObjectId, scrollIntoView } from './element';
 
 const SCROLL_POS_JS = `({
@@ -21,7 +20,7 @@ type ScrollPos = { success: true; x: number; y: number; maxX: number; maxY: numb
 export class ScrollTool implements Tool {
   readonly name = 'scroll';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const hasSel = typeof args.selector === 'string' && args.selector.length > 0;
     const to = args.to as string | undefined;
     const dir = args.direction as string | undefined;
@@ -36,24 +35,24 @@ export class ScrollTool implements Tool {
     }
     const amount = dir ? parseAmount(args.amount) : undefined;
 
-    await ensureAttached((await getCurrentTab()).id!);
-
     if (hasSel) {
-      const objectId = await resolveObjectId(this.name, args.selector as string);
-      await scrollIntoView(objectId);
-      return evaluateScroll(SCROLL_POS_JS);
+      const objectId = await resolveObjectId(this.name, args.selector as string, target.tabId);
+      await scrollIntoView(target.tabId, objectId);
+      return evaluateScroll(target.tabId, SCROLL_POS_JS);
     }
 
     if (to === 'top') {
-      return evaluateScroll(`(() => { window.scrollTo(0, 0); return ${SCROLL_POS_JS}; })()`);
+      return evaluateScroll(target.tabId, `(() => { window.scrollTo(0, 0); return ${SCROLL_POS_JS}; })()`);
     }
     if (to === 'bottom') {
       return evaluateScroll(
+        target.tabId,
         `(() => { window.scrollTo(0, document.documentElement.scrollHeight); return ${SCROLL_POS_JS}; })()`,
       );
     }
 
     return evaluateScroll(
+      target.tabId,
       `(() => { ${directionAction(dir!, amount!)}; return ${SCROLL_POS_JS}; })()`,
     );
   }
@@ -77,11 +76,11 @@ function directionAction(dir: string, amount: number | 'page'): string {
   return vertical ? `window.scrollBy(0, ${signed})` : `window.scrollBy(${signed}, 0)`;
 }
 
-async function evaluateScroll(expression: string): Promise<ScrollPos> {
+async function evaluateScroll(tabId: number, expression: string): Promise<ScrollPos> {
   const result = await sendCommand<{
     exceptionDetails?: { text: string; exception?: { description?: string } };
     result?: { value?: { x?: number; y?: number; maxX?: number; maxY?: number } };
-  }>('Runtime.evaluate', {
+  }>(tabId, 'Runtime.evaluate', {
     expression,
     returnByValue: true,
   });

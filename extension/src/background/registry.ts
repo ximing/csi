@@ -1,13 +1,15 @@
 /**
- * Tool registry + dispatcher. Handles the daemon-injected `_tabId` field
- * (protocol §3.4): for tab-targeted tools it attaches the debugger to that
- * tab first; close_tab / list_tabs / close_session consume `_tabId`
- * themselves.
+ * Tool registry + dispatcher. Resolves the target tab, then enqueues on
+ * that tab's queue. No silent fallback to last-user / active tab (协议 §3.4).
  */
 import type { ToolArgs } from '../shared/messages';
-import type { Tool } from './tools/types';
-import { ensureAttached, setAttachedTabId } from './debugger-session';
+import type { TargetContext, Tool } from './tools/types';
+import { ensureAttached } from './debugger-session';
 import { ensureGroupRemovedListener } from './tab-group';
+import { currentEpoch } from './refs';
+import { enqueueTab } from './tab-queue';
+import { sessionTabIds } from './session-tabs';
+import { ToolError } from './tool-error';
 
 import { NavigateTool } from './tools/navigate';
 import { FindTabTool } from './tools/find-tab';
@@ -37,8 +39,24 @@ function register(tool: Tool): void {
   registry.set(tool.name, tool);
 }
 
-/** Tools that manage `_tabId` themselves instead of being aimed at it. */
-const SESSION_SCOPED_TOOLS = new Set(['close_tab', 'list_tabs', 'close_session']);
+const TAB_AIMED = new Set([
+  'snapshot',
+  'click',
+  'fill',
+  'evaluate',
+  'network',
+  'mouse_click',
+  'wait',
+  'scroll',
+  'hover',
+  'key_type',
+  'send_keys',
+  'cdp',
+  'screenshot',
+  'save_as_pdf',
+  'upload',
+  'list_frames',
+]);
 
 export function toolNames(): string[] {
   return [...registry.keys()];
@@ -69,32 +87,52 @@ export function registerAllTools(): void {
   register(new CloseSessionTool());
 }
 
+const noneTarget: TargetContext = { tabId: 0, documentEpoch: 0 };
+
+export async function resolveTabTarget(args: ToolArgs): Promise<number> {
+  const tabId = args._tabId;
+  const session = typeof args._session === 'string' ? args._session : 'default';
+  if (tabId == null || tabId === 0) {
+    throw new ToolError(
+      "session has no current tab; call navigate first, or find_tab(active:true) to borrow the user's tab",
+      'no_session_target',
+      { session },
+    );
+  }
+  try {
+    await chrome.tabs.get(tabId);
+  } catch {
+    throw new ToolError(`session target tab ${tabId} is no longer available`, 'stale_target', {
+      tabId,
+      session,
+    });
+  }
+  return tabId;
+}
+
 export async function dispatchTool(name: string, args: ToolArgs): Promise<unknown> {
   const tool = registry.get(name);
   if (!tool) {
     throw new Error(`unknown tool: ${name}. Available: ${[...registry.keys()].join(', ')}`);
   }
 
-  // The daemon always injects `_tabId`; 0 means "this session has no
-  // current tab" (0 is never a valid Chrome tabId) — treat it as absent.
-  const tabId = args._tabId;
-  if (tabId != null && tabId !== 0 && !SESSION_SCOPED_TOOLS.has(name)) {
-    // The daemon's `_tabId` may be stale (user closed the tab manually).
-    // Probe first; if the tab is gone, fall through silently so the tool's
-    // own getCurrentTab fallback chain (last user tab → active tab) applies
-    // (protocol §3.4). Real attach errors for existing tabs still propagate.
-    let tabExists = true;
-    try {
-      await chrome.tabs.get(tabId);
-    } catch {
-      tabExists = false;
-    }
-    if (tabExists) {
-      await ensureAttached(tabId);
-      setAttachedTabId(tabId);
-    }
-    delete args._tabId;
+  if (name === 'list_tabs') {
+    return tool.execute(args, noneTarget);
+  }
+  if (name === 'find_tab' || name === 'navigate' || name === 'close_tab' || name === 'close_session') {
+    return tool.execute(args, noneTarget);
   }
 
-  return tool.execute(args);
+  if (TAB_AIMED.has(name)) {
+    const tabId = await resolveTabTarget(args);
+    return enqueueTab(tabId, async () => {
+      await ensureAttached(tabId);
+      const ctx: TargetContext = { tabId, documentEpoch: currentEpoch(tabId) };
+      return tool.execute(args, ctx);
+    });
+  }
+
+  return tool.execute(args, noneTarget);
 }
+
+export { sessionTabIds };

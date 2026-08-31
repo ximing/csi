@@ -4,9 +4,8 @@
  * debugger.onEvent listener fans events into the per-tab tables.
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, getAttachedTabId, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
 
 interface CapturedRequest {
   requestId: string;
@@ -30,6 +29,11 @@ function requestsFor(tabId: number): Map<string, CapturedRequest> {
   }
   return table;
 }
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  capturingTabIds.delete(tabId);
+  requestsByTab.delete(tabId);
+});
 
 function registerEventListener(): void {
   if (eventListenerRegistered) return;
@@ -69,50 +73,43 @@ function registerEventListener(): void {
 export class NetworkTool implements Tool {
   readonly name = 'network';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const cmd = args.cmd as string | undefined;
     if (!cmd) throw new Error('network: cmd is required (start/stop/list/detail)');
     switch (cmd) {
       case 'start':
-        return this.start();
+        return this.start(target.tabId);
       case 'stop':
-        return this.stop();
+        return this.stop(target.tabId);
       case 'list':
-        return this.list(args.filter as string | undefined);
+        return this.list(target.tabId, args.filter as string | undefined);
       case 'detail':
-        return this.detail(args.requestId as string | undefined);
+        return this.detail(target.tabId, args.requestId as string | undefined);
       default:
         throw new Error(`network: unknown cmd "${cmd}"`);
     }
   }
 
-  private async start(): Promise<unknown> {
-    const tab = await getCurrentTab();
-    await ensureAttached(tab.id!);
-    const tabId = tab.id!;
+  private async start(tabId: number): Promise<unknown> {
     requestsByTab.set(tabId, new Map());
     capturingTabIds.add(tabId);
     registerEventListener();
-    await sendCommand('Network.enable');
+    await sendCommand(tabId, 'Network.enable');
     return { success: true, message: 'network capture started' };
   }
 
-  private async stop(): Promise<unknown> {
-    const tabId = getAttachedTabId();
-    if (tabId !== null) {
-      capturingTabIds.delete(tabId);
-      try {
-        await sendCommand('Network.disable');
-      } catch {
-        // already detached / domain disabled — fine
-      }
+  private async stop(tabId: number): Promise<unknown> {
+    capturingTabIds.delete(tabId);
+    try {
+      await sendCommand(tabId, 'Network.disable');
+    } catch {
+      // already detached / domain disabled — fine
     }
     return { success: true, message: 'network capture stopped' };
   }
 
-  private list(filter?: string): unknown {
-    const tabId = getAttachedTabId();
-    let requests = [...(tabId === null ? new Map() : requestsFor(tabId)).values()];
+  private list(tabId: number, filter?: string): unknown {
+    let requests = [...requestsFor(tabId).values()];
     if (filter) requests = requests.filter((r) => r.url.includes(filter));
     return {
       count: requests.length,
@@ -127,12 +124,12 @@ export class NetworkTool implements Tool {
     };
   }
 
-  private async detail(requestId?: string): Promise<unknown> {
+  private async detail(tabId: number, requestId?: string): Promise<unknown> {
     if (!requestId) throw new Error('network: requestId is required for detail');
-    const tabId = getAttachedTabId();
-    const entry = (tabId === null ? new Map() : requestsFor(tabId)).get(requestId);
+    const entry = requestsFor(tabId).get(requestId);
     if (!entry) throw new Error(`network: request "${requestId}" not found`);
     const body = await sendCommand<{ body: string; base64Encoded: boolean }>(
+      tabId,
       'Network.getResponseBody',
       { requestId },
     );

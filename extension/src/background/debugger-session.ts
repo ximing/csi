@@ -1,37 +1,31 @@
 /**
- * chrome.debugger lifecycle: which tabs are attached, which tab is the
- * "current" CDP target, and cleanup when tabs close or the user detaches
- * the debugger manually.
+ * chrome.debugger lifecycle: which tabs are attached. Command destination
+ * is always an explicit tabId argument — never a process-global "current tab".
  */
+import { bumpEpoch, deleteTargetState } from './refs';
 
 const DEBUGGER_PROTOCOL_VERSION = '1.3';
 
 const attachedTabIds = new Set<number>();
-let attachedTabId: number | null = null;
-/** Last tab the user was seen actively using (fallback target). */
-let lastUserTabId: number | null = null;
+/** Tabs that have been attached at least once; re-attach bumps documentEpoch. */
+const everAttached = new Set<number>();
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   attachedTabIds.delete(tabId);
-  if (attachedTabId === tabId) attachedTabId = null;
-  if (lastUserTabId === tabId) lastUserTabId = null;
+  everAttached.delete(tabId);
 });
 
 chrome.debugger.onDetach.addListener((debugee) => {
   if (!debugee.tabId) return;
   attachedTabIds.delete(debugee.tabId);
-  if (attachedTabId === debugee.tabId) attachedTabId = null;
 });
 
 /**
- * Attach the debugger to `tabId` (idempotent) and make it the current
- * CDP target. A stale attachment from a previous renderer is refreshed.
+ * Attach the debugger to `tabId` (idempotent). Already-attached is a no-op.
+ * Does not set any process-global current target.
  */
 export async function ensureAttached(tabId: number): Promise<void> {
-  if (attachedTabIds.has(tabId)) {
-    attachedTabId = tabId;
-    return;
-  }
+  if (attachedTabIds.has(tabId)) return;
   try {
     await chrome.debugger.detach({ tabId });
   } catch {
@@ -40,36 +34,19 @@ export async function ensureAttached(tabId: number): Promise<void> {
   await chrome.debugger.attach({ tabId }, DEBUGGER_PROTOCOL_VERSION);
   await chrome.debugger.sendCommand({ tabId }, 'Page.enable', {});
   attachedTabIds.add(tabId);
-  attachedTabId = tabId;
-}
-
-/** Send a raw CDP command to the current target. */
-export async function sendCommand<T = any>(method: string, params?: object): Promise<T> {
-  if (attachedTabId === null) {
-    throw new Error('No tab attached. Call attach(tabId) first.');
+  if (everAttached.has(tabId)) {
+    bumpEpoch(tabId, 'reattach');
   }
-  return (await chrome.debugger.sendCommand({ tabId: attachedTabId }, method, params)) as T;
+  everAttached.add(tabId);
 }
 
-export function getAttachedTabId(): number | null {
-  return attachedTabId;
-}
-
-/** Force the current CDP target without attaching (used by the tool dispatcher). */
-export function setAttachedTabId(tabId: number): void {
-  attachedTabId = tabId;
-}
-
-export function getLastUserTabId(): number | null {
-  return lastUserTabId;
-}
-
-export function setLastUserTabId(tabId: number): void {
-  lastUserTabId = tabId;
-}
-
-export function clearLastUserTabId(): void {
-  lastUserTabId = null;
+/** Send a CDP command to an explicit tab. */
+export async function sendCommand<T = any>(
+  tabId: number,
+  method: string,
+  params?: object,
+): Promise<T> {
+  return (await chrome.debugger.sendCommand({ tabId }, method, params)) as T;
 }
 
 export function isAttached(tabId: number): boolean {
@@ -78,5 +55,10 @@ export function isAttached(tabId: number): boolean {
 
 export function forgetAttached(tabId: number): void {
   attachedTabIds.delete(tabId);
-  if (attachedTabId === tabId) attachedTabId = null;
+}
+
+export function deleteAttachedState(tabId: number): void {
+  attachedTabIds.delete(tabId);
+  everAttached.delete(tabId);
+  deleteTargetState(tabId);
 }

@@ -5,10 +5,9 @@
  * InputEvent (mode:"contenteditable").
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
-import { isRefSelector, lookupRef } from '../refs';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
+import { consumeRef, isRefSelector, staleRefError } from '../refs';
 import { parseFrameArg } from './element';
 import { resolveFrame, contextIdForFrame } from '../frames';
 
@@ -61,38 +60,35 @@ function fillSnippet(targetExpr: string, value: string): string {
 export class FillTool implements Tool {
   readonly name = 'fill';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const selector = args.selector as string | undefined;
     const value = args.value as string | undefined;
     if (!selector) throw new Error('fill: selector is required (CSS selector or @e ref)');
     if (value == null) throw new Error('fill: value is required');
-    await ensureAttached((await getCurrentTab()).id!);
     const frameArg = parseFrameArg(this.name, args.frame);
-    // @e 忽略 frame（ref 自带帧）；CSS 才解析
     const frameId =
       frameArg && !isRefSelector(selector)
-        ? (await resolveFrame(frameArg)).frameId
+        ? (await resolveFrame(target.tabId, frameArg)).frameId
         : undefined;
     return isRefSelector(selector)
-      ? this.fillByRef(selector, value)
-      : this.fillBySelector(selector, value, frameId);
+      ? this.fillByRef(target.tabId, selector, value)
+      : this.fillBySelector(target.tabId, selector, value, frameId);
   }
 
-  private async fillByRef(selector: string, value: string): Promise<unknown> {
-    const entry = lookupRef(selector);
-    if (!entry) {
-      throw new Error(`fill: unknown ref "${selector}". Run snapshot first to get refs.`);
-    }
-    const { object } = await sendCommand<{ object?: { objectId?: string } }>('DOM.resolveNode', {
-      backendNodeId: entry.backendDOMNodeId,
-    });
+  private async fillByRef(tabId: number, selector: string, value: string): Promise<unknown> {
+    const entry = consumeRef(tabId, 'fill', selector);
+    const { object } = await sendCommand<{ object?: { objectId?: string } }>(
+      tabId,
+      'DOM.resolveNode',
+      { backendNodeId: entry.backendDOMNodeId },
+    );
     if (!object?.objectId) {
-      throw new Error(`fill: could not resolve ref "${selector}" to DOM element`);
+      throw staleRefError('fill', selector, tabId);
     }
     const result = await sendCommand<{
       exceptionDetails?: { text: string };
       result: { value?: unknown };
-    }>('Runtime.callFunctionOn', {
+    }>(tabId, 'Runtime.callFunctionOn', {
       objectId: object.objectId,
       functionDeclaration: `function() { ${fillSnippet('this', value)} }`,
       returnByValue: true,
@@ -101,11 +97,16 @@ export class FillTool implements Tool {
     return result.result.value || { success: true };
   }
 
-  private async fillBySelector(selector: string, value: string, frameId?: string): Promise<unknown> {
+  private async fillBySelector(
+    tabId: number,
+    selector: string,
+    value: string,
+    frameId?: string,
+  ): Promise<unknown> {
     const result = await sendCommand<{
       exceptionDetails?: { text: string };
       result: { value?: { error?: string } | unknown };
-    }>('Runtime.evaluate', {
+    }>(tabId, 'Runtime.evaluate', {
       expression: `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) return { error: 'fill: element not found: ' + ${JSON.stringify(selector)} };
@@ -113,7 +114,7 @@ export class FillTool implements Tool {
       })()`,
       returnByValue: true,
       awaitPromise: false,
-      ...(frameId ? { contextId: await contextIdForFrame(frameId) } : {}),
+      ...(frameId ? { contextId: await contextIdForFrame(tabId, frameId) } : {}),
     });
     if (result.exceptionDetails) throw new Error(`fill: ${result.exceptionDetails.text}`);
     const ret = result.result.value as { error?: string } | undefined;

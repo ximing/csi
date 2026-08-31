@@ -6,9 +6,8 @@
  * roles get an `@eN` ref (backendDOMNodeId mapping, see refs.ts).
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
 import { assignRef, INTERACTIVE_ROLES, resetRefs } from '../refs';
 import { resolveObjectId, parseFrameArg } from './element';
 import { compactFromAx, renderYaml, type AxNode, type IframeInfo } from './ax-yaml';
@@ -39,7 +38,7 @@ const MAX_MAX_CHARS = 80_000;
 export class SnapshotTool implements Tool {
   readonly name = 'snapshot';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const mode = parseMode(args.mode);
     const maxChars = parseMaxChars(args.max_chars);
     const selector =
@@ -47,29 +46,26 @@ export class SnapshotTool implements Tool {
         ? args.selector
         : undefined;
     const frameArg = parseFrameArg(this.name, args.frame);
+    const tabId = target.tabId;
+    const tab = await chrome.tabs.get(tabId);
 
-    const tab = await getCurrentTab();
-    await ensureAttached(tab.id!);
-
-    // frame= 先解析（0 命中/多命中/跨域错误在这里抛，协议 §4.1）。
-    // @e 的 selector 忽略它（ref 表自带 frameId），CSS 的 selector 在该帧里找。
     let preFrame: FrameInfo | undefined;
-    if (frameArg) preFrame = await resolveFrame(frameArg);
+    if (frameArg) preFrame = await resolveFrame(tabId, frameArg);
 
     // selector 在 resetRefs 之前解析，旧快照的 @e 仍可用。
     let backendNodeId: number | undefined;
     let targetFrame: FrameInfo | undefined;
     if (selector) {
-      const objectId = await resolveObjectId('snapshot', selector, preFrame?.frameId);
+      const objectId = await resolveObjectId('snapshot', selector, tabId, preFrame?.frameId);
       const described = await sendCommand<{
         node?: { backendNodeId?: number; nodeName?: string; frameId?: string };
-      }>('DOM.describeNode', { objectId });
+      }>(tabId, 'DOM.describeNode', { objectId });
       const node = described.node;
       const nodeName = (node?.nodeName ?? '').toUpperCase();
       if (nodeName === 'IFRAME' || nodeName === 'FRAME') {
         // 入口 1：selector 指向 iframe/frame → 拍它的子帧
         if (!node?.frameId) throw new Error(FRAME_GONE_ERROR);
-        targetFrame = await frameById(node.frameId);
+        targetFrame = await frameById(tabId, node.frameId);
         if (preFrame && preFrame.frameId !== targetFrame.frameId) {
           throw new Error('iframe: selector and frame do not refer to the same frame');
         }
@@ -86,12 +82,16 @@ export class SnapshotTool implements Tool {
     }
 
     const isFrameEntry = targetFrame != null && backendNodeId == null;
-    if (!isFrameEntry) resetRefs(); // 整页与普通子树 reset；进帧 snapshot 追加（协议 §4.1）
+    if (!isFrameEntry) resetRefs(tabId); // 整页与普通子树 reset；进帧 snapshot 追加（协议 §4.1）
 
     const axParams = targetFrame ? { frameId: targetFrame.frameId } : undefined;
     let nodes: AxNode[];
     try {
-      ({ nodes } = await sendCommand<{ nodes: AxNode[] }>('Accessibility.getFullAXTree', axParams));
+      ({ nodes } = await sendCommand<{ nodes: AxNode[] }>(
+        tabId,
+        'Accessibility.getFullAXTree',
+        axParams,
+      ));
     } catch (err) {
       if (targetFrame?.isolated) throw crossOriginError(targetFrame.url);
       if (targetFrame) throw new Error(FRAME_GONE_ERROR);
@@ -100,10 +100,11 @@ export class SnapshotTool implements Tool {
     // iframe 行的 src/isolated 不来自 AX（iframe 节点无 url 属性）：按帧 owner
     // backendDOMNodeId 建表，渲染时对号（协议 §4.1）。isolated 占位帧无 CDP frameId，跳过。
     const frameInfoByNodeId = new Map<number, IframeInfo>();
-    for (const f of await listAllFrames()) {
+    for (const f of await listAllFrames(tabId)) {
       if (!f.parentId || f.frameId.startsWith('isolated:')) continue;
       try {
         const { backendNodeId } = await sendCommand<{ backendNodeId: number }>(
+          tabId,
           'DOM.getFrameOwner',
           { frameId: f.frameId },
         );
@@ -128,14 +129,14 @@ export class SnapshotTool implements Tool {
     let title: string;
     if (targetFrame) {
       url = targetFrame.url;
-      title = await frameTitle(targetFrame.frameId);
+      title = await frameTitle(tabId, targetFrame.frameId);
     } else {
       url = tab.url ?? '';
       title = tab.title ?? '';
     }
 
     if (mode === 'full') {
-      const tree = this.buildTree(nodes, subtreeRoot, targetFrame?.frameId);
+      const tree = this.buildTree(tabId, nodes, subtreeRoot, targetFrame?.frameId);
       return {
         url,
         title,
@@ -156,6 +157,7 @@ export class SnapshotTool implements Tool {
       Boolean(compactRoot),
       targetFrame?.frameId,
       frameInfoByNodeId,
+      tabId,
     );
     const rendered = renderYaml(compact, maxChars);
     return {
@@ -168,7 +170,12 @@ export class SnapshotTool implements Tool {
     };
   }
 
-  private buildTree(nodes: AxNode[], subtreeRoot?: AxNode, frameId?: string): SnapshotNode[] {
+  private buildTree(
+    tabId: number,
+    nodes: AxNode[],
+    subtreeRoot?: AxNode,
+    frameId?: string,
+  ): SnapshotNode[] {
     const byId = new Map<string, AxNode>();
     for (const node of nodes) byId.set(node.nodeId, node);
     if (nodes.length === 0) return [];
@@ -197,13 +204,13 @@ export class SnapshotTool implements Tool {
       if (node.description?.value) result.description = node.description.value;
 
       if (INTERACTIVE_ROLES.has(role) && node.backendDOMNodeId != null) {
-        result.ref = `@${assignRef(node.backendDOMNodeId, role, (node.name?.value as string) ?? '', frameId)}`;
+        result.ref = `@${assignRef(tabId, node.backendDOMNodeId, role, (node.name?.value as string) ?? '', frameId)}`;
       }
 
       // iframe/frame 角色在 full 模式同样分配 ref（与 compact 对齐，协议 §4.1）。
       const isFrameRole = role === 'iframe' || role === 'frame';
       if (isFrameRole && node.backendDOMNodeId != null) {
-        result.ref = `@${assignRef(node.backendDOMNodeId, role, (node.name?.value as string) ?? '', frameId)}`;
+        result.ref = `@${assignRef(tabId, node.backendDOMNodeId, role, (node.name?.value as string) ?? '', frameId)}`;
       }
 
       if (node.childIds?.length) {
@@ -244,10 +251,10 @@ export class SnapshotTool implements Tool {
 }
 
 /** 取帧的 document.title（该帧 default world）。异常 → ''。 */
-async function frameTitle(frameId: string): Promise<string> {
+async function frameTitle(tabId: number, frameId: string): Promise<string> {
   try {
-    const contextId = await contextIdForFrame(frameId);
-    const res = await sendCommand<{ result?: { value?: string } }>('Runtime.evaluate', {
+    const contextId = await contextIdForFrame(tabId, frameId);
+    const res = await sendCommand<{ result?: { value?: string } }>(tabId, 'Runtime.evaluate', {
       expression: 'document.title',
       contextId,
       returnByValue: true,

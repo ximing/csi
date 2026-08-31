@@ -1,67 +1,77 @@
 /**
- * navigate (protocol §4.1): open a URL. Reuses the current tab unless
- * `newTab` is set, there is no current tab, or the current tab shows a
- * chrome:// / edge:// page (those cannot be navigated via CDP). New
- * background tabs join the session's tab group. Waits for load (30s).
+ * navigate (protocol §4.1): open a URL. Reuses an *owned* current tab only.
+ * Borrowed current targets always get a new owned tab (协议 §3.4).
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand, setLastUserTabId } from '../debugger-session';
-import { resetRefs } from '../refs';
-import { getTrackedTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { ensureAttached, sendCommand } from '../debugger-session';
 import { addToSessionGroup } from '../tab-group';
+import { enqueueTab } from '../tab-queue';
+import { sessionTabIds } from '../session-tabs';
+import { ToolError } from '../tool-error';
 
 const LOAD_TIMEOUT_MS = 30_000;
 
 export class NavigateTool implements Tool {
   readonly name = 'navigate';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, _target: TargetContext): Promise<unknown> {
     const url = args.url as string | undefined;
     if (!url) throw new Error('navigate: url is required');
 
-    // 导航后旧 @e 全部失效（协议 §4.1）
-    resetRefs();
-
-    const newTab = args.newTab as boolean | undefined;
+    const newTab = args.newTab === true;
     const session = args._session;
     const groupTitle = args.group_title as string | undefined;
+    const owned = sessionTabIds(args);
+    const currentId = args._tabId ?? 0;
+    const sessionName = typeof args._session === 'string' ? args._session : 'default';
 
-    const current = newTab ? null : await getTrackedTab();
-
-    if (!current) {
-      const tab = await chrome.tabs.create({ url, active: false });
-      setLastUserTabId(tab.id!);
-      if (session) await addToSessionGroup(tab.id!, session, groupTitle);
-      await ensureAttached(tab.id!);
-      await this.waitForLoad(tab.id!);
-      return { success: true, url, tabId: tab.id };
+    let existing: chrome.tabs.Tab | undefined;
+    if (currentId !== 0 && owned.includes(currentId)) {
+      try {
+        existing = await chrome.tabs.get(currentId);
+      } catch {
+        if (!newTab) {
+          throw new ToolError(
+            `session target tab ${currentId} is no longer available`,
+            'stale_target',
+            { tabId: currentId, session: sessionName },
+          );
+        }
+      }
     }
 
-    let tab = current;
-    if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('edge://')) {
-      // Cannot CDP-navigate browser-internal pages — always open a new tab.
-      tab = await chrome.tabs.create({ url, active: false });
-      setLastUserTabId(tab.id!);
-      if (session) await addToSessionGroup(tab.id!, session, groupTitle);
-      await ensureAttached(tab.id!);
-      await this.waitForLoad(tab.id!);
-      return { success: true, url, tabId: tab.id };
+    const canReuse =
+      !newTab &&
+      existing != null &&
+      !existing.url?.startsWith('chrome://') &&
+      !existing.url?.startsWith('edge://');
+
+    if (canReuse && existing?.id) {
+      const tabId = existing.id;
+      return enqueueTab(tabId, async () => {
+        await ensureAttached(tabId);
+        let frameId: string | undefined;
+        const sameUrl = existing!.url === url || existing!.url === `${url}/`;
+        if (sameUrl) {
+          await sendCommand(tabId, 'Page.reload', { ignoreCache: true });
+        } else {
+          const nav = await sendCommand<{ frameId: string }>(tabId, 'Page.navigate', { url });
+          frameId = nav.frameId;
+        }
+        await this.waitForLoad(tabId);
+        return { success: true, url, tabId, frameId };
+      });
     }
 
-    await ensureAttached(tab.id!);
-    setLastUserTabId(tab.id!);
-
-    let frameId: string | undefined;
-    const sameUrl = tab.url === url || tab.url === `${url}/`;
-    if (sameUrl) {
-      await sendCommand('Page.reload', { ignoreCache: true });
-    } else {
-      const nav = await sendCommand<{ frameId: string }>('Page.navigate', { url });
-      frameId = nav.frameId;
-    }
-    await this.waitForLoad(tab.id!);
-    return { success: true, url, tabId: tab.id, frameId };
+    const tab = await chrome.tabs.create({ url, active: false });
+    const tabId = tab.id!;
+    if (session) await addToSessionGroup(tabId, session, groupTitle);
+    return enqueueTab(tabId, async () => {
+      await ensureAttached(tabId);
+      await this.waitForLoad(tabId);
+      return { success: true, url, tabId };
+    });
   }
 
   private waitForLoad(tabId: number): Promise<void> {

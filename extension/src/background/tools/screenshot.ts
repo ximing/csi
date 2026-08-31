@@ -4,9 +4,8 @@
  * base64 payload goes back to the daemon, which writes it to disk (protocol §5).
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
 import { isRefSelector } from '../refs';
 import { parseFrameArg, resolveObjectId, scrollIntoView } from './element';
 import { resolveFrame, FRAME_GONE_ERROR } from '../frames';
@@ -23,9 +22,7 @@ interface CaptureParams {
 export class ScreenshotTool implements Tool {
   readonly name = 'screenshot';
 
-  async execute(args: ToolArgs): Promise<unknown> {
-    await ensureAttached((await getCurrentTab()).id!);
-
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const format = (args.format as string | undefined) || 'png';
     const quality = format === 'jpeg' ? ((args.quality as number | undefined) || 80) : undefined;
     const selector = typeof args.selector === 'string' ? args.selector : '';
@@ -38,7 +35,7 @@ export class ScreenshotTool implements Tool {
     // @e 忽略 frame（ref 自带帧）；CSS 才解析
     const frameId =
       frameArg && selector && !isRefSelector(selector)
-        ? (await resolveFrame(frameArg)).frameId
+        ? (await resolveFrame(target.tabId, frameArg)).frameId
         : undefined;
 
     let shot: { data: string };
@@ -46,12 +43,12 @@ export class ScreenshotTool implements Tool {
       const params: CaptureParams = { format };
       if (quality !== undefined) params.quality = quality;
 
-      const objectId = await resolveObjectId(this.name, selector, frameId);
-      await scrollIntoView(objectId);
+      const objectId = await resolveObjectId(this.name, selector, target.tabId, frameId);
+      await scrollIntoView(target.tabId, objectId);
 
       let boxModel: { model?: { border?: number[] } };
       try {
-        boxModel = await sendCommand('DOM.getBoxModel', { objectId });
+        boxModel = await sendCommand(target.tabId, 'DOM.getBoxModel', { objectId });
       } catch (err) {
         throw new Error(`${NO_BOX_ERROR} (CDP: ${(err as Error).message})`);
       }
@@ -68,16 +65,16 @@ export class ScreenshotTool implements Tool {
         throw new Error(`screenshot: element has zero-size box (width=${width}, height=${height}).`);
       }
       params.clip = { x, y, width, height, scale: 1 };
-      shot = await sendCommand<{ data: string }>('Page.captureScreenshot', params);
+      shot = await sendCommand<{ data: string }>(target.tabId, 'Page.captureScreenshot', params);
     } else if (fullPage && frameArg) {
       // fullPage + frame（无 selector）：clip 到该 iframe 元素在父页视口里的可见盒，
       // 不开 captureBeyondViewport（协议 §4.1）。
-      const frameId = (await resolveFrame(frameArg)).frameId;
-      const { backendNodeId } = await sendCommand<{ backendNodeId: number }>(
+      const frameId = (await resolveFrame(target.tabId, frameArg)).frameId;
+      const { backendNodeId } = await sendCommand<{ backendNodeId: number }>(target.tabId, 
         'DOM.getFrameOwner',
         { frameId },
       );
-      const { object } = await sendCommand<{ object?: { objectId?: string } }>(
+      const { object } = await sendCommand<{ object?: { objectId?: string } }>(target.tabId, 
         'DOM.resolveNode',
         { backendNodeId },
       );
@@ -88,7 +85,7 @@ export class ScreenshotTool implements Tool {
 
       let boxModel: { model?: { border?: number[] } };
       try {
-        boxModel = await sendCommand('DOM.getBoxModel', { objectId: object.objectId });
+        boxModel = await sendCommand(target.tabId, 'DOM.getBoxModel', { objectId: object.objectId });
       } catch (err) {
         throw new Error(`${NO_BOX_ERROR} (CDP: ${(err as Error).message})`);
       }
@@ -105,13 +102,13 @@ export class ScreenshotTool implements Tool {
         throw new Error(`screenshot: element has zero-size box (width=${width}, height=${height}).`);
       }
       params.clip = { x, y, width, height, scale: 1 };
-      shot = await sendCommand<{ data: string }>('Page.captureScreenshot', params);
+      shot = await sendCommand<{ data: string }>(target.tabId, 'Page.captureScreenshot', params);
     } else {
       const params: CaptureParams & { captureBeyondViewport?: boolean } = { format };
       if (quality !== undefined) params.quality = quality;
       if (fullPage) params.captureBeyondViewport = true;
       try {
-        shot = await sendCommand<{ data: string }>('Page.captureScreenshot', params);
+        shot = await sendCommand<{ data: string }>(target.tabId, 'Page.captureScreenshot', params);
       } catch (err) {
         if (fullPage) {
           throw new Error(

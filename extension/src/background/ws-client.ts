@@ -172,8 +172,9 @@ export class WsClient {
     });
 
     socket.addEventListener('message', (event) => {
+      if (this.socket !== socket) return; // 迟到消息：连接已被替换/拆除，丢弃
       try {
-        this.handleMessage(JSON.parse(String(event.data)) as WsEnvelope);
+        this.handleMessage(JSON.parse(String(event.data)) as WsEnvelope, socket);
       } catch (err) {
         console.error('[ws] invalid message:', err);
       }
@@ -235,7 +236,7 @@ export class WsClient {
     });
   }
 
-  private handleMessage(message: WsEnvelope): void {
+  private handleMessage(message: WsEnvelope, socket: WebSocket): void {
     switch (message.type) {
       case 'ping':
         this.send({ type: 'pong' });
@@ -243,36 +244,42 @@ export class WsClient {
       case 'hello_ack':
         break;
       case 'tool_call':
-        void this.handleToolCall(message);
+        void this.handleToolCall(message, socket);
         break;
       default:
         console.log('[ws] unhandled message type:', message.type);
     }
   }
 
-  private async handleToolCall(message: WsEnvelope): Promise<void> {
+  private async handleToolCall(message: WsEnvelope, socket: WebSocket): Promise<void> {
+    // 结果只回给收到调用的那个连接：执行期间连接被替换的话，
+    // daemon 侧已按代数清扫旧 pending，结果不能串到新连接上。
+    const reply = (payload: ToolResultPayload): void => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      socket.send(
+        JSON.stringify({
+          type: 'tool_result',
+          responseToRequestId: message.requestId,
+          payload,
+        } satisfies WsEnvelope),
+      );
+    };
     const payload = message.payload as ToolCallPayload | undefined;
     if (!payload?.name) {
-      this.send({
-        type: 'tool_result',
-        responseToRequestId: message.requestId,
-        payload: { error: 'missing tool name' } satisfies ToolResultPayload,
-      });
+      reply({ error: 'missing tool name' });
       return;
     }
     try {
       const data = await this.onToolCall(payload.name, payload.args || {});
-      this.send({
-        type: 'tool_result',
-        responseToRequestId: message.requestId,
-        payload: { data } satisfies ToolResultPayload,
-      });
+      reply({ data } satisfies ToolResultPayload);
     } catch (err) {
-      this.send({
-        type: 'tool_result',
-        responseToRequestId: message.requestId,
-        payload: { error: (err as Error)?.message ?? String(err) } satisfies ToolResultPayload,
-      });
+      const result: ToolResultPayload = {
+        error: (err as Error)?.message ?? String(err),
+      };
+      const te = err as { code?: string; details?: Record<string, unknown> };
+      if (typeof te.code === 'string' && te.code) result.code = te.code;
+      if (te.details) result.details = te.details;
+      reply(result);
     }
   }
 

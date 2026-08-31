@@ -3,9 +3,8 @@
  * matches (or is gone). One condition only; unknown @e fails immediately.
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
 import { isRefSelector, lookupRef } from '../refs';
 import { parseFrameArg, resolveObjectId } from './element';
 import { resolveFrame, contextIdForFrame } from '../frames';
@@ -22,7 +21,7 @@ const MAX_INTERVAL_MS = 2_000;
 export class WaitTool implements Tool {
   readonly name = 'wait';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const picked = pickCondition(args);
     const gone = args.gone === true;
     const timeout = parseIntRange(
@@ -40,15 +39,12 @@ export class WaitTool implements Tool {
       'interval_ms',
     );
 
-    if (picked.kind === 'selector' && isRefSelector(picked.value) && !lookupRef(picked.value)) {
+    const currentId = target.tabId;
+    if (picked.kind === 'selector' && isRefSelector(picked.value) && !lookupRef(currentId, picked.value)) {
       throw new Error(
         `wait: unknown ref "${picked.value}". Run snapshot first, or wait on a CSS selector / text instead.`,
       );
     }
-
-    const tab = await getCurrentTab();
-    const currentId = tab.id!;
-    await ensureAttached(currentId);
 
     // frameArg 在进循环之前解析成 frameId（resolveFrame 的错误要立刻抛，不能被轮询吃掉）。
     // @e 忽略 frame（ref 自带帧）；url 不看 frame（仍看 tab URL，协议 §4.1）。
@@ -56,7 +52,7 @@ export class WaitTool implements Tool {
     const isRefSel = picked.kind === 'selector' && isRefSelector(picked.value);
     const frameId =
       frameArg && picked.kind !== 'url' && !isRefSel
-        ? (await resolveFrame(frameArg)).frameId
+        ? (await resolveFrame(target.tabId, frameArg)).frameId
         : undefined;
 
     const kindLabel = gone ? `gone:${picked.kind}` : picked.kind;
@@ -92,8 +88,8 @@ export class WaitTool implements Tool {
   ): Promise<boolean> {
     try {
       if (kind === 'url') return await checkUrl(currentId, value);
-      if (kind === 'text') return await checkText(value, frameId);
-      return await checkSelector(value, frameId);
+      if (kind === 'text') return await checkText(currentId, value, frameId);
+      return await checkSelector(currentId, value, frameId);
     } catch {
       return false;
     }
@@ -134,19 +130,20 @@ async function checkUrl(currentId: number, needle: string): Promise<boolean> {
   return (tab.url ?? '').includes(needle);
 }
 
-async function checkText(needle: string, frameId?: string): Promise<boolean> {
+async function checkText(tabId: number, needle: string, frameId?: string): Promise<boolean> {
   const params: Record<string, unknown> = {
     expression: `document.body && document.body.innerText.includes(${JSON.stringify(needle)})`,
     returnByValue: true,
   };
-  if (frameId) params.contextId = await contextIdForFrame(frameId);
+  if (frameId) params.contextId = await contextIdForFrame(tabId, frameId);
   const result = await sendCommand<{
     exceptionDetails?: { text: string };
     result?: { value?: unknown };
-  }>('Runtime.evaluate', params);
+  }>(tabId, 'Runtime.evaluate', params);
   if (!result.exceptionDetails && result.result?.value === true) return true;
 
   const { nodes } = await sendCommand<{ nodes?: { name?: { value?: unknown } }[] }>(
+    tabId,
     'Accessibility.getFullAXTree',
     frameId ? { frameId } : undefined,
   );
@@ -155,11 +152,11 @@ async function checkText(needle: string, frameId?: string): Promise<boolean> {
   );
 }
 
-async function checkSelector(selector: string, frameId?: string): Promise<boolean> {
+async function checkSelector(tabId: number, selector: string, frameId?: string): Promise<boolean> {
   let objectId: string | undefined;
   if (isRefSelector(selector)) {
     try {
-      objectId = await resolveObjectId('wait', selector);
+      objectId = await resolveObjectId('wait', selector, tabId);
     } catch {
       return false;
     }
@@ -168,11 +165,11 @@ async function checkSelector(selector: string, frameId?: string): Promise<boolea
       expression: `document.querySelector(${JSON.stringify(selector)})`,
       returnByValue: false,
     };
-    if (frameId) params.contextId = await contextIdForFrame(frameId);
+    if (frameId) params.contextId = await contextIdForFrame(tabId, frameId);
     const result = await sendCommand<{
       exceptionDetails?: { text: string };
       result?: { subtype?: string; objectId?: string };
-    }>('Runtime.evaluate', params);
+    }>(tabId, 'Runtime.evaluate', params);
     if (result.exceptionDetails || result.result?.subtype === 'null' || !result.result?.objectId) {
       return false;
     }
@@ -181,7 +178,7 @@ async function checkSelector(selector: string, frameId?: string): Promise<boolea
 
   let boxModel: { model?: { border?: number[]; content?: number[] } };
   try {
-    boxModel = await sendCommand('DOM.getBoxModel', { objectId });
+    boxModel = await sendCommand(tabId, 'DOM.getBoxModel', { objectId });
   } catch {
     return false;
   }
@@ -189,7 +186,7 @@ async function checkSelector(selector: string, frameId?: string): Promise<boolea
     return false;
   }
 
-  const hidden = await sendCommand<{ result?: { value?: unknown } }>('Runtime.callFunctionOn', {
+  const hidden = await sendCommand<{ result?: { value?: unknown } }>(tabId, 'Runtime.callFunctionOn', {
     objectId,
     functionDeclaration: `function() { return this.getAttribute('aria-hidden') === 'true'; }`,
     returnByValue: true,
