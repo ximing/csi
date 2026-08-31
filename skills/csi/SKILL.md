@@ -30,7 +30,7 @@ Drive the user's real Chrome (with their login sessions) via a local daemon: `PO
 3. Act on refs (`click` / `fill` / …).
 4. After anything that changes the page, `wait` for text / selector / url — never sleep, never bash-poll.
 
-Prefer `@e` refs over hand-written CSS — refs survive class-hash changes. If a call fails with `stale_ref` / `stale_target`, re-`snapshot` (don't replay the action blindly).
+Prefer `@e` refs over hand-written CSS — every `selector` arg takes `"@e3"` (from the latest snapshot) or CSS, and refs survive class-hash churn: `{"action":"click","args":{"selector":"@e3"},"session":"my-task"}`. Refs are per-tab and die on navigation — a failed `stale_ref` / `stale_target` means re-`snapshot` first, never blind-replay.
 
 ## Sessions
 
