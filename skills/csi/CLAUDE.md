@@ -6,7 +6,7 @@
 
 ## 放置约束
 
-- `SKILL.md` 是主文件，**预算 ≤1200 tokens（cl100k_base，CI 强制）**：只放 frontmatter 触发边界、**21 个工具的目标分组索引（兼作 reference 路由表，工具索引不能缺——否则 Agent 看不到工具面）**、一行默认工作流、session 规则、`@e` 优先原则和 daemon 不可达时的单句恢复；细节一律下沉到 `references/`。
+- `SKILL.md` 是主文件，**能力优先：Agent 能用好是唯一约束，token 只观测不设门槛**（CI 只报告数字，不 fail）：必放 frontmatter 触发边界、**21 个工具的目标分组索引（兼作 reference 路由表，工具索引不能缺——否则 Agent 看不到工具面）**、默认工作流、session 规则、`@e` 优先原则和 daemon 不可达时的单句恢复；参数级细节下沉到 `references/`。
 - frontmatter 的 `description` 同时包含**正向触发**（browser/webpage/screenshot 等）与**排除边界**（只讨论概念不打开页面、headless/隔离 profile/纯 HTTP 抓取、代码审查里出现字样），两类都要保留。
 - `references/` 六个文件：`http-transport.md`（调用格式 + 错误信封 + **21 个工具的索引表**）、`tabs-and-sessions.md`、`interaction.md`、`frames.md`、`large-results.md`、`operations.md`。工具参数只写在对应 reference，不复制回 SKILL.md。
 - 工具清单一致性由 CI 强制：`docs/protocol.md` §4 = daemon `validTools` = MCP `toolDefs` = extension registry = `references/http-transport.md` 的工具索引表（`.github/workflows/skill-ci.yml` 的 check-tools）；且 §4 每个工具的 args 列必须与 MCP `inputSchema` 的 props 键一致（check-schemas）。加/改工具或参数时 `protocol.md` 先行，这几处一起改。

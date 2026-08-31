@@ -23,7 +23,14 @@ Drive the user's real Chrome (with their login sessions) via a local daemon: `PO
 | Escape hatches (arbitrary page-side code — use deliberately, only when nothing else fits) | `evaluate` `cdp` | `references/large-results.md` |
 | Close (only when the user asks) | `close_tab` `close_session` | `references/tabs-and-sessions.md` |
 
-Typical flow: `navigate` → `snapshot` → act on `@e` refs → `wait` for text/selector/url. Prefer `@e` over hand-written CSS — refs survive class-hash changes.
+## Typical flow
+
+1. `navigate` to the task page (`newTab:true` gives the session its own tab).
+2. `snapshot` — interactive elements carry `@e` refs; on big pages, use `match` (role + name) to find the control instead of reading the whole tree.
+3. Act on refs (`click` / `fill` / …).
+4. After anything that changes the page, `wait` for text / selector / url — never sleep, never bash-poll.
+
+Prefer `@e` refs over hand-written CSS — refs survive class-hash changes. If a call fails with `stale_ref` / `stale_target`, re-`snapshot` (don't replay the action blindly).
 
 ## Sessions
 

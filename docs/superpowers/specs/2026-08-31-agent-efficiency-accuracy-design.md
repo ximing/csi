@@ -50,7 +50,7 @@ extension 当前只有 WebSocket 连接状态测试，没有覆盖 snapshot、AX
 
 1. 任意工具调用都能明确回答：目标 tab 是哪个、属于哪个 document epoch、引用来自哪次文档生命周期。
 2. 不允许因为 stale target、并行调用或其他 session 的 snapshot 而操作用户无关页面。
-3. CSI 主技能控制在 1,200 tokens 以内，长尾说明按需加载。
+3. CSI 主技能以**可用性为先**：工具索引完整、默认工作流明确，长尾说明按需加载；token 消耗在这个前提下观测与优化，不设硬上限。
 4. 普通任务默认只返回完成下一步所需的信息；大结果必须分页、语义裁剪或落盘。
 5. 同名按钮、表格行操作和多个 dialog 中的控件必须带足够的最小上下文，Agent 不需要靠猜。
 6. 建立可重复的 Agent eval，用任务总 token 和首次选对目标率评价改造，而不是只看单个响应字符数。
@@ -388,13 +388,13 @@ artifact 只是内部 WS/daemon 契约；HTTP/MCP 客户端不接收原始 `data
 
 # 阶段 E：技能渐进加载
 
-## E.1 主技能预算
+## E.1 主技能：能力优先，token 只观测
 
-`skills/csi/SKILL.md` 的目标上限为 1,200 tokens。主文件只保留：
+主技能的约束是「Agent 能用好」：工具面完整可见、关键工作流与坑位齐备。**token 消耗在这个前提下观测，不设硬上限**——原 1,200 tokens 门槛取消；先把体积卡瘦会牺牲可用性，本末倒置（「能用好」约束下的 token 消耗才有评价意义）。主文件保留：
 
 1. 准确触发边界。
 2. **21 个工具的目标分组索引**（工具名 + 一句话用途 + 对应 reference），兼作按需加载的路由表——工具索引不能缺，否则 Agent 看不到工具面，只剩工作流叙事。
-3. 默认工作流一行：`navigate → snapshot → @e → action → wait`。
+3. 默认工作流：`navigate → snapshot → @e → action → wait`，含「动作后必须 wait、不 sleep 不轮询」。
 4. 一个 task 复用一个 session。
 5. 优先 `@e`，evaluate/cdp 是逃生口。
 6. daemon 不可达时的单句恢复入口。
@@ -440,7 +440,7 @@ frontmatter 正向触发保留：
 
 CI 增加：
 
-- 用固定 tokenizer 统计主技能 token；超过 1,200 失败。
+- 用固定 tokenizer 统计并**报告**主技能 token（观测项，不 fail——门槛取消，见 E.1）。
 - 检查 SKILL.md 中的 reference 链接都存在。
 - 检查协议工具清单、daemon validTools、MCP toolDefs、extension registry 一致。
 - 如果工具 schema 改动而协议与技能路由未改，测试失败。
@@ -524,7 +524,7 @@ CI 增加：
 
 1. 并发、borrowed 和 stale 四组关键回归中，wrong-tab 次数为 0。
 2. 同名控件 eval 的首次目标命中率为 100%。
-3. 主 SKILL.md 不超过 1,200 tokens。
+3. 主 SKILL.md 不读任何 reference 即可看到全部 21 个工具与默认工作流；token 数由 CI 观测记录，不设门槛（可用性是约束，token 是指标）。
 4. 除显式 full/file 请求外，任何单次文本工具结果不得超过其声明的 max_chars。
 5. 典型浏览器任务总 token 的 p50 至少下降 30%，p95 至少下降 50%。
 6. 改造后任务成功率不得低于改造前基线。

@@ -1,7 +1,7 @@
 name: skill-ci
 
-# skill 渐进拆分的三道闸：
-# 1) SKILL.md token 预算（cl100k_base ≤ 1200）
+# skill 渐进拆分的闸：
+# 1) SKILL.md token 统计（cl100k_base，观测项只报告不 fail——能力优先，不设硬门槛）
 # 2) 技能内本地 reference 链接全部存在
 # 3) 协议 §4 / daemon validTools / MCP toolDefs / extension registry / 技能工具索引 五处一致
 # 4) 协议 §4 每个工具的 args 与 daemon MCP inputSchema 的 props 键一致（schema 漂移闸）
@@ -29,7 +29,7 @@ jobs:
       - name: Install pinned skill-ci deps
         run: npm ci --prefix scripts/skill-ci --ignore-scripts
 
-      - name: SKILL.md token budget (cl100k_base, <= 1200)
+      - name: SKILL.md token report (cl100k_base, informational)
         run: node scripts/skill-ci/check-tokens.mjs
 
       - name: Skill reference links exist
