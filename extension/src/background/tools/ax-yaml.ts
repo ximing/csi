@@ -50,6 +50,18 @@ export type CompactNode = {
   children?: CompactNode[];
 };
 
+/** interactive 模式最小祖先上下文的候选角色（协议 §4.3）。 */
+export const CONTEXT_ROLES = new Set([
+  'dialog',
+  'form',
+  'row',
+  'listitem',
+  'article',
+  'region',
+  'navigation',
+  'main',
+]);
+
 export const STRUCTURAL_ROLES = new Set([
   'heading', 'paragraph', 'list', 'listitem', 'navigation', 'main',
   'banner', 'contentinfo', 'complementary', 'form', 'article', 'region',
@@ -95,13 +107,19 @@ export function compactFromAx(
         tabId,
       );
   const roots = asList(formatted);
-  return mode === 'interactive' ? flattenInteractive(roots) : roots;
+  return mode === 'interactive' ? contextualInteractive(roots) : roots;
 }
 
-export function renderYaml(
-  nodes: CompactNode[],
-  maxChars: number,
-): { yaml: string; chars: number; truncated: boolean } {
+export interface RenderedYaml {
+  yaml: string;
+  /** yaml 实际返回内容的字符数（含截断标记）。 */
+  chars: number;
+  /** 裁剪前完整 YAML 的字符数（协议 §4.3 source_chars）。 */
+  sourceChars: number;
+  truncated: boolean;
+}
+
+export function renderYaml(nodes: CompactNode[], maxChars: number): RenderedYaml {
   const lines: string[] = [];
   const walk = (node: CompactNode, depth: number): void => {
     lines.push(formatLine(node, depth));
@@ -113,7 +131,7 @@ export function renderYaml(
 
   const yaml = lines.length === 0 ? '' : `${lines.join('\n')}\n`;
   if (yaml.length <= maxChars) {
-    return { yaml, chars: yaml.length, truncated: false };
+    return { yaml, chars: yaml.length, sourceChars: yaml.length, truncated: false };
   }
 
   const nl = yaml.lastIndexOf('\n', maxChars - 1);
@@ -121,7 +139,7 @@ export function renderYaml(
   const omitted = yaml.length - kept.length;
   const truncated =
     `${kept}\n... truncated, ${omitted} chars omitted. ${TRUNCATED_HINT}`;
-  return { yaml: truncated, chars: truncated.length, truncated: true };
+  return { yaml: truncated, chars: truncated.length, sourceChars: yaml.length, truncated: true };
 }
 
 function formatNode(
@@ -224,19 +242,105 @@ function collectChildren(
   return children;
 }
 
-function flattenInteractive(nodes: CompactNode[]): CompactNode[] {
-  const out: CompactNode[] = [];
-  const walk = (node: CompactNode): void => {
+/**
+ * contextual interactive（协议 §4.3）：每个交互节点保留最多两个最近的、
+ * 角色属于 CONTEXT_ROLES 的有名称祖先；共享祖先的节点按 YAML 分组
+ * （同一对象只出现一次），无有名称候选祖先时维持单行输出。
+ * 行为与原 flattenInteractive 一致的部分：只输出行内带 ref 的节点，
+ * ref 节点的子树继续下行找嵌套 ref，但不为 ref 节点本身输出 children。
+ */
+export function contextualInteractive(nodes: CompactNode[]): CompactNode[] {
+  interface Item {
+    chain: CompactNode[];
+    node: CompactNode;
+  }
+  const items: Item[] = [];
+  const walk = (node: CompactNode, stack: CompactNode[]): void => {
+    // chain 保持外→内顺序，slice(-2) 留下最近的两个有名称候选祖先。
+    const nextStack =
+      CONTEXT_ROLES.has(node.role) && node.name ? [...stack, node].slice(-2) : stack;
     if (node.ref) {
       const { children: _children, ...rest } = node;
-      out.push(rest);
+      items.push({ chain: nextStack, node: rest });
     }
     if (node.children) {
-      for (const child of node.children) walk(child);
+      for (const child of node.children) walk(child, nextStack);
     }
   };
-  for (const node of nodes) walk(node);
-  return out;
+  for (const node of nodes) walk(node, []);
+
+  // 按祖先链分组：链上同一 CompactNode 对象只建一次上下文行。
+  const root: CompactNode[] = [];
+  const ctxLine = new Map<CompactNode, CompactNode>();
+  for (const { chain, node } of items) {
+    let siblings = root;
+    for (const ctx of chain) {
+      let line = ctxLine.get(ctx);
+      if (!line) {
+        line = { role: ctx.role, name: ctx.name, children: [] };
+        ctxLine.set(ctx, line);
+        siblings.push(line);
+      }
+      siblings = line.children!;
+    }
+    siblings.push(node);
+  }
+  return root;
+}
+
+/** snapshot `match` 参数（协议 §4.3）：name 必填、role 可选、exact 默认 true。 */
+export interface MatchSpec {
+  role?: string;
+  name: string;
+  exact: boolean;
+}
+
+/** Unicode 简单 case-fold 的工程近似：JS 没有 caseFold，用 toLowerCase。 */
+function fold(text: string): string {
+  return text.toLowerCase();
+}
+
+export function matchesSpec(node: { role: string; name?: string }, spec: MatchSpec): boolean {
+  if (spec.role && node.role !== fold(spec.role)) return false;
+  const name = node.name;
+  if (!name) return false;
+  return spec.exact ? fold(name) === fold(spec.name) : fold(name).includes(fold(spec.name));
+}
+
+/**
+ * 确定性 match 过滤（协议 §4.3）：只过滤输出，不动作。
+ * 命中节点保留完整子树；其祖先只保留 role+name 作为最小上下文行
+ * （共享祖先自动分组）；零命中返回空数组与 matches:0。
+ * match 之后再由调用方应用 max_chars。
+ */
+export function filterByMatch(
+  nodes: CompactNode[],
+  spec: MatchSpec,
+): { out: CompactNode[]; matches: number } {
+  let matches = 0;
+  const walk = (node: CompactNode): CompactNode | null => {
+    if (matchesSpec(node, spec)) {
+      // 命中节点保留完整子树，且不再向子树里计数（命中的是「一处结果」，
+      // 子树里的可交互 ref 已随子树完整返回）。
+      matches += 1;
+      return node;
+    }
+    if (!node.children) return null;
+    const kept: CompactNode[] = [];
+    for (const child of node.children) {
+      const filtered = walk(child);
+      if (filtered) kept.push(filtered);
+    }
+    if (kept.length === 0) return null;
+    // 纯上下文行：只留 role+name（对齐协议 §4.3 的 YAML 示例）。
+    return { role: node.role, name: node.name, children: kept };
+  };
+  const out: CompactNode[] = [];
+  for (const node of nodes) {
+    const filtered = walk(node);
+    if (filtered) out.push(filtered);
+  }
+  return { out, matches };
 }
 
 function formatLine(node: CompactNode, depth: number): string {

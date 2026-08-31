@@ -10,7 +10,8 @@ import type { TargetContext, Tool } from './types';
 import { sendCommand } from '../debugger-session';
 import { assignRef, INTERACTIVE_ROLES, resetRefs } from '../refs';
 import { resolveObjectId, parseFrameArg } from './element';
-import { compactFromAx, renderYaml, type AxNode, type IframeInfo } from './ax-yaml';
+import { compactFromAx, contextualInteractive, filterByMatch, matchesSpec, renderYaml, type AxNode, type CompactNode, type IframeInfo, type MatchSpec } from './ax-yaml';
+import { INLINE_MAX_CHARS, makeArtifact } from './artifact';
 import {
   resolveFrame,
   frameById,
@@ -35,12 +36,66 @@ const DEFAULT_MAX_CHARS = 24_000;
 const MIN_MAX_CHARS = 1000;
 const MAX_MAX_CHARS = 80_000;
 
+/**
+ * 解析 snapshot 的 match 参数（协议 §4.3）：object、name 必填、
+ * role 可选、exact 默认 true。
+ */
+function parseMatch(raw: unknown): MatchSpec | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('snapshot: match must be an object like {role?, name, exact?}');
+  }
+  const m = raw as Record<string, unknown>;
+  if (typeof m.name !== 'string' || m.name === '') {
+    throw new Error('snapshot: match.name is required');
+  }
+  if (m.role !== undefined && typeof m.role !== 'string') {
+    throw new Error('snapshot: match.role must be a string');
+  }
+  if (m.exact !== undefined && typeof m.exact !== 'boolean') {
+    throw new Error('snapshot: match.exact must be a boolean');
+  }
+  return { role: m.role as string | undefined, name: m.name, exact: (m.exact as boolean) ?? true };
+}
+
+/** full 模式（SnapshotNode JSON 树）的确定性 match 过滤（协议 §4.3）。 */
+function filterFullTree(
+  nodes: SnapshotNode[],
+  spec: MatchSpec,
+): { out: SnapshotNode[]; matches: number } {
+  let matches = 0;
+  const nameOf = (node: SnapshotNode): string =>
+    typeof node.name === 'string' ? node.name : node.name == null ? '' : String(node.name);
+  const walk = (node: SnapshotNode): SnapshotNode | null => {
+    if (matchesSpec({ role: node.role, name: nameOf(node) }, spec)) {
+      matches += 1;
+      return node;
+    }
+    if (!node.children?.length) return null;
+    const kept: SnapshotNode[] = [];
+    for (const child of node.children) {
+      const filtered = walk(child);
+      if (filtered) kept.push(filtered);
+    }
+    if (kept.length === 0) return null;
+    // 纯上下文行：只留 role+name。
+    return { role: node.role, ...(node.name !== undefined ? { name: node.name } : {}), children: kept };
+  };
+  const out: SnapshotNode[] = [];
+  for (const node of nodes) {
+    const filtered = walk(node);
+    if (filtered) out.push(filtered);
+  }
+  return { out, matches };
+}
+
 export class SnapshotTool implements Tool {
   readonly name = 'snapshot';
 
   async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const mode = parseMode(args.mode);
     const maxChars = parseMaxChars(args.max_chars);
+    const match = parseMatch(args.match);
     const selector =
       typeof args.selector === 'string' && args.selector.length > 0
         ? args.selector
@@ -136,14 +191,49 @@ export class SnapshotTool implements Tool {
     }
 
     if (mode === 'full') {
-      const tree = this.buildTree(tabId, nodes, subtreeRoot, targetFrame?.frameId);
+      let tree = this.buildTree(tabId, nodes, subtreeRoot, targetFrame?.frameId);
+      // match 只作用于顶层 snapshot（含 selector 限定的顶层子树）；
+      // 进框 snapshot 本期不实现 match 过滤，忽略该参数返回安全超集（协议 §6）。
+      let matches: number | undefined;
+      if (match && !targetFrame) {
+        const filtered = filterFullTree(tree, match);
+        tree = filtered.out;
+        matches = filtered.matches;
+      }
+      const json = JSON.stringify(tree);
+      if (json.length <= INLINE_MAX_CHARS) {
+        return {
+          url,
+          title,
+          mode: 'full',
+          chars: json.length,
+          source_chars: json.length,
+          returned_chars: json.length,
+          ...(matches !== undefined ? { matches } : {}),
+          truncated: false,
+          tree,
+        };
+      }
+      // 协议 §4.3：full 树 >80000 字符自动转 artifact（§3.5），
+      // 不截断成非法 JSON，也不返回 result_too_large。
+      const env = makeArtifact({
+        data: json,
+        mimeType: 'application/json',
+        suggestedName: 'csi-snapshot-full.json',
+        hint: 'Most tasks are cheaper with selector or match to narrow the scope.',
+      });
       return {
         url,
         title,
         mode: 'full',
-        chars: JSON.stringify(tree).length,
-        truncated: false,
-        tree,
+        chars: env.preview.length,
+        source_chars: env.sourceChars,
+        returned_chars: env.preview.length,
+        ...(matches !== undefined ? { matches } : {}),
+        truncated: true,
+        artifact: env.artifact,
+        preview: env.preview,
+        sourceChars: env.sourceChars,
       };
     }
 
@@ -151,20 +241,32 @@ export class SnapshotTool implements Tool {
     const axNodes = compactRoot
       ? [compactRoot, ...nodes.filter((n) => n.nodeId !== compactRoot.nodeId)]
       : nodes;
-    const compact = compactFromAx(
+    // 先取层级树，match 过滤在层级树上做（祖先变上下文行），
+    // interactive 的上下文化分组最后应用（协议 §4.3）。
+    let roots: CompactNode[] = compactFromAx(
       axNodes,
-      mode,
+      'compact',
       Boolean(compactRoot),
       targetFrame?.frameId,
       frameInfoByNodeId,
       tabId,
     );
-    const rendered = renderYaml(compact, maxChars);
+    let matches: number | undefined;
+    if (match && !targetFrame) {
+      const filtered = filterByMatch(roots, match);
+      roots = filtered.out;
+      matches = filtered.matches;
+    }
+    if (mode === 'interactive') roots = contextualInteractive(roots);
+    const rendered = renderYaml(roots, maxChars);
     return {
       url,
       title,
       mode,
       chars: rendered.chars,
+      source_chars: rendered.sourceChars,
+      returned_chars: rendered.chars,
+      ...(matches !== undefined ? { matches } : {}),
       truncated: rendered.truncated,
       tree: rendered.yaml,
     };
