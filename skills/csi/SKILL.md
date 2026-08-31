@@ -10,18 +10,31 @@ metadata:
 
 Drive the user's real Chrome (with their login sessions) via a local daemon: `POST http://127.0.0.1:10088/command` with a JSON body `{"action","args","session"}`. Call format, response envelope, Windows file-body rule: `references/http-transport.md`.
 
-## Tools (21) — pick by goal, read the linked reference for args
+## Tools (21) — what each does; args live in the linked reference
 
-| Goal | Tools | Reference |
+| Tool | Use it to | Reference |
 |---|---|---|
-| Navigate / find tabs | `navigate` `find_tab` `list_tabs` | `references/tabs-and-sessions.md` |
-| Read & inspect | `snapshot` (`@e` refs, `match`, modes) · `list_frames` · `network` | `references/interaction.md` · `references/frames.md` · `references/large-results.md` |
-| Click / fill / upload | `click` `mouse_click` (trusted) `fill` `upload` `scroll` `hover` | `references/interaction.md` |
-| Type / keys | `key_type` `send_keys` | `references/interaction.md` |
-| Wait (never sleep, never bash-poll) | `wait` | `references/interaction.md` |
-| Capture / export | `screenshot` `save_as_pdf` | `references/large-results.md` |
-| Escape hatches (arbitrary page-side code — use deliberately, only when nothing else fits) | `evaluate` `cdp` | `references/large-results.md` |
-| Close (only when the user asks) | `close_tab` `close_session` | `references/tabs-and-sessions.md` |
+| `navigate` | open a URL (reuses the session's owned tab, or `newTab:true` for a fresh one) | `references/tabs-and-sessions.md` |
+| `find_tab` | adopt an open tab — `active:true` borrows the tab the user is looking at (act on it without owning it) | `references/tabs-and-sessions.md` |
+| `list_tabs` | list the session's owned tabs (+ a borrowed current target) | `references/tabs-and-sessions.md` |
+| `snapshot` | read the page as an accessibility tree — interactive elements get `@e` refs; `match` filters by role/name; modes compact/interactive/full | `references/interaction.md` |
+| `list_frames` | list iframes — same-origin frames can be snapshotted and acted into via the `frame` arg | `references/frames.md` |
+| `network` | capture and inspect HTTP traffic: list/filter requests, read response bodies | `references/large-results.md` |
+| `click` | DOM-level click | `references/interaction.md` |
+| `mouse_click` | trusted coordinate-level click (passes `isTrusted` checks) | `references/interaction.md` |
+| `fill` | set inputs/textareas **and** rich-text editors (contenteditable: ProseMirror/TipTap/Lexical/…) | `references/interaction.md` |
+| `upload` | attach local files to a file input | `references/interaction.md` |
+| `scroll` | scroll the page or an element (direction / top / bottom / to element) | `references/interaction.md` |
+| `hover` | real mouse-move (opens CSS `:hover` menus) | `references/interaction.md` |
+| `key_type` | type text into the focused element | `references/interaction.md` |
+| `send_keys` | special keys & shortcuts (`Enter`, `Tab`, `Mod+a`…), repeatable | `references/interaction.md` |
+| `wait` | wait for text / selector / url to appear or vanish — never sleep, never bash-poll | `references/interaction.md` |
+| `screenshot` | PNG/JPEG of viewport, element, or full page → file | `references/large-results.md` |
+| `save_as_pdf` | print the page to a PDF file | `references/large-results.md` |
+| `evaluate` | run arbitrary JS in the page (escape hatch — deliberate use only) | `references/large-results.md` |
+| `cdp` | raw Chrome DevTools Protocol passthrough (escape hatch — deliberate use only) | `references/large-results.md` |
+| `close_tab` | close the session's current **owned** tab (never a borrowed user tab) | `references/tabs-and-sessions.md` |
+| `close_session` | close all of the session's owned tabs | `references/tabs-and-sessions.md` |
 
 ## Typical flow
 
