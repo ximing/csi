@@ -453,3 +453,57 @@ func TestChromeExtensionOriginCanHello(t *testing.T) {
 	}
 	waitFor(t, h.Connected, "connected")
 }
+
+// CallTool 把 tool_result payload 的可选 code/details 解析成 *ToolError
+// 传给调用方；无 code 的普通错误仍是裸 error（协议 §3.3）。
+func TestCallToolParsesToolErrorCodeDetails(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	conn := dialHello(t, wsURL)
+	waitFor(t, h.Connected, "connected")
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := h.CallTool(context.Background(), "click", map[string]any{"selector": "#x"})
+		errCh <- err
+	}()
+
+	var msg Message
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("read tool_call: %v", err)
+	}
+	if msg.Type != MsgToolCall {
+		t.Fatalf("type = %q, want %q", msg.Type, MsgToolCall)
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"error":   "session target tab 99 is no longer available",
+		"code":    "stale_target",
+		"details": map[string]any{"tabId": 99, "session": "s", "nextTabId": 42},
+	})
+	if err := conn.WriteJSON(Message{
+		Type:                MsgToolResult,
+		ResponseToRequestID: msg.RequestID,
+		Payload:             payload,
+	}); err != nil {
+		t.Fatalf("write tool_result: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		var te *ToolError
+		if !errors.As(err, &te) {
+			t.Fatalf("err type %T %v, want *ToolError", err, err)
+		}
+		if te.Message != "session target tab 99 is no longer available" {
+			t.Fatalf("message = %q", te.Message)
+		}
+		if te.Code != "stale_target" {
+			t.Fatalf("code = %q, want stale_target", te.Code)
+		}
+		if te.Details["nextTabId"].(float64) != 42 || te.Details["tabId"].(float64) != 99 {
+			t.Fatalf("details = %v", te.Details)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CallTool did not return after tool_result")
+	}
+}

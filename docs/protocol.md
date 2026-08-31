@@ -298,7 +298,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - 同域帧已卸载 / context 失效 → `iframe: frame is gone; run snapshot again`。
 - 进框 snapshot 返回 `{url, title, mode, chars, source_chars, returned_chars, matches?, truncated, tree}`，`url`/`title` 用该帧的（title 没有就 `""`），`max_chars` 作用在该帧 YAML 上。只下一层。
 - ref 表：按 tab 分区；`RefEntry` 加可选 `frameId`（空 = 顶层）与 `documentEpoch`。整页 snapshot 与非 iframe 的 selector 子树 → 只 reset **该 tab**（`@e1` 起）；进帧 snapshot → 不 reset，序号续编，父页旧 `@e` 保留。主文档 commit / reload / 关该 tab → 只影响该 tab。主文档 commit 提升该 tab 的 `documentEpoch`；消费 `@e` 时 epoch 不一致 → `stale_ref`。不同 tab 允许相同 `@e` 编号。任意其它 tab 关闭不得清空本 tab 的 ref。
-- `frame` 在七个工具上：`@e` 忽略 `frame`（以 ref 表 frameId 为准）；CSS / evaluate 的 `code` 无 `frame` 在顶层、有 `frame` 在该帧（跨域走跨域错误）。
+- `frame` 在八个工具上（snapshot/click/fill/evaluate/mouse_click/wait/hover/screenshot）：`@e` 忽略 `frame`（以 ref 表 frameId 为准）；CSS / evaluate 的 `code` 无 `frame` 在顶层、有 `frame` 在该帧（跨域走跨域错误）。
 - `screenshot`：`fullPage` 与 `selector` 仍互斥；`fullPage + frame` clip 到该 iframe 元素在父页视口里的可见盒（不是子文档完整滚动高度）。
 - `wait`：`url` 仍看 tab URL；`text`/`selector` 在指定帧（或 `@e` 所在帧）轮询。
 

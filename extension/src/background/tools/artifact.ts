@@ -55,17 +55,3 @@ export function parseResultMaxChars(tool: string, raw: unknown): number {
   }
   return raw;
 }
-
-/** 判断结果对象是否带 artifact 信封（供调用方/测试识别转落盘的结果）。 */
-export function isArtifactEnvelope(value: unknown): value is ArtifactEnvelope {
-  const v = value as ArtifactEnvelope | undefined;
-  return (
-    !!v &&
-    typeof v === 'object' &&
-    !!v.artifact &&
-    v.artifact.encoding === 'utf8' &&
-    typeof v.artifact.data === 'string' &&
-    typeof v.preview === 'string' &&
-    typeof v.sourceChars === 'number'
-  );
-}
