@@ -15,6 +15,7 @@ import (
 	"csi/daemon/internal/daemon"
 	"csi/daemon/internal/session"
 	"csi/daemon/internal/tools"
+	"csi/daemon/internal/update"
 	"csi/daemon/internal/version"
 	"csi/daemon/internal/ws"
 )
@@ -28,6 +29,9 @@ type Server struct {
 	dir      string
 	started  time.Time
 	logger   *log.Logger
+
+	// UpdateChecker 供 /status 暴露更新信息；nil 表示不输出相关字段。
+	UpdateChecker *update.Checker
 
 	// OnConfigApplied POST /config 保存成功后回调（如更新日志保留天数）；可为 nil。
 	OnConfigApplied func(daemon.Config)
@@ -137,6 +141,8 @@ type statusResponse struct {
 	UptimeSeconds      int64     `json:"uptime_seconds"`
 	Sessions           []string  `json:"sessions"`
 	Port               int       `json:"port"`
+	UpdateAvailable    *bool     `json:"update_available,omitempty"`
+	LatestVersion      string    `json:"latest_version,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +151,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		cp := append([]string(nil), t...)
 		extTools = &cp
 	}
-	writeJSON(w, statusResponse{
+	resp := statusResponse{
 		Running:            true,
 		PID:                os.Getpid(),
 		Version:            version.Version,
@@ -155,7 +161,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		UptimeSeconds:      int64(time.Since(s.started).Seconds()),
 		Sessions:           s.Sessions.Names(),
 		Port:               s.Port,
-	})
+	}
+	if s.UpdateChecker != nil {
+		if cache := s.UpdateChecker.ReadCache(); cache != nil {
+			ua := update.NewerAvailable(version.Version, cache.LatestVersion)
+			resp.UpdateAvailable = &ua
+			resp.LatestVersion = cache.LatestVersion
+		}
+	}
+	writeJSON(w, resp)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {

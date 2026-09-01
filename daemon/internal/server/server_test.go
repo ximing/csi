@@ -20,6 +20,7 @@ import (
 	"csi/daemon/internal/daemon"
 	"csi/daemon/internal/server"
 	"csi/daemon/internal/tools"
+	"csi/daemon/internal/update"
 	"csi/daemon/internal/version"
 	"csi/daemon/internal/ws"
 )
@@ -771,5 +772,58 @@ func TestToolErrorCodeDetailsInHTTPBody(t *testing.T) {
 	}
 	if details["session"] != "s" {
 		t.Fatalf("details.session = %v, want s", details["session"])
+	}
+}
+
+// TestStatusUpdateFields /status 在有缓存时暴露 update_available 与 latest_version，
+// 无缓存时两字段不出现（omitempty）。
+func TestStatusUpdateFields(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	// 无缓存：字段不应出现
+	req := httptest.NewRequest("GET", "/status", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var noCache map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &noCache); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := noCache["update_available"]; ok {
+		t.Fatalf("no cache should omit update_available, got %v", noCache)
+	}
+	if _, ok := noCache["latest_version"]; ok {
+		t.Fatalf("no cache should omit latest_version, got %v", noCache)
+	}
+
+	// 写入缓存：latest=9.9.9
+	cachePath := filepath.Join(dir, "update-check.json")
+	cache := update.CheckResult{
+		LatestVersion: "9.9.9",
+		Tag:           "v9.9.9",
+		CheckedAt:     time.Now(),
+	}
+	data, _ := json.Marshal(cache)
+	if err := os.WriteFile(cachePath, data, 0o644); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	srv.UpdateChecker = &update.Checker{Dir: dir}
+
+	req2 := httptest.NewRequest("GET", "/status", nil)
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, req2)
+	var withCache map[string]any
+	if err := json.Unmarshal(w2.Body.Bytes(), &withCache); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if withCache["latest_version"] != "9.9.9" {
+		t.Fatalf("latest_version = %v, want 9.9.9", withCache["latest_version"])
+	}
+	ua, ok := withCache["update_available"].(bool)
+	if !ok || ua != update.NewerAvailable(version.Version, "9.9.9") {
+		t.Fatalf("update_available = %v, want %v", withCache["update_available"], update.NewerAvailable(version.Version, "9.9.9"))
 	}
 }

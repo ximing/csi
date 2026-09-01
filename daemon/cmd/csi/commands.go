@@ -18,6 +18,7 @@ import (
 	"csi/daemon/internal/daemon"
 	mcpserver "csi/daemon/internal/mcp"
 	"csi/daemon/internal/server"
+	"csi/daemon/internal/update"
 	"csi/daemon/internal/version"
 )
 
@@ -56,6 +57,7 @@ func cmdServe() error {
 
 	srv := server.New(cfg, dir, logger)
 	srv.OnConfigApplied = func(c daemon.Config) { daily.SetKeepDays(c.LogRetentionDays) }
+	srv.UpdateChecker = &update.Checker{Dir: dir}
 	httpSrv := &http.Server{
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -79,6 +81,14 @@ func cmdServe() error {
 
 	logger.Printf("csi %s serving on 127.0.0.1:%d (pid %d, id %s)",
 		version.Version, port, os.Getpid(), id)
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if _, err := srv.UpdateChecker.Check(ctx, false); err != nil {
+			logger.Printf("update check: %v", err)
+		}
+	}()
 
 	select {
 	case sig := <-sigCh:
