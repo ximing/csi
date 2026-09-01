@@ -12,11 +12,7 @@
 
 ### tabs
 
-> The extension lists, creates, reuses, and closes browser tabs as part of executing automation commands from the local daemon. Concretely: `list_tabs` enumerates open tabs so the agent can pick a target; `navigate` creates a tab or reuses the current one and waits for page load via `chrome.tabs.onUpdated`; `find_tab` locates an existing tab by URL/title; `close_tab`/`close_session` close tabs the session opened. Tab tracking (`chrome.tabs.get` / `chrome.tabs.query`) is also used to resolve which tab a command should act on.
-
-### activeTab
-
-> When a command does not specify a target tab, the extension falls back to the tab the user is currently using (see `tab-manager.ts`, which queries the active tab of the current window and remembers it as the command target). activeTab ensures the extension can act on that user-focused tab — e.g. read its content or screenshot it — at the moment the user (via the local daemon) directs it to.
+> The extension lists, creates, reuses, and closes browser tabs as part of executing automation commands from the local daemon. Concretely: `list_tabs` enumerates the tabs owned by the session; `navigate` creates a new tab or reuses the session's current *owned* tab and waits for page load via `chrome.tabs.onUpdated`; `find_tab` locates a session-owned tab by URL domain, or with `active:true` scopes the search to the user's foreground tab in the last-focused window; `close_tab`/`close_session` close only tabs the session opened. The target tab for every command is supplied by the daemon (`_tabId`); the extension uses `chrome.tabs.get` only to verify that target still exists, and never silently falls back to an unrelated active tab.
 
 ### debugger
 
@@ -74,7 +70,7 @@ CWS 认证问答建议答案：
 ## 材料覆盖核对
 
 - [x] single purpose
-- [x] 权限 justification × 8（tabs / activeTab / debugger / storage / alarms / tabGroups / windows / `<all_urls>`）
+- [x] 权限 justification × 7（tabs / debugger / storage / alarms / tabGroups / windows / `<all_urls>`）
 - [x] 数据使用披露（不收集、不出本机）
 - [x] remote code 声明（已核实 src 无远程加载）
 - [x] 审核员测试方式备注
