@@ -20,6 +20,7 @@ import (
 	"csi/daemon/internal/daemon"
 	"csi/daemon/internal/server"
 	"csi/daemon/internal/tools"
+	"csi/daemon/internal/version"
 	"csi/daemon/internal/ws"
 )
 
@@ -365,7 +366,7 @@ func TestHelloAckAndStatus(t *testing.T) {
 	}
 	var p map[string]any
 	_ = json.Unmarshal(ack.Payload, &p)
-	if p["daemonVersion"] != "0.6.0" {
+	if p["daemonVersion"] != version.Version {
 		t.Fatalf("daemonVersion = %v", p["daemonVersion"])
 	}
 	gotAckTools, ok := p["tools"].([]any)
@@ -391,7 +392,7 @@ func TestHelloAckAndStatus(t *testing.T) {
 	defer resp.Body.Close()
 	var st map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&st)
-	if st["running"] != true || st["version"] != "0.6.0" {
+	if st["running"] != true || st["version"] != version.Version {
 		t.Fatalf("status = %v", st)
 	}
 	// 测试 server 与用例同进程，pid 应等于当前进程
