@@ -50,6 +50,8 @@ export interface WsClientOptions {
   onConnectionStateChange?: (state: ConnectionState, serverUrl: string) => void;
   /** WS 单消息字节上限，默认 WS_MAX_MESSAGE_BYTES（协议 §3.2）；测试可注入小值。 */
   maxMessageBytes?: number;
+  /** 断线重连退避序列（毫秒），默认 [1000, 2000, 5000, 10000, 30000]，封顶取末位；测试可注入小值。 */
+  retryDelaysMs?: number[];
 }
 
 function sameHost(a: string, b: string): boolean {
@@ -69,12 +71,16 @@ export class WsClient {
   private readonly tools: string[];
   private readonly onConnectionStateChange?: WsClientOptions['onConnectionStateChange'];
   private readonly maxMessageBytes: number;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryAttempt = 0;
+  private readonly retryDelaysMs: number[];
 
   constructor(options: WsClientOptions) {
     this.onToolCall = options.onToolCall;
     this.tools = options.tools;
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.maxMessageBytes = options.maxMessageBytes ?? WS_MAX_MESSAGE_BYTES;
+    this.retryDelaysMs = options.retryDelaysMs ?? [1000, 2000, 5000, 10000, 30000];
   }
 
   isConnected(): boolean {
@@ -122,6 +128,7 @@ export class WsClient {
 
   async disconnect(): Promise<void> {
     await this.setDesired({ shouldConnect: false, url: this.currentUrl });
+    this.resetRetry(); // 手动断开不留下挂起的重试
     this.teardown();
   }
 
@@ -208,6 +215,7 @@ export class WsClient {
       this.setConnectionState('disconnected');
       this.clearConnectingTimer();
       console.log('[ws] disconnected');
+      void this.scheduleRetry();
     });
 
     socket.addEventListener('error', (event) => {
@@ -216,6 +224,7 @@ export class WsClient {
   }
 
   private teardown(): void {
+    this.resetRetry();
     this.clearConnectingTimer();
     if (this.socket) {
       const socket = this.socket;
@@ -227,6 +236,28 @@ export class WsClient {
       }
     }
     this.setConnectionState('disconnected');
+  }
+
+  /** close 后按指数退避自动重连（协议无变更，纯客户端行为）；
+   *  与 csi-reconcile alarm 共存：alarm 是 30s 兜底，这里是秒级快路径。 */
+  private async scheduleRetry(): Promise<void> {
+    const desired = await this.getDesired();
+    if (!desired.shouldConnect || this.retryTimer) return;
+    const delays = this.retryDelaysMs;
+    const delay = delays[Math.min(this.retryAttempt, delays.length - 1)]!;
+    this.retryAttempt++;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.reconcile();
+    }, delay);
+  }
+
+  private resetRetry(): void {
+    this.retryAttempt = 0;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
   }
 
   private setConnectionState(state: ConnectionState): void {
@@ -264,6 +295,7 @@ export class WsClient {
         this.send({ type: 'pong' });
         break;
       case 'hello_ack':
+        this.resetRetry(); // 握手成功，退避序列归零
         break;
       case 'tool_call':
         void this.handleToolCall(message, socket);
