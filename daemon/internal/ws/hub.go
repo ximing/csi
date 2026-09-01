@@ -72,6 +72,7 @@ type Hub struct {
 	PingInterval     time.Duration // 应用层 ping 间隔，默认 30s
 	HandshakeTimeout time.Duration // hello 握手超时，默认 5s
 	MaxReadBytes     int64         // WS 单消息读上限（协议 §3.2），默认 160MiB
+	WriteTimeout     time.Duration // 单帧写 deadline；0 = 默认 15s。对端卡死时防止全局 writeMu 堵死所有 tool_call 与 ping
 	Logger           *log.Logger
 
 	mu            sync.Mutex
@@ -432,6 +433,11 @@ func (h *Hub) pingLoop(conn *websocket.Conn) {
 func (h *Hub) writeJSON(conn *websocket.Conn, msg Message) error {
 	h.writeMu.Lock()
 	defer h.writeMu.Unlock()
+	timeout := h.WriteTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(timeout))
 	return conn.WriteJSON(msg)
 }
 

@@ -615,3 +615,37 @@ func TestCallToolParsesToolErrorCodeDetails(t *testing.T) {
 		t.Fatal("CallTool did not return after tool_result")
 	}
 }
+
+func TestWriteJSONDeadline(t *testing.T) {
+	// 服务端 upgrade 后不读任何数据
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		time.Sleep(5 * time.Second) // 持连接不读
+	}))
+	defer srv.Close()
+	url := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	h := New("test", log.New(io.Discard, "", 0))
+	h.WriteTimeout = 100 * time.Millisecond
+	// 必须是合法 JSON 大帧（零字节不是合法 JSON，WriteJSON 会在 marshal 阶段秒报错，
+	// 根本走不到网络写，测试实现前后都绿、红绿门失效）——用 8MB 的 JSON 字符串。
+	big := json.RawMessage(`"` + strings.Repeat("a", 8<<20) + `"`)
+	start := time.Now()
+	err = h.writeJSON(conn, Message{Type: MsgToolCall, Payload: big})
+	if err == nil {
+		t.Fatal("期望写超时错误")
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("写阻塞 %.1fs,deadline 未生效", d.Seconds())
+	}
+}
