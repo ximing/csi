@@ -40,3 +40,6 @@ jobs:
 
       - name: Tool arg schema consistency (protocol vs MCP inputSchema)
         run: node scripts/skill-ci/check-schemas.mjs
+
+      - name: Version surfaces aligned
+        run: node scripts/skill-ci/check-versions.mjs

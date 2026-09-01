@@ -25,6 +25,12 @@ if [[ -z "$VERSION" ]]; then
   exit 1
 fi
 
+PKG_VER="$(node -p "require('$EXT_DIR/package.json').version")"
+if [ "$VERSION" != "$PKG_VER" ]; then
+  echo "manifest.json ($VERSION) 与 package.json ($PKG_VER) 版本不一致" >&2
+  exit 1
+fi
+
 ZIP_NAME="csi-extension-v${VERSION}.zip"
 ZIP_PATH="$RELEASE_DIR/$ZIP_NAME"
 mkdir -p "$RELEASE_DIR"
