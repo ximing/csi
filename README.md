@@ -122,6 +122,35 @@ curl -s -X POST http://127.0.0.1:10088/command \
 
 The installer also copies two Claude Code skills to `~/.claude/skills/`: `csi` (browser control — used automatically whenever you ask Claude Code to interact with websites) and `csi-e2e` (e2e test suites — see below).
 
+## Upgrading
+
+Pick the channel that matches how you installed:
+
+- **Re-run the installer** — it is idempotent, so the install commands from [Quick start](#quick-start) double as a full upgrade (daemon + skills + extension zip). The daemon is restarted automatically at the end.
+- **`csi update`** — updates just the daemon binary in place: downloads the new release, verifies the checksum, swaps the binary, and restarts the daemon if it is running. `csi update --check` only reports versions (`current` / `latest` / `update_available`) without changing anything; `--with-skills` also refreshes the skill packs under `~/.claude/skills/`, `--with-extension` refreshes the sideloaded extension under `~/.csi/extension`. Homebrew installs are refused (self-update would overwrite brew-managed files) — use `brew upgrade csi` instead.
+- **`brew upgrade csi`** — for Homebrew (Option C) users.
+
+The installer also registers a **daily update task** alongside login autostart: once a day it probes for a new release and self-updates the daemon. `csi autostart off` removes both the login entry and the daily task; `csi autostart on` brings both back. To see what it would find, run `csi update --check` yourself.
+
+The extension and the skills move on their own tracks:
+
+- **Chrome Web Store extension** — Chrome updates it automatically; nothing to do.
+- **Sideloaded extension** — re-run the installer or `csi update --with-extension`, then hit reload on `chrome://extensions`.
+- **Skills** — `csi update --with-skills`, re-run the installer, or re-install via your agent's plugin command.
+
+## Uninstalling
+
+```bash
+csi uninstall        # asks for confirmation; -y skips the prompt
+```
+
+This stops the daemon, removes login autostart and the daily update task, and deletes `~/.csi` (binary, config, logs). Two things it deliberately leaves to you:
+
+- **Skill directories** — remove `~/.claude/skills/csi` and `~/.claude/skills/csi-e2e` (plus the copies under any other agents' skill dirs you installed to).
+- **Chrome extension** — remove it at `chrome://extensions`. For a sideloaded install the unpacked entry is enough; `~/.csi/extension` is already gone.
+
+Homebrew installs keep the binary in the brew prefix, so finish with `brew services stop csi && brew uninstall csi`.
+
 ## MCP server
 
 `csi mcp` runs a stdio MCP server exposing all 21 browser tools. It is a thin proxy: each tool call is forwarded to the local daemon's `POST /command` (same `CSI_PORT`, default 10088), so the daemon must be running (`csi start`).

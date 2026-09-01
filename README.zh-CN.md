@@ -122,6 +122,35 @@ curl -s -X POST http://127.0.0.1:10088/command \
 
 安装器还会把两个 Claude Code 技能复制到 `~/.claude/skills/`：`csi`（浏览器控制——你让 Claude Code 与网站交互时会自动启用）和 `csi-e2e`（e2e 测试套件——见下文）。
 
+## 升级
+
+按你当初的安装方式选一条：
+
+- **重跑安装器** —— 安装器是幂等的，[快速开始](#快速开始)里的安装命令直接当升级用（daemon + 技能 + 扩展 zip 全套），装完自动重启 daemon。
+- **`csi update`** —— 只更新 daemon 二进制：下载新 release、校验 checksum、就地替换，daemon 在跑就顺便重启。`csi update --check` 只报告版本（`current` / `latest` / `update_available`），不动任何东西；`--with-skills` 顺带刷新 `~/.claude/skills/` 下的技能包，`--with-extension` 顺带刷新 `~/.csi/extension` 的解压版扩展。Homebrew 装的会被拒绝（自更新会覆盖 brew 管的文件）——请用 `brew upgrade csi`。
+- **`brew upgrade csi`** —— Homebrew（方式 C）用户。
+
+安装器注册登录自启的同时还会注册一个**每日更新任务**：每天探一次新 release 并自更新 daemon。`csi autostart off` 会把登录项和每日任务一起撤掉，`csi autostart on` 一起装回来。想先看看有没有新版本，自己跑 `csi update --check`。
+
+扩展和技能各走各的轨道：
+
+- **应用商店版扩展** —— Chrome 会自动更新，不用管。
+- **手动加载的扩展** —— 重跑安装器或 `csi update --with-extension`，然后到 `chrome://extensions` 点一下刷新。
+- **技能** —— `csi update --with-skills`、重跑安装器，或用各 Agent 的插件命令重装。
+
+## 卸载
+
+```bash
+csi uninstall        # 会询问确认；-y 跳过确认
+```
+
+它会停掉 daemon、撤掉登录自启和每日更新任务、删掉 `~/.csi`（二进制、配置、日志）。有两样它特意留给你手动清：
+
+- **技能目录** —— 删掉 `~/.claude/skills/csi` 和 `~/.claude/skills/csi-e2e`（以及你装到其它 Agent 技能目录下的同名副本）。
+- **Chrome 扩展** —— 到 `chrome://extensions` 移除；手动加载版删掉解压条目即可（`~/.csi/extension` 已经没了）。
+
+Homebrew 安装的二进制在 brew prefix 里，收尾再跑 `brew services stop csi && brew uninstall csi`。
+
 ## MCP server
 
 `csi mcp` 跑一个 stdio MCP server，暴露全部 21 个浏览器工具。它是一个薄代理：每次工具调用都转发给本地 daemon 的 `POST /command`（同一个 `CSI_PORT`，默认 10088），所以 daemon 必须在运行（`csi start`）。
