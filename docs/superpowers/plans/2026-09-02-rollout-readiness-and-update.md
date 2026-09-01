@@ -309,7 +309,9 @@ func TestWriteJSONDeadline(t *testing.T) {
 
 	h := New("test", log.New(io.Discard, "", 0))
 	h.WriteTimeout = 100 * time.Millisecond
-	big := make([]byte, 8<<20) // 超过内核写缓冲,逼出写阻塞
+	// 必须是合法 JSON 大帧(零字节不是合法 JSON,WriteJSON 会在 marshal 阶段秒报错,
+	// 根本走不到网络写,测试实现前后都绿、红绿门失效)——用 8MB 的 JSON 字符串。
+	big := json.RawMessage(`"` + strings.Repeat("a", 8<<20) + `"`)
 	start := time.Now()
 	err = h.writeJSON(conn, Message{Type: MsgToolCall, Payload: big})
 	if err == nil { t.Fatal("期望写超时错误") }
@@ -322,7 +324,7 @@ func TestWriteJSONDeadline(t *testing.T) {
 - [ ] **Step 2: 跑测试确认失败(阻塞/超时)**
 
 Run: `cd daemon && go test ./internal/ws/ -run TestWriteJSONDeadline -timeout 30s`
-Expected: FAIL 或测试超时(err == nil 分支)
+Expected: FAIL —— `err == nil` 分支报"期望写超时错误"(写最终穿透内核缓冲成功,只是慢),或因无 deadline 拖到接近对端 5s 关闭才返回。若测试秒过且 err != nil,说明 payload 没走到网络写,检查 JSON 合法性。
 
 - [ ] **Step 3: 实现**
 
@@ -436,7 +438,7 @@ Expected: FAIL(未回收/字段不存在编译错误)
 const (
 	// MaxSessions session 数上限;超出淘汰最久未访问者(LRU)。
 	MaxSessions = 256
-	// MaxNameLength session 名长度上限(字符数),防失控客户端刷爆内存。
+	// MaxNameLength session 名长度上限(按字节,len()),防失控客户端刷爆内存。
 	MaxNameLength = 128
 	// IdleTTL 闲置回收阈值;回收无副作用(session 只持 tab 映射,协议 §3.4 有降级路径)。
 	IdleTTL = 24 * time.Hour
@@ -449,6 +451,7 @@ const (
 func (m *Manager) get(name string) *Session {
 	m.seq++
 	now := m.now()
+	m.sweepLocked(now) // 每次访问顺带清扫(≤256 项,代价可忽略),不只 miss 路径
 	if s, ok := m.sessions[name]; ok {
 		s.lastUsed, s.lastAccess = m.seq, now
 		if s.gate == nil {
@@ -456,7 +459,6 @@ func (m *Manager) get(name string) *Session {
 		}
 		return s
 	}
-	m.sweepLocked(now)
 	if len(m.sessions) >= MaxSessions {
 		m.evictLRULocked()
 	}
@@ -499,16 +501,16 @@ func (m *Manager) evictLRULocked() {
 }
 ```
 
-`gate.go` 的 `fifo` 加(字段名按实际调整,先读该文件):
+`gate.go` 的 `fifo` 加(`held`/`wait` 受 `f.mu` 保护,busy 走同一把锁;Unlock 移交等待者时 `held` 保持 true,所以 held 或队列非空都算忙):
 
 ```go
-// busy 当前是否持有锁(回收扫描跳过持锁 session)。
+// busy 当前是否持有锁或有排队者(回收扫描跳过忙 session)。
 func (f *fifo) busy() bool {
-	return f.held // 按 gate.go 实际实现:锁被持有即 true,可能需要加原子/互斥保护
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.held || len(f.wait) > 0
 }
 ```
-
-注意:`busy()` 与 `LockCtx`/`Unlock` 的并发安全——`get` 在 `m.mu` 下调用 `busy()`,但 `Unlock` 不持 `m.mu`;`held` 需用 `atomic.Bool` 或在 fifo 自己的 mutex 下读写。实现时按 gate.go 现状选最小改动。
 
 `server.go` 的 `handleCommand` 在 `req.Action == ""` 校验后加:
 
@@ -546,30 +548,63 @@ git commit -m "session map 双闸回收:上限 256 LRU + 闲置 24h,名称限长
 
 - [ ] **Step 1: 写失败测试**
 
-在 `ws-client-reconnect.test.ts` 追加(先读该文件头部,fake WebSocket 与 fake timers 模式照搬):
+在 `ws-client-reconnect.test.ts` 追加。该文件的 FakeWebSocket API 是 `emit('open')` / `emitMessage(envelope)` / `close()`(**不是** `open()`/`receive()`);fake timers 必须在用例内显式 `vi.useFakeTimers()` 并 finally 复位(对照该文件 :226-239 的现有写法):
 
 ```ts
 it('close 后按退避序列自动重连,不等 reconcile alarm', async () => {
-  const client = makeClient({ retryDelaysMs: [10, 20, 40] }); // 按现有 helper 调整
-  await client.connect('ws://localhost:1/ws');
-  const first = FakeWebSocket.instances[0];
-  first.open();
-  first.receive({ type: 'hello_ack', payload: { daemonVersion: '0.7.0', tools: [] } });
-  first.close(); // 模拟 daemon 重启断开
-  expect(FakeWebSocket.instances).toHaveLength(1);
-  await vi.advanceTimersByTimeAsync(10); // 第一次退避
-  expect(FakeWebSocket.instances).toHaveLength(2);
-  FakeWebSocket.instances[1].close();
-  await vi.advanceTimersByTimeAsync(20);
-  expect(FakeWebSocket.instances).toHaveLength(3);
+  vi.useFakeTimers();
+  try {
+    const client = new WsClient({ onToolCall: async () => ({}), tools: [], retryDelaysMs: [10, 20, 40] });
+    await client.connect(DEFAULT_URL);
+    const first = FakeWebSocket.instances[0];
+    first.emit('open');
+    first.emitMessage({ type: 'hello_ack', payload: { daemonVersion: '0.7.0', tools: [] } });
+    first.close(); // 模拟 daemon 重启断开
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(10); // 第一次退避
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    FakeWebSocket.instances[1].close();
+    await vi.advanceTimersByTimeAsync(20);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+    await client.disconnect();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('disconnect() 后不自动重连', async () => {
-  // connect → open → disconnect() → 推进所有退避时长 → 无新 socket
+  vi.useFakeTimers();
+  try {
+    const client = new WsClient({ onToolCall: async () => ({}), tools: [], retryDelaysMs: [10, 20, 40] });
+    await client.connect(DEFAULT_URL);
+    FakeWebSocket.instances[0].emit('open');
+    await client.disconnect(); // teardown 触发的 close 不得调度重试
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('hello_ack 后重置退避序列', async () => {
-  // close → 退避一次 → 第二次连接 open + hello_ack → 再 close → 下次延迟回到序列首位
+  vi.useFakeTimers();
+  try {
+    const client = new WsClient({ onToolCall: async () => ({}), tools: [], retryDelaysMs: [10, 20, 40] });
+    await client.connect(DEFAULT_URL);
+    FakeWebSocket.instances[0].emit('open');
+    FakeWebSocket.instances[0].emitMessage({ type: 'hello_ack', payload: {} });
+    FakeWebSocket.instances[0].close();
+    await vi.advanceTimersByTimeAsync(10); // 用掉第一档
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    FakeWebSocket.instances[1].emit('open');
+    FakeWebSocket.instances[1].emitMessage({ type: 'hello_ack', payload: {} }); // 重置
+    FakeWebSocket.instances[1].close();
+    await vi.advanceTimersByTimeAsync(10); // 又回到第一档而非第二档
+    expect(FakeWebSocket.instances).toHaveLength(3);
+    await client.disconnect();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 ```
 
@@ -631,6 +666,8 @@ private resetRetry(): void {
 
 `handleMessage` 的 `case 'hello_ack'` 里调 `this.resetRetry()`;`disconnect()` 与 `teardown()` 里也要 `this.resetRetry()`(手动断开不留下挂起的重试)。
 
+**既有用例防污染(必须做)**:新行为下,任何 `shouldConnect=true` 时 close 的既有用例都会调度一个真实 1s 重试定时器,在后续用例运行途中触发 `reconcile()` 新开 FakeWebSocket,污染共享的 `FakeWebSocket.instances`(beforeEach 重置数组但挡不住挂起的定时器)。落地时:该文件 `afterEach` 增加 `vi.clearAllTimers()`(或 `vi.useRealTimers()` 前清),并审计现有用例——凡 close 过 socket 且没走 fake timers 的,补 `await client.disconnect()` 收尾或改走 fake timers。
+
 - [ ] **Step 4: 跑全部 ws-client 测试**
 
 Run: `cd extension && npx vitest run src/background/`
@@ -648,12 +685,12 @@ git commit -m "扩展断线退避重连:close 后 1s→30s 指数退避,不等 3
 ### Task 7: popup 显示 daemon 版本 + 错配警告(extension)
 
 **Files:**
-- Modify: `extension/src/shared/messages.ts`(`StatusResponse` 加字段)
-- Modify: `extension/src/background/ws-client.ts`(存 hello_ack 的 daemonVersion)
+- Modify: `extension/src/shared/messages.ts`(`StatusResponse` 加字段、新增 `HelloAckPayload`)
+- Modify: `extension/src/background/ws-client.ts`(存 hello_ack 的 daemonVersion + `getDaemonVersion()`)
 - Modify: `extension/src/background/index.ts`(GET_STATUS 应答带上)
 - Modify: `extension/popup.html:30` 附近、`extension/src/popup/popup.ts:29-31`
 - Modify: `extension/_locales/en/messages.json`、`extension/_locales/zh_CN/messages.json`
-- Test: `extension/src/popup/popup.test.ts`、`extension/src/background/index.test.ts`(均为现有文件)
+- Test: `extension/src/popup/popup.test.ts`、`extension/src/background/index.test.ts`、`extension/src/background/ws-client-reconnect.test.ts`(均为现有文件)
 
 **Interfaces:**
 - Consumes: Task 6 的 `resetRetry` 挂点(hello_ack case)。
@@ -661,8 +698,11 @@ git commit -m "扩展断线退避重连:close 后 1s→30s 指数退避,不等 3
 
 - [ ] **Step 1: 写失败测试**
 
-`index.test.ts`:模拟 hello_ack 带 `daemonVersion: '0.7.0'` 后,`GET_STATUS` 应答含 `daemonVersion: '0.7.0'`。
-`popup.test.ts`:GET_STATUS 返回 `{ state:'connected', serverUrl:'...', daemonVersion:'0.6.0' }` 且 manifest 版本 0.7.0 时,footer 文本含警告 key 对应文案(测试里 i18n mock 直接返回 key,断言 `versionMismatch`)。
+注意 `index.test.ts:39-83` 用 `vi.mock('./ws-client')` 整体替换了 WsClient 类——**没有真实 hello_ack 可模拟**,三层各测各的:
+
+1. `ws-client-reconnect.test.ts`(真实 WsClient + FakeWebSocket):emit `hello_ack` 带 `payload: { daemonVersion: '0.8.1' }` 后,`client.getDaemonVersion()` 返回 `'0.8.1'`。
+2. `index.test.ts`:给 WsClient mock 加 `getDaemonVersion: () => '0.8.1'`,断言 `GET_STATUS` 应答含 `daemonVersion: '0.8.1'`(透传)。
+3. `popup.test.ts`:GET_STATUS mock 返回 `{ state:'connected', serverUrl:'...', daemonVersion:'0.6.0' }`(manifest mock 版本 0.7.0),断言 footer 文本含 `versionMismatch`。注意该文件的 i18n mock 对未知 key 返回 `''`,能断言到 key 是靠 `popup.ts:13` 的 `|| key` 兜底——断言目标就是兜底后的 key 字符串。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -891,7 +931,7 @@ Expected: 编译错误
 - asset 名:`windows/amd64 → csi-windows-amd64.zip`;其余 `csi-<goos>-<goarch>.tar.gz`;白名单矩阵外的组合报错(darwin/arm64、darwin/amd64、linux/arm64、linux/amd64、windows/amd64)。
 - 下载顺序:`checksums.txt` → asset;`sha256.New()` 边下边算或下完算;与 checksums.txt 中该 asset 的行匹配,不匹配 → 错误并清理。
 - 解包:tar.gz 用 `archive/tar`+`gzip` 取名为 `csi` 的成员;zip 用 `archive/zip` 取 `csi.exe`;落到 `os.MkdirTemp` 里。
-- `Replace`:unix 走 `os.Rename(self, self+".bak")` 失败不致命 → 然后 `os.Rename(newBin, self)`(跨设备时 fallback 到 copy);windows 走 rename-to-`.old` + copy-into-place(注释说明 Windows 不能覆盖运行中的 exe,但允许 rename)。权限位显式 `Chmod(0o755)`。
+- `Replace`:unix 走 `os.Rename(self, self+".bak")` 失败不致命 → 然后 `os.Rename(newBin, self)`(Fetch 落在系统临时目录,跨设备时 rename 必失败,fallback 到 io copy——注释说明);windows 走 rename-to-`.old` + copy-into-place(注释说明 Windows 不能覆盖运行中的 exe,但允许 rename)。**windows 的 `.old` 轮换**:rename 前先 best-effort `os.Remove(self+".old")` 并容忍失败(旧 daemon 还在跑时 `.old` 被锁删不掉),删不掉就退而 rename 到 `self+".old."+<unixMilli>`;同名 `.bak` 同理只留一代。权限位显式 `Chmod(0o755)`。
 - `IsHomebrewInstall`:`strings.Contains` 匹配 `/Cellar/`、`/homebrew/`、`/linuxbrew/`(大小写不敏感)。
 
 - [ ] **Step 4: 跑测试**
@@ -1035,10 +1075,15 @@ Expected: FAIL
 
 (把 `writeJSON(w, statusResponse{...})` 重构为先构造 `resp` 再按需补字段。)
 
-`commands.go` 的 `cmdServe` 在 `logger.Printf("csi %s serving ...")` 后加:
+`commands.go` 的 `cmdServe`:**赋值必须在 `go func() { errCh <- httpSrv.Serve(ln) }()` 之前**(否则 /status 早到会与赋值数据竞争)——在 `srv := server.New(...)` 之后立即:
 
 ```go
 	srv.UpdateChecker = &update.Checker{Dir: dir}
+```
+
+启动后的异步检查放 `logger.Printf("csi %s serving ...")` 之后(仅为时序美观,竞态已由前置赋值消除):
+
+```go
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -1066,8 +1111,12 @@ git commit -m "/status 暴露 update_available/latest_version,启动时异步检
 
 **Files:**
 - Modify: `daemon/internal/autostart/generate.go`(新增三平台定时单元生成)
-- Modify: `daemon/internal/autostart/apply.go`(Enable/Disable 一并注册/移除)
+- Modify: `daemon/internal/autostart/apply.go`(Enable/Disable 一并注册/移除;windows 挂接点在带 build tag 的 `windows.go` 与 nowin 桩文件里——先 `ls daemon/internal/autostart/` 确认实际文件名,两文件都要改)
 - Test: `daemon/internal/autostart/*_test.go`(现有测试模式:纯字符串断言 + fake runCmd)
+
+**与 spec 的有意偏离(已确认可接受):** spec C3 的"0–60 分钟随机 jitter"实现为 `sha256(home)[0] % 60` 的**稳定分钟**——负载分散目标等价,且同机同值更利于排查与测试。
+
+**日志归口:** macOS plist 与 Windows 任务的 stdout/stderr 必须落 `~/.csi/logs/update.log`(spec"失败只写日志"才有意义);linux 由 systemd journal 兜底。注意 systemd user timer 在用户未登录期间不触发(与现有 user service 同限制,可接受)。
 
 **Interfaces:**
 - Consumes: Task 10 的 `csi update --quiet`。
@@ -1114,9 +1163,9 @@ Expected: 编译错误
 
 `generate.go` 追加(常量:`DarwinUpdateLabel = "ai.csi.update"`,文件名 `ai.csi.update.plist`,linux `csi-update.timer`/`csi-update.service`,windows 任务名 `CSI-Update`):
 
-- darwin plist:`ProgramArguments` = `/bin/sh -c '"<exe>" start && "<exe>" update --quiet'`(拆三个 string);`StartCalendarInterval` dict 含 `Hour=4`、`Minute=<minute>`;`RunAtLoad=false`(不写该 key)。
-- linux:`csi-update.timer`(`[Timer] OnCalendar=*-*-* 04:%02d:00`、`Persistent=true`、`[Install] WantedBy=timers.target`)+ `csi-update.service`(oneshot,`ExecStart=/bin/sh -c '"<exe>" start && "<exe>" update --quiet'`)。
-- windows:`schtasks /Create /F /SC DAILY /ST 04:%02d /TN CSI-Update /TR "cmd /c \"\"<exe>\" start && \"<exe>\" update --quiet\""`——参数切片形式返回,注释说明引号嵌套。
+- darwin plist:`ProgramArguments` = `/bin/sh -c '"<exe>" start && "<exe>" update --quiet'`(拆三个 string);`StartCalendarInterval` dict 含 `Hour=4`、`Minute=<minute>`;不写 `RunAtLoad`;加 `StandardOutPath`/`StandardErrorPath` 指向 `<home>/.csi/logs/update.log`。
+- linux:`csi-update.timer`(`[Timer] OnCalendar=*-*-* 04:%02d:00`、`Persistent=true`、`[Install] WantedBy=timers.target`)+ `csi-update.service`(oneshot,`ExecStart=/bin/sh -c '"<exe>" start && "<exe>" update --quiet'`;stderr/stdout 默认进 journal,满足"失败只写日志")。
+- windows:`schtasks /Create /F /SC DAILY /ST 04:%02d /TN CSI-Update /TR "cmd /c \"\"<exe>\" start && \"<exe>\" update --quiet >> \"%USERPROFILE%\.csi\logs\update.log\" 2>&1\""`——参数切片形式返回,注释说明引号嵌套;挂接点在 `windows.go` 的 enable/disable 函数里(`/Delete /F /TN CSI-Update` 对称移除),nowin 桩同步加 no-op。
 - `UpdateMinute()`:`sum := sha256.Sum256([]byte(home)); return int(sum[0]) % 60`(home 从 `os.UserHomeDir`;注入点:包级 `var homeDir = os.UserHomeDir` 或直接读环境,测试可接受同机稳定即可)。
 
 `apply.go`:`Enable` 成功后在各平台追加注册(darwin:写第二个 plist + `launchctl bootstrap`;linux:写两个文件 + `daemon-reload` + `enable --now csi-update.timer`;windows:`schtasks /Create`);`Disable` 对称移除(bootout/删文件、`disable`+删两文件、`schtasks /Delete /F`)。注册失败只降级为 error 返回(调用方 cmdAutostart 已会报错);**但注意 install.sh 对 autostart 失败仅 warn,不会因定时任务注册失败搞挂安装**。
@@ -1131,7 +1180,7 @@ Expected: PASS;plist 存在且含 StartCalendarInterval;验证完 `autostart on`
 - [ ] **Step 5: 提交**
 
 ```bash
-git add daemon/internal/autostart/generate.go daemon/internal/autostart/apply.go daemon/internal/autostart/
+git add daemon/internal/autostart/
 git commit -m "autostart 增加每日更新定时任务:csi start 探活 + csi update --quiet"
 ```
 
@@ -1157,15 +1206,29 @@ if [ -x "$BIN_PATH" ] && curl -sf --max-time 2 "http://127.0.0.1:${CSI_PORT:-100
 fi
 ```
 
-b) daemon 下载后加 sha256 校验(`download` 函数可复用):
+b) daemon 下载后、**`tar -xzf`/`mv` 落盘之前**做 sha256 校验(顺序错了等于没校验)。`checksums.txt` 里的文件名是 release 原始名(`csi-darwin-arm64.tar.gz`),而 install.sh 把包下载为 `daemon.tar.gz`——**不能用 `shasum -c`**(它按 checksums.txt 里的文件名去磁盘找文件,必然 FAILED open),要算 hash 再字符串比较:
 
 ```bash
 download "$DL/checksums.txt" "$TMP_DIR/checksums.txt"
-( cd "$TMP_DIR" && grep "csi-$OS-$ARCH.tar.gz" checksums.txt | shasum -a 256 -c - ) \
-  || die "checksum mismatch: csi-$OS-$ARCH.tar.gz"
+
+sha256_check() { # 已下载文件 checksums.txt-里的文件名
+  local want got
+  want="$(awk -v f="$2" '$2==f {print $1}' "$TMP_DIR/checksums.txt")"
+  [ -n "$want" ] || die "checksums.txt missing entry: $2"
+  if command -v shasum >/dev/null 2>&1; then
+    got="$(shasum -a 256 "$1" | awk '{print $1}')"
+  else
+    got="$(sha256sum "$1" | awk '{print $1}')"
+  fi
+  [ "$got" = "$want" ] || die "checksum mismatch: $2"
+}
+
+download "$DL/csi-$OS-$ARCH.tar.gz" "$TMP_DIR/daemon.tar.gz"
+sha256_check "$TMP_DIR/daemon.tar.gz" "csi-$OS-$ARCH.tar.gz"
+tar -xzf "$TMP_DIR/daemon.tar.gz" -C "$TMP_DIR"
 ```
 
-扩展 zip 与技能包同样校验(同一 checksums.txt,grep 对应文件名)。Linux 有 `sha256sum`,macOS 只有 `shasum`;统一用 `shasum -a 256`(Linux 发行版自带 perl shasum;若无则 fallback `sha256sum`,实现一个 `sha256_check()` 封装先试 `shasum` 再试 `sha256sum`)。
+(`shasum` 是 perl 脚本,macOS 自带、主流 Linux 发行版也有;没有则 fallback `sha256sum`。)扩展 zip(`csi-extension.zip`)与两个技能包(`csi-skill.tar.gz`、`csi-e2e-skill.tar.gz`)在同一 `sha256_check` 下校验,同样在解压前;技能包是多目标复用下载,校验放 `install_skill` 的下载分支里。
 
 c) 第 5 步改为升级语义:
 
@@ -1289,6 +1352,7 @@ git commit -m "新增 csi uninstall:停 daemon、撤自启与定时任务、清 
 
 a) :47 附近对不存在 `uninstall` 命令的引用改为真实 `csi uninstall`(语义保留:不要自动运行)。
 b) Recovery 段加一条:排查时 `curl -s http://127.0.0.1:10088/status` 看 `update_available`,为 true 时建议用户跑 `csi update`(列入 "Do NOT do automatically" 清单——更新涉及替换二进制与重启,由用户决策)。
+c) "/status JSON fields" 字段清单段(约 :55)补 `update_available` / `latest_version` 两个新字段说明(仅在有更新检查缓存时出现)。
 
 - [ ] **Step 5: 提交**
 
