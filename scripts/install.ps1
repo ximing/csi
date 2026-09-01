@@ -121,7 +121,7 @@ What it does:
   2. Download the built extension  -> $ExtDir  (sideload; skip with -NoExtension)
   3. Install the skills            -> each target's skills dir (see above)
   4. Register login autostart (skip with -NoAutostart / CSI_NO_AUTOSTART=1)
-  5. Start the daemon (idempotent)
+  5. Start the daemon (restart if it was already running)
 "@
     exit 0
 }
@@ -163,14 +163,53 @@ function Download ([string]$url, [string]$dest) {
     $ProgressPreference = $oldPref
 }
 
+# ---------- upgrade detection ----------
+
+# 换二进制前记录旧 daemon 是否在跑：在跑则装完提示 restarted，否则幂等 start。
+# Windows 下运行中的 csi.exe 被占用，替换前必须先 stop。
+$script:WasRunning = $false
+if (Test-Path $BinPath) {
+    $port = if ($env:CSI_PORT) { $env:CSI_PORT } else { '10088' }
+    try {
+        Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 2 | Out-Null
+        $script:WasRunning = $true
+    } catch {
+        $script:WasRunning = $false
+    }
+}
+
+# ---------- checksums ----------
+
+# checksums.txt 里的文件名是 release 原始名（csi-windows-amd64.zip），
+# 而落盘名是 daemon.zip——算 hash 字符串比对，与 install.sh 的 sha256_check 对齐。
+$checksumsFile = Join-Path $TmpDir 'checksums.txt'
+
+function Assert-Sha256 ([string]$File, [string]$AssetName) {
+    $want = $null
+    foreach ($line in Get-Content $checksumsFile) {
+        $parts = $line -split '\s+'
+        if ($parts.Count -ge 2 -and $parts[1] -eq $AssetName) { $want = $parts[0]; break }
+    }
+    if (-not $want) { Die "checksums.txt missing entry: $AssetName" }
+    $got = (Get-FileHash -Algorithm SHA256 $File).Hash
+    if ($got -ne $want.ToUpper()) { Die "checksum mismatch: $AssetName" }
+}
+
 try {
     # ---------- 1. daemon ----------
 
     Step '[1/5] Installing daemon (windows-amd64)'
 
     New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+    Download "$DL/checksums.txt" $checksumsFile
     $daemonZip = Join-Path $TmpDir 'daemon.zip'
     Download "$DL/csi-windows-amd64.zip" $daemonZip
+    Assert-Sha256 $daemonZip 'csi-windows-amd64.zip'
+    # Windows 会锁住运行中的 csi.exe，升级替换前必须先停掉旧 daemon
+    if ($script:WasRunning) {
+        & $BinPath stop
+        if ($LASTEXITCODE -ne 0) { Die "failed to stop the running daemon before upgrade - run: $BinPath stop --force" }
+    }
     Expand-Archive $daemonZip -DestinationPath $TmpDir -Force
     Move-Item (Join-Path $TmpDir 'csi.exe') $BinPath -Force
     Ok "daemon: $BinPath ($(Format-Elapsed $script:DL_LAST_TIME))"
@@ -186,6 +225,7 @@ try {
 
         $extZip = Join-Path $TmpDir 'extension.zip'
         Download "$DL/csi-extension.zip" $extZip
+        Assert-Sha256 $extZip 'csi-extension.zip'
         if (Test-Path $ExtDir) { Remove-Item $ExtDir -Recurse -Force }
         Expand-Archive $extZip -DestinationPath $ExtDir
         Ok "extension: $ExtDir ($(Format-Elapsed $script:DL_LAST_TIME))"
@@ -198,6 +238,7 @@ try {
         # tarball 只下载一次，多目标复用
         if (-not (Test-Path $tar)) {
             Download "$DL/$TarName" $tar
+            Assert-Sha256 $tar $TarName
             Ok "  fetched $TarName ($(Format-Elapsed $script:DL_LAST_TIME))"
         }
         if (Test-Path $DestDir) { Remove-Item $DestDir -Recurse -Force }
@@ -266,6 +307,9 @@ try {
     if ($NoStart) {
         Step '[5/5] Start daemon - skipped (-NoStart)'
         Info "start it later with:  $BinPath start"
+        if ($script:WasRunning) {
+            Warn "old daemon is still running the previous version - restart it with:  $BinPath restart"
+        }
     } else {
         Step '[5/5] Starting daemon'
         $start = Get-Date
@@ -277,14 +321,25 @@ try {
             $started = $false
         }
         if ($started) {
-            Ok "daemon is running ($(Format-Elapsed ((Get-Date) - $start).TotalSeconds))"
+            if ($script:WasRunning) {
+                Ok "daemon restarted on new version ($(Format-Elapsed ((Get-Date) - $start).TotalSeconds))"
+            } else {
+                Ok "daemon is running ($(Format-Elapsed ((Get-Date) - $start).TotalSeconds))"
+            }
         } else {
-            Warn "daemon failed to start - check logs at $InstallDir\logs\daemon.log"
+            Warn "daemon failed to start - check logs at $InstallDir\logs\ (daemon-<date>.log)"
         }
     }
 } finally {
     Remove-Item $TmpDir -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# 落版本文件，供 csi update / 排障时对照安装来源版本
+try {
+    $verOut = & $BinPath version 2>$null
+    $ver = ($verOut -split '\s+')[1]
+    if ($ver) { Set-Content -Path (Join-Path $InstallDir 'VERSION') -Value $ver -NoNewline }
+} catch { }
 
 # ---------- done ----------
 

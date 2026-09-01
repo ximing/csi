@@ -88,7 +88,7 @@ What it does:
   2. Download the built extension  → $EXT_DIR  (sideload; skip with --no-extension)
   3. Install the skills            → each target's skills dir (see above)
   4. Register login autostart (skip with --no-autostart / CSI_NO_AUTOSTART=1)
-  5. Start the daemon (idempotent)
+  5. Start the daemon (restart if it was already running)
 EOF
 }
 
@@ -167,6 +167,14 @@ download() { # url dest
   fi
 }
 
+# ---------- upgrade detection ----------
+
+# 换二进制前记录旧 daemon 是否在跑：在跑则装完走 restart，否则幂等 start。
+WAS_RUNNING=0
+if [ -x "$BIN_PATH" ] && curl -sf --max-time 2 "http://127.0.0.1:${CSI_PORT:-10088}/healthz" >/dev/null 2>&1; then
+  WAS_RUNNING=1
+fi
+
 # ---------- 1. daemon ----------
 
 step "[1/5] Installing daemon ($OS-$ARCH)"
@@ -175,7 +183,24 @@ mkdir -p "$BIN_DIR"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/csi-install.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+# checksums.txt 里的文件名是 release 原始名（csi-darwin-arm64.tar.gz），
+# 而落盘名是 daemon.tar.gz——不能用 shasum -c 按原始文件名找文件，只能算 hash 字符串比对。
+download "$DL/checksums.txt" "$TMP_DIR/checksums.txt"
+
+sha256_check() { # 已下载文件 checksums.txt-里的文件名
+  local want got
+  want="$(awk -v f="$2" '$2==f {print $1}' "$TMP_DIR/checksums.txt")"
+  [ -n "$want" ] || die "checksums.txt missing entry: $2"
+  if command -v shasum >/dev/null 2>&1; then
+    got="$(shasum -a 256 "$1" | awk '{print $1}')"
+  else
+    got="$(sha256sum "$1" | awk '{print $1}')"
+  fi
+  [ "$got" = "$want" ] || die "checksum mismatch: $2"
+}
+
 download "$DL/csi-$OS-$ARCH.tar.gz" "$TMP_DIR/daemon.tar.gz"
+sha256_check "$TMP_DIR/daemon.tar.gz" "csi-$OS-$ARCH.tar.gz"
 tar -xzf "$TMP_DIR/daemon.tar.gz" -C "$TMP_DIR"
 mv "$TMP_DIR/csi" "$BIN_PATH"
 chmod +x "$BIN_PATH"
@@ -191,6 +216,7 @@ else
   step "[2/5] Installing Chrome extension"
 
   download "$DL/csi-extension.zip" "$TMP_DIR/extension.zip"
+  sha256_check "$TMP_DIR/extension.zip" "csi-extension.zip"
   rm -rf "$EXT_DIR"
   mkdir -p "$EXT_DIR"
   unzip -q "$TMP_DIR/extension.zip" -d "$EXT_DIR"
@@ -213,6 +239,7 @@ agent_skills_base() { # agent → skills base dir
 install_skill() { # tar-name dest-dir（tarball 只下载一次，多目标复用）
   if [ ! -f "$TMP_DIR/$1" ]; then
     download "$DL/$1" "$TMP_DIR/$1"
+    sha256_check "$TMP_DIR/$1" "$1"
     ok "  fetched $1 ($(fmt_elapsed "$DL_LAST_TIME"))"
   fi
   rm -rf "$2"
@@ -286,15 +313,30 @@ fi
 if [ "$NO_START" -eq 1 ]; then
   step "[5/5] Start daemon — skipped (--no-start)"
   info "start it later with:  $BIN_PATH start"
+  if [ "$WAS_RUNNING" -eq 1 ]; then
+    warn "old daemon is still running the previous version — restart it with:  $BIN_PATH restart"
+  fi
 else
   step "[5/5] Starting daemon"
   _start=$SECONDS
-  if "$BIN_PATH" start; then
-    ok "daemon is running ($(fmt_elapsed $((SECONDS - _start))))"
+  if [ "$WAS_RUNNING" -eq 1 ]; then
+    # 升级语义：旧 daemon 在跑，restart 让它换上新二进制
+    if "$BIN_PATH" restart; then
+      ok "daemon restarted on new version ($(fmt_elapsed $((SECONDS - _start))))"
+    else
+      warn "daemon failed to restart — check logs at $INSTALL_DIR/logs/ (daemon-<date>.log)"
+    fi
   else
-    warn "daemon failed to start — check logs at $INSTALL_DIR/logs/daemon.log"
+    if "$BIN_PATH" start; then
+      ok "daemon is running ($(fmt_elapsed $((SECONDS - _start))))"
+    else
+      warn "daemon failed to start — check logs at $INSTALL_DIR/logs/ (daemon-<date>.log)"
+    fi
   fi
 fi
+
+# 落版本文件，供 csi update / 排障时对照安装来源版本
+"$BIN_PATH" version 2>/dev/null | awk '{print $2}' > "$INSTALL_DIR/VERSION" || true
 
 # ---------- done ----------
 
