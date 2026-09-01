@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -122,6 +124,47 @@ func TestUpdateFlow(t *testing.T) {
 			t.Fatalf("daemon 未运行不应 Restart,序列: %v", stub.calls)
 		}
 	})
+}
+
+func TestUpdateWritesVersionFile(t *testing.T) {
+	// 更新成功后应刷新 <Dir>/VERSION(与 install.sh 同格式:裸版本号+换行),
+	// 否则自动更新后该文件停留在安装时版本。
+	dir := t.TempDir()
+	stub := newUpdateStub("99.0.0")
+	stub.deps.Dir = dir
+	stub.deps.WriteVersionFile = func(d, v string) error {
+		stub.calls = append(stub.calls, "write-version:"+v)
+		return writeVersionFile(d, v)
+	}
+	if err := runUpdate(nil, stub.deps); err != nil {
+		t.Fatalf("runUpdate: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "VERSION"))
+	if err != nil {
+		t.Fatalf("更新成功后应写入 VERSION 文件: %v", err)
+	}
+	if string(data) != "99.0.0\n" {
+		t.Fatalf("VERSION 内容应为 99.0.0\\n,实际: %q", string(data))
+	}
+	// VERSION 应在 Replace 成功之后落盘
+	if !(stub.callIndex("replace") < stub.callIndex("write-version")) {
+		t.Fatalf("write-version 应在 replace 之后,序列: %v", stub.calls)
+	}
+}
+
+func TestUpdateVersionFileFailureNotFatal(t *testing.T) {
+	// VERSION 写失败仅警告,不影响已完成的更新
+	stub := newUpdateStub("99.0.0")
+	stub.deps.Dir = t.TempDir()
+	stub.deps.WriteVersionFile = func(string, string) error {
+		return fmt.Errorf("disk full")
+	}
+	if err := runUpdate(nil, stub.deps); err != nil {
+		t.Fatalf("VERSION 写失败不应致命: %v", err)
+	}
+	if !stub.called("replace") {
+		t.Fatalf("更新流程应已完成 replace,序列: %v", stub.calls)
+	}
 }
 
 func TestUpdateHomebrewRefused(t *testing.T) {

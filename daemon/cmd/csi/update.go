@@ -35,6 +35,10 @@ type updateDeps struct {
 	Restart    func() error // 默认走 POST /restart,失败回退进程级 restart
 	Out        io.Writer
 
+	// Dir 是 ~/.csi(参照 Checker.Dir),更新成功后在其下刷新 VERSION。
+	Dir              string
+	WriteVersionFile func(dir, version string) error // 默认 writeVersionFile,nil 则跳过
+
 	// 以下为 --with-skills / --with-extension 用,正常更新路径不触。
 	FetchAsset func(ctx context.Context, tag, asset string) ([]byte, error)
 	HomeDir    func() (string, error) // 默认 os.UserHomeDir,技能安装目标的基准
@@ -128,6 +132,15 @@ func runUpdate(args []string, deps updateDeps) error {
 			return err
 		}
 	}
+
+	// 刷新 <Dir>/VERSION:该文件记录"安装/更新来源的最近一次版本"
+	// (install.sh 安装时落盘),不刷新则自动更新后过时。
+	// 写失败仅警告:二进制已替换,VERSION 只是元信息,不致命。
+	if deps.WriteVersionFile != nil {
+		if err := deps.WriteVersionFile(deps.Dir, res.LatestVersion); err != nil {
+			printf("warning: 写入 VERSION 文件失败: %v", err)
+		}
+	}
 	return nil
 }
 
@@ -139,19 +152,27 @@ func cmdUpdate() error {
 	}
 	checker := &update.Checker{Dir: dir}
 	return runUpdate(os.Args[2:], updateDeps{
-		Self:       os.Executable,
-		IsHomebrew: update.IsHomebrewInstall,
-		Check:      checker.Check,
-		Fetch:      checker.Fetch,
-		Replace:    update.Replace,
-		Running:    daemonRunning,
-		Restart:    restartDaemon,
-		Out:        os.Stdout,
+		Self:             os.Executable,
+		IsHomebrew:       update.IsHomebrewInstall,
+		Check:            checker.Check,
+		Fetch:            checker.Fetch,
+		Replace:          update.Replace,
+		Running:          daemonRunning,
+		Restart:          restartDaemon,
+		Out:              os.Stdout,
+		Dir:              dir,
+		WriteVersionFile: writeVersionFile,
 		FetchAsset: func(ctx context.Context, tag, asset string) ([]byte, error) {
 			return fetchReleaseAsset(ctx, checker.Releases, checker.Client, tag, asset)
 		},
 		HomeDir: os.UserHomeDir,
 	})
+}
+
+// writeVersionFile 把最近一次安装/更新来源的版本号写到 <dir>/VERSION,
+// 格式与 install.sh 落盘一致(裸版本号,无 v 前缀,带换行)。
+func writeVersionFile(dir, ver string) error {
+	return os.WriteFile(filepath.Join(dir, "VERSION"), []byte(ver+"\n"), 0o644)
 }
 
 // daemonRunning 判定 daemon 活着且是 csi:读 pid 文件 + /status 身份确认

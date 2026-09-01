@@ -4,10 +4,22 @@
 package autostart
 
 import (
+	"os"
+	"path/filepath"
+
 	"golang.org/x/sys/windows/registry"
 )
 
 func enableWindows(exe string) error {
+	// 定时任务日志归口目录(<home>/.csi/logs):任务体里 cmd 的 >> 重定向
+	// 只建文件不建目录,schtasks 也不代建,缺了目录每日更新的日志直接丢。
+	home, err := homeDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".csi", "logs"), 0o755); err != nil {
+		return err
+	}
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, WindowsRunKey, registry.SET_VALUE)
 	if err != nil {
 		return err
