@@ -10,7 +10,29 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: daemon/go.mod
+      - name: Go test (race)
+        working-directory: daemon
+        run: go test ./... -race -count=1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - name: Extension tests
+        working-directory: extension
+        run: |
+          npm ci --no-audit --no-fund
+          npx vitest run
+
   daemon:
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -39,7 +61,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-        run: go build -trimpath -ldflags="-s -w" -o out/ ./cmd/csi
+        run: go build -trimpath -ldflags="-s -w -X csi/daemon/internal/version.Version=${GITHUB_REF_NAME#v}" -o out/ ./cmd/csi
 
       - name: Package (tar.gz)
         if: matrix.goos != 'windows'
@@ -60,6 +82,7 @@ jobs:
           if-no-files-found: error
 
   extension:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
