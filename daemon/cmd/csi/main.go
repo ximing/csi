@@ -9,6 +9,7 @@
 //	status     查询运行状态
 //	update     更新到最新 release（--check|--quiet|--with-skills|--with-extension）
 //	autostart  登录自启（status | on | off；默认 status）
+//	uninstall  卸载（停 daemon、撤自启、清 ~/.csi；-y 跳过确认）
 //	version    打印版本
 //	mcp        stdio MCP server（21 个浏览器工具，转发到本机 daemon）
 package main
@@ -41,6 +42,8 @@ func main() {
 		err = cmdUpdate()
 	case "autostart":
 		err = cmdAutostart()
+	case "uninstall":
+		err = cmdUninstall()
 	case "version":
 		fmt.Println("csi " + version.Version)
 	case "mcp":
@@ -73,6 +76,7 @@ commands:
   status          show daemon status
   update          update daemon to the latest release (--check|--quiet|--with-skills|--with-extension)
   autostart       login autostart (status | on | off; default status)
+  uninstall [-y]  stop daemon, remove autostart and ~/.csi
   version         print version
   mcp             run MCP server over stdio (forwards to the local daemon)
 
