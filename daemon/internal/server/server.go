@@ -4,6 +4,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -102,6 +103,11 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Action == "" {
 		writeJSON(w, commandResponse{Success: false, Error: "action is required"})
+		return
+	}
+	// session 名限长（按字节）：防失控客户端刷爆 session map；业务错误走 body，不用 400。
+	if len(req.Session) > session.MaxNameLength {
+		writeJSON(w, commandResponse{Success: false, Error: fmt.Sprintf("session name too long (max %d)", session.MaxNameLength)})
 		return
 	}
 

@@ -3,8 +3,19 @@ package session
 
 import (
 	"context"
+	"math"
 	"sort"
 	"sync"
+	"time"
+)
+
+const (
+	// MaxSessions session 数上限；超出淘汰最久未访问者（LRU）。
+	MaxSessions = 256
+	// MaxNameLength session 名长度上限（按字节，len()），防失控客户端刷爆内存。
+	MaxNameLength = 128
+	// IdleTTL 闲置回收阈值；回收无副作用（session 只持 tab 映射，协议 §3.4 有降级路径）。
+	IdleTTL = 24 * time.Hour
 )
 
 // Session 单个会话的标签状态。
@@ -14,13 +25,18 @@ type Session struct {
 	Borrowed     bool   // CurrentTabID 是否为借用（不在 TabIDs 中）
 	GroupTitle   string // navigate 时指定的 group_title
 
-	gate *fifo
+	gate       *fifo
+	lastUsed   int64     // 访问序号（LRU 依据，Manager.seq 单调递增）
+	lastAccess time.Time // 最近访问墙钟时间（闲置回收依据）
 }
 
 // Manager 管理全部 session。
 type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
+	seq      int64
+	// Now 注入时钟（测试用）；nil 时用 time.Now。
+	Now func() time.Time
 }
 
 // NewManager 创建 Manager。
@@ -29,15 +45,55 @@ func NewManager() *Manager {
 }
 
 func (m *Manager) get(name string) *Session {
-	s, ok := m.sessions[name]
-	if !ok {
-		s = &Session{gate: &fifo{}}
-		m.sessions[name] = s
+	m.seq++
+	now := m.now()
+	m.sweepLocked(now) // 每次访问顺带清扫（≤256 项，代价可忽略），不只 miss 路径
+	if s, ok := m.sessions[name]; ok {
+		s.lastUsed, s.lastAccess = m.seq, now
+		if s.gate == nil {
+			s.gate = &fifo{}
+		}
+		return s
 	}
-	if s.gate == nil {
-		s.gate = &fifo{}
+	if len(m.sessions) >= MaxSessions {
+		m.evictLRULocked()
 	}
+	s := &Session{gate: &fifo{}, lastUsed: m.seq, lastAccess: now}
+	m.sessions[name] = s
 	return s
+}
+
+func (m *Manager) now() time.Time {
+	if m.Now != nil {
+		return m.Now()
+	}
+	return time.Now()
+}
+
+// sweepLocked 惰性清扫闲置超 TTL 的 session；持有锁（busy）的跳过。
+func (m *Manager) sweepLocked(now time.Time) {
+	for n, s := range m.sessions {
+		if now.Sub(s.lastAccess) > IdleTTL && !s.gate.busy() {
+			delete(m.sessions, n)
+		}
+	}
+}
+
+// evictLRULocked 淘汰最久未访问且未持锁的一个 session。
+func (m *Manager) evictLRULocked() {
+	var victim string
+	var min int64 = math.MaxInt64
+	for n, s := range m.sessions {
+		if s.gate.busy() {
+			continue
+		}
+		if s.lastUsed < min {
+			min, victim = s.lastUsed, n
+		}
+	}
+	if victim != "" {
+		delete(m.sessions, victim)
+	}
 }
 
 // Acquire 按 session 名 FIFO 锁住完整 Execute（协议 §3.4）。

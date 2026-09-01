@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -180,6 +181,69 @@ func TestNames(t *testing.T) {
 	m.Inject("a", nil)
 	if got := m.Names(); !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Fatalf("Names = %v", got)
+	}
+}
+
+func TestSessionEvictIdleTTL(t *testing.T) {
+	m := NewManager()
+	now := time.Now()
+	m.Now = func() time.Time { return now }
+	m.Inject("old", map[string]any{})
+	now = now.Add(25 * time.Hour)     // 超 IdleTTL
+	m.Inject("new", map[string]any{}) // 触发惰性清扫
+	for _, n := range m.Names() {
+		if n == "old" {
+			t.Fatal("闲置超 24h 的 session 未被回收")
+		}
+	}
+}
+
+func TestSessionEvictLRU(t *testing.T) {
+	m := NewManager()
+	for i := 0; i < MaxSessions; i++ {
+		m.Inject(fmt.Sprintf("s%03d", i), map[string]any{})
+	}
+	m.Inject("s000", map[string]any{}) // 刷新 s000，使它不是最久未用
+	m.Inject("overflow", map[string]any{})
+	names := m.Names()
+	if len(names) > MaxSessions {
+		t.Fatalf("session 数 %d 超上限", len(names))
+	}
+	found := false
+	for _, n := range names {
+		if n == "s000" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("LRU 误杀了刚访问的 s000")
+	}
+	for _, n := range names {
+		if n == "s001" {
+			t.Fatal("最久未用的 s001 应被淘汰")
+		}
+	}
+}
+
+func TestSessionEvictSkipsBusy(t *testing.T) {
+	m := NewManager()
+	now := time.Now()
+	m.Now = func() time.Time { return now }
+	release, err := m.Acquire(context.Background(), "busy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	now = now.Add(25 * time.Hour)
+	m.Inject("trigger", map[string]any{})
+	found := false
+	for _, n := range m.Names() {
+		if n == "busy" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("持有锁的 session 不能被回收")
 	}
 }
 

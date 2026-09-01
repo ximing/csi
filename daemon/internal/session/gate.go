@@ -53,6 +53,14 @@ func (f *fifo) LockCtx(ctx context.Context) error {
 	return nil
 }
 
+// busy 当前是否持有锁或有排队者（回收扫描跳过忙 session）。
+// Unlock 移交等待者时 held 保持 true，所以 held 或队列非空其一即算忙。
+func (f *fifo) busy() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.held || len(f.wait) > 0
+}
+
 func (f *fifo) Unlock() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
