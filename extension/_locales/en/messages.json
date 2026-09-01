@@ -42,6 +42,7 @@
       "ver": { "content": "$1" }
     }
   },
+  "versionMismatch": { "message": "version mismatch with daemon — update CSI" },
   "settingsLink": { "message": "Settings" },
   "optionsTitle": { "message": "CSI Settings" },
   "statusHeading": { "message": "Daemon Status" },
@@ -72,6 +73,7 @@
   "restartOk": { "message": "Daemon restarted on port $PORT$ — extension reconnected", "placeholders": { "port": { "content": "$1" } } },
   "restartFailedOldAlive": { "message": "Restart failed — daemon is still on the old port; see ~/.csi/logs" },
   "restartFailedDown": { "message": "Restart failed — daemon is down; see ~/.csi/logs and start it with `csi start`" },
+  "restartFailedExt": { "message": "Daemon restarted on port $PORT$, but the extension failed to reconnect — click Restart to retry", "placeholders": { "port": { "content": "$1" } } },
   "reconcileLabel": { "message": "Auto-reconnect interval" },
   "reconcile30": { "message": "Every 30 seconds (default)" },
   "reconcile60": { "message": "Every 60 seconds" },

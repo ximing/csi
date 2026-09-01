@@ -385,6 +385,13 @@ describe('消息处理', () => {
     );
   });
 
+  it('hello_ack 记录 daemonVersion，getDaemonVersion 可读', async () => {
+    const { client, socket } = await connectedClient();
+    expect(client.getDaemonVersion()).toBe(''); // 握手前为空
+    socket.emitMessage({ type: 'hello_ack', payload: { daemonVersion: '0.8.1' } });
+    expect(client.getDaemonVersion()).toBe('0.8.1');
+  });
+
   it('hello_ack 静默；未知类型只记日志', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {

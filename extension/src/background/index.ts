@@ -40,6 +40,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             connected: wsClient.isConnected(),
             state: wsClient.getConnectionState(),
             serverUrl: wsClient.getServerUrl(),
+            daemonVersion: wsClient.getDaemonVersion(),
           });
           break;
         case 'CONNECT':

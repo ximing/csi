@@ -41,6 +41,7 @@
       "ver": { "content": "$1" }
     }
   },
+  "versionMismatch": { "message": "与 daemon 版本不匹配，请更新 CSI" },
   "settingsLink": { "message": "设置" },
   "optionsTitle": { "message": "CSI 设置" },
   "statusHeading": { "message": "守护进程状态" },
@@ -71,6 +72,7 @@
   "restartOk": { "message": "daemon 已重启到端口 $PORT$，扩展已重连", "placeholders": { "port": { "content": "$1" } } },
   "restartFailedOldAlive": { "message": "重启失败——daemon 仍在原端口运行，请查看 ~/.csi/logs" },
   "restartFailedDown": { "message": "重启失败——daemon 已停止，请查看 ~/.csi/logs 并用 `csi start` 启动" },
+  "restartFailedExt": { "message": "daemon 已重启到端口 $PORT$，但扩展重连失败——请再次点击重启重试", "placeholders": { "port": { "content": "$1" } } },
   "reconcileLabel": { "message": "自动重连间隔" },
   "reconcile30": { "message": "每 30 秒（默认）" },
   "reconcile60": { "message": "每 60 秒" },

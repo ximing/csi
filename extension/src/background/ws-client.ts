@@ -15,6 +15,7 @@ import {
 } from '../shared/constants';
 import type {
   ConnectionState,
+  HelloAckPayload,
   HelloPayload,
   ToolCallPayload,
   ToolResultPayload,
@@ -74,6 +75,8 @@ export class WsClient {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private retryAttempt = 0;
   private readonly retryDelaysMs: number[];
+  /** 最近一次 hello_ack 上报的 daemon 版本；未握手过时为空串。 */
+  private daemonVersion = '';
 
   constructor(options: WsClientOptions) {
     this.onToolCall = options.onToolCall;
@@ -93,6 +96,10 @@ export class WsClient {
 
   getServerUrl(): string {
     return this.currentUrl;
+  }
+
+  getDaemonVersion(): string {
+    return this.daemonVersion;
   }
 
   isReconcileAlarm(alarmName: string): boolean {
@@ -294,9 +301,12 @@ export class WsClient {
       case 'ping':
         this.send({ type: 'pong' });
         break;
-      case 'hello_ack':
+      case 'hello_ack': {
+        const ack = message.payload as HelloAckPayload | undefined;
+        this.daemonVersion = ack?.daemonVersion ?? '';
         this.resetRetry(); // 握手成功，退避序列归零
         break;
+      }
       case 'tool_call':
         void this.handleToolCall(message, socket);
         break;

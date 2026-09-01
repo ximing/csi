@@ -17,6 +17,11 @@ export interface HelloPayload {
   tools?: string[];
 }
 
+export interface HelloAckPayload {
+  daemonVersion?: string;
+  tools?: string[];
+}
+
 export interface ToolCallPayload {
   name: string;
   args?: ToolArgs;
@@ -66,6 +71,8 @@ export interface StatusResponse {
   connected: boolean;
   state: ConnectionState;
   serverUrl: string;
+  /** 最近一次 hello_ack 携带的 daemon 版本；未握手过时缺省。 */
+  daemonVersion?: string;
   error?: string;
 }
 
