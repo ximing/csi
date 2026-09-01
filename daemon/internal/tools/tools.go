@@ -117,6 +117,13 @@ func (e *Executor) Execute(ctx context.Context, action, sess string, args map[st
 		var te *ws.ToolError
 		if errors.As(err, &te) && te.Code == "stale_target" {
 			tabId := detailTabID(te)
+			if tabId == 0 {
+				// 当前扩展总带 details.tabId；缺失时 stale 的仍只能是注入的
+				// _tabId（协议 §3.4 注入＝当前目标），回退清理它。否则
+				// ForgetTab(0) 是 no-op，CurrentTabID 继续指着死 tab，
+				// nextTabId 会把客户端循环引回故障点。
+				tabId = e.Sessions.CurrentTab(sess)
+			}
 			next := e.Sessions.ForgetTab(sess, tabId)
 			if te.Details == nil {
 				te.Details = map[string]any{}

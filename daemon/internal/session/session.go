@@ -137,6 +137,13 @@ func (m *Manager) Update(name, tool string, data any) {
 	}
 }
 
+// CurrentTab 返回 session 当前目标 tabId（0 = 无）。
+func (m *Manager) CurrentTab(name string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.get(name).CurrentTabID
+}
+
 // ForgetTab 从 owned 集移除失效 tab；若当前目标指向它则回退到最后一个 owned 或 0。
 // 返回新的 CurrentTabID（0 表示没有 next）。不重放原工具。
 func (m *Manager) ForgetTab(name string, tabId int) int {

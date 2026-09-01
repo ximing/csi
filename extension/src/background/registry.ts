@@ -9,6 +9,7 @@ import { ensureGroupRemovedListener } from './tab-group';
 import { currentEpoch } from './refs';
 import { enqueueTab } from './tab-queue';
 import { sessionTabIds } from './session-tabs';
+import { asStaleTarget, staleTargetError } from './stale-target';
 import { ToolError } from './tool-error';
 
 import { NavigateTool } from './tools/navigate';
@@ -102,10 +103,7 @@ export async function resolveTabTarget(args: ToolArgs): Promise<number> {
   try {
     await chrome.tabs.get(tabId);
   } catch {
-    throw new ToolError(`session target tab ${tabId} is no longer available`, 'stale_target', {
-      tabId,
-      session,
-    });
+    throw staleTargetError(tabId, session);
   }
   return tabId;
 }
@@ -133,21 +131,24 @@ export async function dispatchTool(name: string, args: ToolArgs): Promise<unknow
         // TOCTOU：resolveTabTarget 的 tabs.get 探针通过后、本任务真正跑到
         // attach 之前，tab 仍可能被用户关掉 → 与探针失败同语义，报 stale_target
         // （daemon 据此 ForgetTab 并补 nextTabId，协议 §3.4）。
-        try {
-          await chrome.tabs.get(tabId);
-        } catch {
-          throw new ToolError(`session target tab ${tabId} is no longer available`, 'stale_target', {
-            tabId,
-            session,
-          });
-        }
+        const stale = await asStaleTarget(tabId, session, err);
+        if (stale) throw stale;
         // tab 存在但不可 attach（chrome:// 等受限页）：协议暂无对应 code，
         // 保持无 code 的裸错，但补齐 tab 上下文让错误可读。
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(`cannot attach debugger to session target tab ${tabId}: ${msg}`);
       }
-      const ctx: TargetContext = { tabId, documentEpoch: currentEpoch(tabId) };
-      return tool.execute(args, ctx);
+      try {
+        const ctx: TargetContext = { tabId, documentEpoch: currentEpoch(tabId) };
+        return await tool.execute(args, ctx);
+      } catch (err) {
+        // tool.execute 执行期 tab 被关：CDP/tabs API 抛的是无 code 裸错，
+        // daemon 只认 stale_target 才 ForgetTab（协议 §3.3/§3.4），这里统一归类。
+        // 已是 ToolError 的业务错误（stale_ref 等）由 asStaleTarget 原样放行。
+        const stale = await asStaleTarget(tabId, session, err);
+        if (stale) throw stale;
+        throw err;
+      }
     });
   }
 

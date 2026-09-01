@@ -6,6 +6,7 @@ import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';
 import { sendCommand } from '../debugger-session';
 import { consumeRef, isRefSelector } from '../refs';
+import { asStaleTarget } from '../stale-target';
 import { ToolError } from '../tool-error';
 import { parseFrameArg, resolveRefNode } from './element';
 import { resolveFrame, contextIdForFrame } from '../frames';
@@ -58,11 +59,12 @@ export class WaitTool implements Tool {
 
     const kindLabel = gone ? `gone:${picked.kind}` : picked.kind;
     const matched = `${kindLabel}:${picked.value}`;
+    const session = typeof args._session === 'string' ? args._session : 'default';
 
     const start = Date.now();
     const deadline = start + timeout;
     while (true) {
-      const hit = await this.check(picked.kind, picked.value, currentId, frameId);
+      const hit = await this.check(picked.kind, picked.value, currentId, frameId, session);
       if (gone ? !hit : hit) {
         return { success: true, waitedMs: Date.now() - start, matched };
       }
@@ -85,7 +87,8 @@ export class WaitTool implements Tool {
     kind: WaitKind,
     value: string,
     currentId: number,
-    frameId?: string,
+    frameId: string | undefined,
+    session: string,
   ): Promise<boolean> {
     try {
       if (kind === 'url') return await checkUrl(currentId, value);
@@ -95,6 +98,11 @@ export class WaitTool implements Tool {
       // ToolError（轮询中途导航导致的 stale_ref 等）是确定性失败，原样上抛，
       // 不能吞成超时；其余错误按导航途中的瞬时不可用处理，视为未命中继续轮询。
       if (err instanceof ToolError) throw err;
+      // tab 在轮询中途被关：后续 CDP/tabs 调用抛无 code 裸错，必须立刻归类
+      // stale_target（协议 §3.3/§3.4），不能当瞬时未命中烧满整个 timeout、
+      // 占着该 tab 的 per-tab 队列槽。
+      const stale = await asStaleTarget(currentId, session, err);
+      if (stale) throw stale;
       return false;
     }
   }

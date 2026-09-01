@@ -9,6 +9,7 @@ import { addTab, fireRemoved, installChrome, resetChromeState, tabsRemoved } fro
 installChrome();
 
 const { CloseTabTool } = await import('./close-tab');
+const { enqueueTab } = await import('../tab-queue');
 
 const tool = new CloseTabTool();
 const ctx = { tabId: 10, documentEpoch: 1 };
@@ -67,6 +68,28 @@ describe('close_tab', () => {
     )) as CloseResult;
     expect(result.closed).toBe(false);
     expect(result.code).toBe('already_closed');
+  });
+
+  // 回归（#17 审查）：remove 不进 per-tab 队列。排在其它 session 的长任务
+  // （wait 上限 120s）后面会撞 daemon CallTool 120s 超时——假失败 + 迟到的副作用。
+  it("does not head-of-line block behind another session's long task", async () => {
+    addTab({ id: 10, url: 'https://owned.example' });
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const longTask = enqueueTab(10, () => blocked);
+    try {
+      const result = (await tool.execute(
+        { _tabId: 10, _tabIds: [10], _borrowed: false, _session: 's' },
+        ctx,
+      )) as CloseResult;
+      expect(result).toEqual({ success: true, closed: true });
+      expect(tabsRemoved).toEqual([10]);
+    } finally {
+      release();
+      await longTask;
+    }
   });
 
   it('reports close_failed when remove fails but the tab is still open', async () => {

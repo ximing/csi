@@ -382,10 +382,11 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 
 ## 5. 大结果后处理（daemon 侧）
 
-- `screenshot`：扩展返回 `{format, dataLength, data(base64)}`。daemon base64 解码后写入 `args.path`（父目录自动创建、覆盖写）；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>.<ext>`。最终响应 `{format, path, sizeBytes, mimeType}`。
+- `screenshot`：扩展返回 `{format, dataLength, data(base64)}`。daemon base64 解码后写入 `args.path`（父目录自动创建、覆盖写）；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>-<rand>.<ext>`。最终响应 `{format, path, sizeBytes, mimeType}`。
 - `save_as_pdf`：扩展返回 `{data(base64), dataLength, pageTitle, requestedFileName}`。落盘规则同上；默认文件名取页面标题（清洗非法字符）+ `.pdf`。解码后 >100MB 拒绝并返回错误。
-- artifact（snapshot full >80000、network detail `body_mode:file`、evaluate/cdp 超 `max_chars`；内部信封见 §3.5）：扩展返回 `{artifact:{encoding:"utf8", mimeType, suggestedName, data}, preview, sourceChars}`。daemon 将 `artifact.data` 落盘（父目录自动创建、覆盖写）：工具带 `path` 参数且调用方显式提供时沿用本节 `path` 语义，否则写入 `$TMPDIR/csi-<suggestedName>-<ts>`。客户端最终收到 `{truncated:true, preview, path, sizeBytes, mimeType}` ——`truncated:true` 表示**内联被省略、完整内容在 path**，不是数据缺失。HTTP/MCP 客户端永不收到原始 `artifact.data`。落盘写盘失败按 `result_too_large` 返回（§2.1）。
+- artifact（snapshot full >80000、network detail `body_mode:file`、evaluate/cdp 超 `max_chars`；内部信封见 §3.5）：扩展返回 `{artifact:{encoding:"utf8", mimeType, suggestedName, data}, preview, sourceChars}`。daemon 将 `artifact.data` 落盘（父目录自动创建、覆盖写）：工具带 `path` 参数且调用方显式提供时沿用本节 `path` 语义，否则写入 `$TMPDIR/csi-<suggestedName>-<ts>-<rand>`。客户端最终收到 `{truncated:true, preview, path, sizeBytes, mimeType}` ——`truncated:true` 表示**内联被省略、完整内容在 path**，不是数据缺失。HTTP/MCP 客户端永不收到原始 `artifact.data`。落盘写盘失败按 `result_too_large` 返回（§2.1）。
 - `path` 按调用方字面写入：不校验 `..`、不要求绝对路径、不限制基目录。相对路径相对 **daemon 进程的 cwd**（与调用方 cwd 无关；登录自启时 cwd 通常是 `/` 或 `$HOME`，不是项目目录）。调用方应传绝对路径。未提供 `path` 才落到 `$TMPDIR`。这是产品能力（要把截图/PDF 存到项目目录），不是路径遍历漏洞，威胁模型见 §7。
+- `<rand>` 是每次落盘生成的随机后缀：§3.4 的 per-session FIFO 只串行单 session 内，跨 session 并行可能同毫秒触发同名默认路径，`<rand>` 保证互不覆盖。`save_as_pdf` 默认路径按页面标题确定性命名（同名覆盖写，是既有语义），要区分并发产物须显式传 `path`。
 
 ## 6. 版本与兼容
 

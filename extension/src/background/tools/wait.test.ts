@@ -4,7 +4,7 @@
  * gone:true 下节点已从文档移除算命中。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { addTab, installChrome, resetChromeState } from '../test-chrome';
+import { addTab, fireRemoved, installChrome, resetChromeState } from '../test-chrome';
 
 installChrome();
 
@@ -54,5 +54,22 @@ describe('wait @e 错误契约', () => {
     )) as { success: boolean; matched: string };
     expect(res.success).toBe(true);
     expect(res.matched).toBe('gone:selector:@e1');
+  });
+});
+
+describe('wait 轮询期间 tab 死亡（协议 §3.3/§3.4）', () => {
+  it('tab 在轮询中途被关 → 立刻 stale_target，不把裸错当未命中烧满 timeout', async () => {
+    const started = Date.now();
+    const pending = new WaitTool().execute(
+      { url: 'never-matches', timeout_ms: 5000, interval_ms: 50, _session: 's' },
+      ctx,
+    );
+    await new Promise((r) => setTimeout(r, 120));
+    fireRemoved(10);
+    await expect(pending).rejects.toMatchObject({
+      code: 'stale_target',
+      details: { tabId: 10, session: 's' },
+    });
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 });

@@ -489,4 +489,44 @@ describe('dispatchTool concurrency rules (spec 用例 3/4/6/13b/15/17)', () => {
       spy.mockRestore();
     }
   });
+
+  // tab 在 tool.execute 执行期被关：sendCommand 抛无 code 裸错，
+  // 出口必须归类 stale_target（带 details），daemon 才能 ForgetTab（协议 §3.3/§3.4）。
+  it('tab closed during tool.execute throws stale_target with details', async () => {
+    const original = replaceSendCommand(async (debuggee, method) => {
+      if (method === 'Input.insertText') {
+        fireRemoved(debuggee.tabId);
+        throw new Error(`No tab with given id: ${debuggee.tabId}.`);
+      }
+      return {};
+    });
+    try {
+      await expect(
+        dispatchTool('key_type', { text: 'x', _tabId: 10, _tabIds: [10], _session: 's' }),
+      ).rejects.toMatchObject({
+        code: 'stale_target',
+        details: { tabId: 10, session: 's' },
+      });
+    } finally {
+      restoreSendCommand(original);
+    }
+  });
+
+  // tab 仍在时的普通 CDP 错误不得误报 stale_target（tab 明明存在，ForgetTab 语义不适用）。
+  it('CDP error with the tab alive propagates without a code', async () => {
+    const original = replaceSendCommand(async (_debuggee, method) => {
+      if (method === 'Input.insertText') throw new Error('some CDP failure');
+      return {};
+    });
+    try {
+      await dispatchTool('key_type', { text: 'x', _tabId: 10, _tabIds: [10], _session: 's' });
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toBe('some CDP failure');
+      expect((err as { code?: string }).code).toBeUndefined();
+    } finally {
+      restoreSendCommand(original);
+    }
+  });
 });

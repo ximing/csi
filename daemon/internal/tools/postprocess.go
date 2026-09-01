@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,13 +76,13 @@ func saveArtifact(action string, args map[string]any, d map[string]any) (any, er
 
 	path, _ := args["path"].(string)
 	if path == "" {
-		// 默认 $TMPDIR/csi-<suggestedName>-<ts>（协议 §5）。
+		// 默认 $TMPDIR/csi-<suggestedName>-<ts>-<rand>（协议 §5）。
 		name := sanitizeFilename(suggestedName)
 		if name == "" {
 			name = "artifact"
 		}
 		path = filepath.Join(os.TempDir(),
-			fmt.Sprintf("csi-%s-%d", name, time.Now().UnixMilli()))
+			fmt.Sprintf("csi-%s-%d-%s", name, time.Now().UnixMilli(), randSuffix()))
 	}
 	raw := []byte(content)
 	if err := writeFileWithParents(path, raw); err != nil {
@@ -130,7 +132,7 @@ func saveScreenshot(args map[string]any, data any) (any, error) {
 	path, _ := args["path"].(string)
 	if path == "" {
 		path = filepath.Join(os.TempDir(),
-			fmt.Sprintf("csi-screenshot-%d.%s", time.Now().UnixMilli(), ext))
+			fmt.Sprintf("csi-screenshot-%d-%s.%s", time.Now().UnixMilli(), randSuffix(), ext))
 	}
 	if err := writeFileWithParents(path, raw); err != nil {
 		return nil, fmt.Errorf("screenshot: %w", err)
@@ -183,6 +185,19 @@ func savePDF(args map[string]any, data any) (any, error) {
 		"mimeType":  "application/pdf",
 		"pageTitle": pageTitle,
 	}, nil
+}
+
+// randSuffix 默认落盘路径的随机后缀（协议 §5 的 <rand>）：协议 §3.4 的
+// per-session FIFO 只串行单 session 内，跨 session 并行可能同毫秒触发
+// 同名默认路径（suggestedName 是常量），没有随机后缀后写会覆盖先写，
+// 两个客户端互相读到对方 session 的内容。
+func randSuffix() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand 不可用只在极端环境发生；退化为纳秒时间戳仍避免同毫秒互踩。
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // writeFileWithParents 父目录自动创建、覆盖写（协议 §5）。

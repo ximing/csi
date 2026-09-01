@@ -34,7 +34,9 @@ export function addTab(tab: FakeTab): void {
 
 export function fireRemoved(tabId: number): void {
   tabs.delete(tabId);
-  for (const fn of onRemoved) fn(tabId);
+  // 迭代快照：监听者（如 navigate 的 waitForLoad）会在回调里注销自己，
+  // 直接迭代原数组会跳过后续监听者。
+  for (const fn of [...onRemoved]) fn(tabId);
 }
 
 export function fireDebuggerEvent(tabId: number, method: string, params: unknown): void {
@@ -83,7 +85,13 @@ export function installChrome(): void {
         query: async () => {
           throw new Error('tabs.query should not be used as silent fallback');
         },
-        onRemoved: { addListener: (fn: Fn) => onRemoved.push(fn) },
+        onRemoved: {
+          addListener: (fn: Fn) => onRemoved.push(fn),
+          removeListener: (fn: Fn) => {
+            const i = onRemoved.indexOf(fn);
+            if (i >= 0) onRemoved.splice(i, 1);
+          },
+        },
         onUpdated: { addListener: (fn: Fn) => onUpdated.push(fn), removeListener: () => undefined },
       },
       windows: {

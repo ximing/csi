@@ -3,9 +3,11 @@ package tools
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"csi/daemon/internal/ws"
@@ -174,13 +176,94 @@ func artifactEnvelope(data string) map[string]any {
 	}
 }
 
-// artifactEnvelopeNamed 同 artifactEnvelope，但指定 suggestedName。
-// 走默认落盘路径（$TMPDIR/csi-<suggestedName>-<ts>）的并行测试必须用
-// 各自唯一的名字：时间戳只到毫秒，同名会同路径互相覆盖/删除。
+// artifactEnvelopeNamed 同 artifactEnvelope，但指定 suggestedName，
+// 让默认落盘路径（$TMPDIR/csi-<suggestedName>-<ts>-<rand>，协议 §5）带可识别的名字。
 func artifactEnvelopeNamed(name, data string) map[string]any {
 	env := artifactEnvelope(data)
 	env["artifact"].(map[string]any)["suggestedName"] = name
 	return env
+}
+
+// pathSlot 并发落盘结果：各自写到的路径与期望内容。
+type pathSlot struct{ path, content string }
+
+// TestDefaultPathsUniqueAcrossSessions 协议 §5：默认路径尾随机后缀，
+// 跨 session 并行（同 session FIFO 之外）同毫秒同名不互相覆盖。
+// 没有 <rand> 时同名循环必撞同一路径、后写覆盖先写且内容互串。
+func TestDefaultPathsUniqueAcrossSessions(t *testing.T) {
+	t.Parallel()
+	t.Run("artifact", func(t *testing.T) {
+		slots := parallelDefaultPaths(t, func(i int) (string, string, error) {
+			content := fmt.Sprintf("artifact-content-%d", i)
+			res, err := PostProcess("evaluate", map[string]any{}, artifactEnvelopeNamed("race.json", content))
+			if err != nil {
+				return "", "", err
+			}
+			return res.(map[string]any)["path"].(string), content, nil
+		})
+		assertSlotsUniqueAndIntact(t, slots)
+	})
+	t.Run("screenshot", func(t *testing.T) {
+		slots := parallelDefaultPaths(t, func(i int) (string, string, error) {
+			content := fmt.Sprintf("shot-content-%d", i)
+			res, err := PostProcess("screenshot", map[string]any{}, map[string]any{
+				"format": "png",
+				"data":   b64(content),
+			})
+			if err != nil {
+				return "", "", err
+			}
+			return res.(map[string]any)["path"].(string), content, nil
+		})
+		assertSlotsUniqueAndIntact(t, slots)
+	})
+}
+
+func parallelDefaultPaths(t *testing.T, run func(i int) (path, content string, err error)) []pathSlot {
+	t.Helper()
+	const n = 64
+	slots := make(chan pathSlot, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			path, content, err := run(i)
+			if err != nil {
+				t.Errorf("PostProcess #%d: %v", i, err)
+				return
+			}
+			slots <- pathSlot{path, content}
+		}(i)
+	}
+	wg.Wait()
+	close(slots)
+	out := make([]pathSlot, 0, n)
+	for s := range slots {
+		out = append(out, s)
+	}
+	return out
+}
+
+func assertSlotsUniqueAndIntact(t *testing.T, slots []pathSlot) {
+	t.Helper()
+	seen := make(map[string]string, len(slots))
+	for _, s := range slots {
+		defer os.Remove(s.path) // 测试清理
+		if prev, dup := seen[s.path]; dup {
+			t.Fatalf("default path collision: %q (contents %q vs %q)", s.path, prev, s.content)
+		}
+		seen[s.path] = s.content
+	}
+	for path, want := range seen {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %q: %v", path, err)
+		}
+		if string(got) != want {
+			t.Fatalf("file %q = %q, want %q (later write overwrote earlier session's data)", path, got, want)
+		}
+	}
 }
 
 func TestArtifactPersistAndClientEnvelope(t *testing.T) {

@@ -223,3 +223,53 @@ func TestStaleTargetForgetsTab(t *testing.T) {
 		t.Fatalf("snap = %+v", snap)
 	}
 }
+
+// details 缺 tabId（当前扩展不会这样发，兜底防线）：按协议 §3.4 注入语义 stale 的
+// 只能是注入的 _tabId＝当前目标，回退清理它——而不是 ForgetTab(0) 空转，
+// 否则 CurrentTabID 继续指着死 tab，nextTabId 把客户端循环引回故障点。
+func TestStaleTargetMissingDetailsTabIdFallsBackToCurrentTab(t *testing.T) {
+	be := &fakeBE{err: &ws.ToolError{
+		Message: "session target tab 11 is no longer available",
+		Code:    "stale_target",
+		Details: map[string]any{"session": "s"}, // 无 tabId
+	}}
+	sm := session.NewManager()
+	sm.Update("s", "navigate", map[string]any{"success": true, "tabId": 10})
+	sm.Update("s", "navigate", map[string]any{"success": true, "tabId": 11})
+	ex := NewExecutor(be, sm)
+	_, err := ex.Execute(context.Background(), "snapshot", "s", nil)
+	te, ok := err.(*ws.ToolError)
+	if !ok || te.Code != "stale_target" {
+		t.Fatalf("err = %v", err)
+	}
+	if te.Details["nextTabId"] != 10 {
+		t.Fatalf("nextTabId = %v, want 10（不得引回死 tab 11）", te.Details["nextTabId"])
+	}
+	snap := sm.Snapshot("s")
+	if snap.CurrentTabID != 10 || len(snap.TabIDs) != 1 || snap.TabIDs[0] != 10 {
+		t.Fatalf("snap = %+v, want 死 tab 11 已清、回到 10", snap)
+	}
+}
+
+// 死 tab 是 session 唯一目标且 details 整个缺失：清空当前目标，不写 nextTabId。
+func TestStaleTargetMissingDetailsTabIdNoNext(t *testing.T) {
+	be := &fakeBE{err: &ws.ToolError{
+		Message: "session target tab 11 is no longer available",
+		Code:    "stale_target",
+	}} // Details 整个缺失
+	sm := session.NewManager()
+	sm.Update("s", "navigate", map[string]any{"success": true, "tabId": 11})
+	ex := NewExecutor(be, sm)
+	_, err := ex.Execute(context.Background(), "snapshot", "s", nil)
+	te, ok := err.(*ws.ToolError)
+	if !ok || te.Code != "stale_target" {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok := te.Details["nextTabId"]; ok {
+		t.Fatalf("nextTabId = %v, want 省略（没有存活的下一个）", te.Details["nextTabId"])
+	}
+	snap := sm.Snapshot("s")
+	if snap.CurrentTabID != 0 {
+		t.Fatalf("CurrentTabID = %d, want 0（死 tab 不得残留）", snap.CurrentTabID)
+	}
+}
