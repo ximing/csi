@@ -4,9 +4,8 @@
  * file name (protocol §5).
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
 
 /** Paper sizes in inches [width, height]. */
 const PAPER_SIZES: Record<string, [number, number]> = {
@@ -20,9 +19,7 @@ const PAPER_SIZES: Record<string, [number, number]> = {
 export class SaveAsPdfTool implements Tool {
   readonly name = 'save_as_pdf';
 
-  async execute(args: ToolArgs): Promise<unknown> {
-    await ensureAttached((await getCurrentTab()).id!);
-
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const paperFormat = ((args.paper_format as string | undefined) || 'letter').toLowerCase();
     const [paperWidth, paperHeight] = PAPER_SIZES[paperFormat] ?? PAPER_SIZES.letter!;
 
@@ -31,7 +28,7 @@ export class SaveAsPdfTool implements Tool {
       throw new Error(`save_as_pdf: scale must be in [0.1, 2.0], got ${scale}`);
     }
 
-    const pdf = await sendCommand<{ data?: string }>('Page.printToPDF', {
+    const pdf = await sendCommand<{ data?: string }>(target.tabId, 'Page.printToPDF', {
       printBackground: args.print_background !== false,
       landscape: !!args.landscape,
       scale,
@@ -43,7 +40,7 @@ export class SaveAsPdfTool implements Tool {
 
     let pageTitle = '';
     try {
-      const titleResult = await sendCommand<{ result?: { value?: string } }>(
+      const titleResult = await sendCommand<{ result?: { value?: string } }>(target.tabId, 
         'Runtime.evaluate',
         { expression: 'document.title', returnByValue: true },
       );

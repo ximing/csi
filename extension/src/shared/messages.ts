@@ -25,6 +25,24 @@ export interface ToolCallPayload {
 export interface ToolResultPayload {
   data?: unknown;
   error?: string;
+  code?: string;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * artifact 信封（协议 §3.5）：工具结果超内联预算时放在
+ * tool_result.payload.data 里，由 daemon 落盘后改写为客户端信封。
+ * HTTP/MCP 客户端永不收到 artifact.data。
+ */
+export interface ArtifactEnvelope {
+  artifact: {
+    encoding: 'utf8';
+    mimeType: string;
+    suggestedName: string;
+    data: string;
+  };
+  preview: string;
+  sourceChars: number;
 }
 
 /** Tool args are free-form plus the daemon-injected session fields (§3.4). */
@@ -32,6 +50,7 @@ export interface ToolArgs {
   _session?: string;
   _tabId?: number;
   _tabIds?: number[];
+  _borrowed?: boolean;
   [key: string]: unknown;
 }
 

@@ -211,6 +211,33 @@ func TestHubClose(t *testing.T) {
 	}
 }
 
+// Close() 与进行中的握手竞争：Close 之后才完成 hello 的连接不得被接纳，
+// 否则会产生未被本次 Close 清扫的 pending。
+func TestCloseDuringHandshake(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+
+	conn := dial(t, wsURL) // 只拨号，不发 hello，停在握手阶段
+	h.Close()
+
+	hello, _ := json.Marshal(map[string]any{"extensionVersion": "0.0.1"})
+	if err := conn.WriteJSON(Message{Type: MsgHello, Payload: hello}); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+
+	// 握手"成功"但 daemon 已关闭：连接必须被关闭，而不是装回 Hub
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("connection should be closed after Close, got a message")
+	}
+	if h.Connected() {
+		t.Fatal("hub must stay disconnected after Close")
+	}
+	if h.currentGen() != 0 {
+		t.Fatalf("gen = %d, want 0 (no connection admitted)", h.currentGen())
+	}
+}
+
 // 未发 hello 的连接不能顶替在位连接：首条消息非 hello 被直接关闭，
 // 在位连接仍 Connected、代数不变。
 func TestNoHelloCannotKick(t *testing.T) {
@@ -425,4 +452,166 @@ func TestChromeExtensionOriginCanHello(t *testing.T) {
 		t.Fatalf("ack type = %q, want %q", ack.Type, MsgHelloAck)
 	}
 	waitFor(t, h.Connected, "connected")
+}
+
+// WS 单消息超读上限（协议 §3.2）：daemon 以 code=result_too_large 的 *ToolError
+// 唤醒该连接的在途调用并断开连接（不是无声断连），扩展重连后新调用正常。
+func TestOversizedFrameFailsPendingWithResultTooLarge(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	h.MaxReadBytes = 1 << 10 // 测试用 1KB 上限
+
+	conn := dialHello(t, wsURL)
+	waitFor(t, h.Connected, "connected")
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := h.CallTool(context.Background(), "evaluate", nil)
+		errCh <- err
+	}()
+	waitFor(t, func() bool { return h.pendingLen() == 1 }, "pending registered")
+
+	// 发一个超过读上限的 tool_result 帧（内容无所谓，frame header 即触发拒收）
+	big := strings.Repeat("x", 4<<10)
+	payload, _ := json.Marshal(map[string]any{"data": map[string]any{"blob": big}})
+	if err := conn.WriteJSON(Message{
+		Type:                MsgToolResult,
+		ResponseToRequestID: "req-whatever",
+		Payload:             payload,
+	}); err != nil {
+		t.Fatalf("write oversized frame: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		var te *ToolError
+		if !errors.As(err, &te) {
+			t.Fatalf("err type %T %v, want *ToolError", err, err)
+		}
+		if te.Code != "result_too_large" {
+			t.Fatalf("code = %q, want result_too_large", te.Code)
+		}
+		if !strings.HasPrefix(te.Message, "result too large to deliver: ws transport limit exceeded") {
+			t.Fatalf("message = %q, want protocol §2.1 wording", te.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending call not failed after oversized frame")
+	}
+
+	// 连接被关闭（超限帧破坏帧边界，不可恢复），hub 报未连接
+	waitFor(t, func() bool { return !h.Connected() }, "connection closed after oversized frame")
+
+	// 扩展 reconcile 重连后：新连接上的调用正常完成，不受旧连接超限影响
+	c2 := dialHello(t, wsURL)
+	waitFor(t, h.Connected, "reconnected")
+	go func() {
+		var msg Message
+		if err := c2.ReadJSON(&msg); err != nil {
+			return
+		}
+		if msg.Type != MsgToolCall {
+			return
+		}
+		payload, _ := json.Marshal(map[string]any{"data": json.RawMessage(`{"ok":true}`)})
+		_ = c2.WriteJSON(Message{Type: MsgToolResult, ResponseToRequestID: msg.RequestID, Payload: payload})
+	}()
+	res, err := h.CallTool(context.Background(), "snapshot", nil)
+	if err != nil {
+		t.Fatalf("call on reconnected conn: %v", err)
+	}
+	if string(res) != `{"ok":true}` {
+		t.Fatalf("res = %s", res)
+	}
+}
+
+// 读上限内的消息不受影响：略低于上限的 tool_result 正常投递。
+func TestFrameUnderReadLimitPasses(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	h.MaxReadBytes = 1 << 20
+
+	conn := dialHello(t, wsURL)
+	waitFor(t, h.Connected, "connected")
+
+	errCh := make(chan error, 1)
+	var res json.RawMessage
+	go func() {
+		var err error
+		res, err = h.CallTool(context.Background(), "evaluate", nil)
+		errCh <- err
+	}()
+
+	var msg Message
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("read tool_call: %v", err)
+	}
+	payload, _ := json.Marshal(map[string]any{"data": map[string]any{"blob": strings.Repeat("y", 512<<10)}})
+	if err := conn.WriteJSON(Message{Type: MsgToolResult, ResponseToRequestID: msg.RequestID, Payload: payload}); err != nil {
+		t.Fatalf("write tool_result: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("call: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CallTool did not return")
+	}
+	if !strings.Contains(string(res), "yyy") {
+		t.Fatalf("res = %.80s...", res)
+	}
+}
+
+// CallTool 把 tool_result payload 的可选 code/details 解析成 *ToolError
+// 传给调用方；无 code 的普通错误仍是裸 error（协议 §3.3）。
+func TestCallToolParsesToolErrorCodeDetails(t *testing.T) {
+	t.Parallel()
+	h, wsURL := newTestHub(t)
+	conn := dialHello(t, wsURL)
+	waitFor(t, h.Connected, "connected")
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := h.CallTool(context.Background(), "click", map[string]any{"selector": "#x"})
+		errCh <- err
+	}()
+
+	var msg Message
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("read tool_call: %v", err)
+	}
+	if msg.Type != MsgToolCall {
+		t.Fatalf("type = %q, want %q", msg.Type, MsgToolCall)
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"error":   "session target tab 99 is no longer available",
+		"code":    "stale_target",
+		"details": map[string]any{"tabId": 99, "session": "s", "nextTabId": 42},
+	})
+	if err := conn.WriteJSON(Message{
+		Type:                MsgToolResult,
+		ResponseToRequestID: msg.RequestID,
+		Payload:             payload,
+	}); err != nil {
+		t.Fatalf("write tool_result: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		var te *ToolError
+		if !errors.As(err, &te) {
+			t.Fatalf("err type %T %v, want *ToolError", err, err)
+		}
+		if te.Message != "session target tab 99 is no longer available" {
+			t.Fatalf("message = %q", te.Message)
+		}
+		if te.Code != "stale_target" {
+			t.Fatalf("code = %q, want stale_target", te.Code)
+		}
+		if te.Details["nextTabId"].(float64) != 42 || te.Details["tabId"].(float64) != 99 {
+			t.Fatalf("details = %v", te.Details)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CallTool did not return after tool_result")
+	}
 }

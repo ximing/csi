@@ -1,0 +1,42 @@
+name: skill-ci
+
+# skill 渐进拆分的闸：
+# 1) SKILL.md token 统计（cl100k_base，观测项只报告不 fail——能力优先，不设硬门槛）
+# 2) 技能内本地 reference 链接全部存在
+# 3) 协议 §4 / daemon validTools / MCP toolDefs / extension registry / 技能工具索引 五处一致
+# 4) 协议 §4 每个工具的 args 与 daemon MCP inputSchema 的 props 键一致（schema 漂移闸）
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  skill-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: scripts/skill-ci/package-lock.json
+
+      - name: Install pinned skill-ci deps
+        run: npm ci --prefix scripts/skill-ci --ignore-scripts
+
+      - name: SKILL.md token report (cl100k_base, informational)
+        run: node scripts/skill-ci/check-tokens.mjs
+
+      - name: Skill reference links exist
+        run: node scripts/skill-ci/check-links.mjs
+
+      - name: Tool list consistency (protocol, daemon, extension, skills)
+        run: node scripts/skill-ci/check-tools.mjs
+
+      - name: Tool arg schema consistency (protocol vs MCP inputSchema)
+        run: node scripts/skill-ci/check-schemas.mjs

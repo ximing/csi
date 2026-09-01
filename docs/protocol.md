@@ -52,14 +52,34 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 { "success": false, "error": "navigate: url is required" }
 ```
 
+可选字段 `code` / `details`（旧客户端忽略未知字段，继续读 `error`）：
+
+```json
+{
+  "success": false,
+  "error": "session target tab 123 is no longer available",
+  "code": "stale_target",
+  "details": { "tabId": 123, "session": "my-task", "nextTabId": 122 }
+}
+```
+
+`nextTabId` 仅 daemon 在清理失效 owned tab 之后填写；没有仍存活的 owned tab 时省略该字段。daemon **不**自动重放原工具。
+
 常见错误：
 
-| 场景 | error 内容 |
-|---|---|
-| 扩展未连接 | `extension not connected` |
-| 未知工具 | `unknown tool: xxx` |
-| 工具执行失败 | 扩展返回的原始错误消息 |
-| 执行超时 | `tool call timeout (120s)` |
+| 场景 | error 内容 | code |
+|---|---|---|
+| 扩展未连接 | `extension not connected` | — |
+| 未知工具 | `unknown tool: xxx` | — |
+| 工具执行失败 | 扩展返回的原始错误消息 | 见下 |
+| 执行超时 | `tool call timeout (120s)` | — |
+| 注入的非零 `_tabId` 对应 tab 已不存在 | `session target tab <id> is no longer available` | `stale_target` |
+| `_tabId===0` 且工具需要页面目标 | `session has no current tab; call navigate first, or find_tab(active:true) to borrow the user's tab` | `no_session_target` |
+| `@e` 在当前 tab 的 ref store 中不存在 | `<tool>: unknown ref "…". Run snapshot first to get refs.` | `unknown_ref` |
+| `@e` 所属 document epoch 已过期，或节点已替换 | `<tool>: stale ref "…". Page navigated; run snapshot again.` | `stale_ref` |
+| 结果无法投递（WS 传输超限、落盘写盘失败等） | `result too large to deliver: <reason>` | `result_too_large` |
+
+`result_too_large` 只用于**无法投递**的场景；snapshot full / network detail / evaluate / cdp 的内容超预算**不**走此 code——自动转 artifact（§3.5/§5），因为「调用方要完整内容」是可满足的请求，不是错误用法。错误文案以稳定英文 `result too large to deliver` 开头；`reason` 形如 `ws transport limit exceeded` / `failed to persist artifact: <os error>`。WS 传输上限的具体数值与两侧行为见 §3.2。
 
 ### 2.2 `GET /status`
 
@@ -140,6 +160,11 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 
 `requestId` 仅在请求/响应类消息中必填。
 
+**单消息字节上限：160MiB（167772160 字节），双向适用。** 取值依据：§5 的 PDF 落盘上限 100MB（解码后）经 base64 传输约 133MiB，再加 JSON 信封余量；超过这个量级的只有失控结果（如 evaluate/cdp 返回数百 MB 字符串）。超限处理：
+
+- daemon 对每条连接设读上限（握手帧与业务帧同一上限）。读到超限帧时 WS 帧边界已不可恢复：daemon 以 `result_too_large`（错误文案前缀 `result too large to deliver: ws transport limit exceeded`，§2.1）唤醒**该连接上全部在途 `tool_call`**，随后关闭连接；扩展经 reconcile（§3.1）重连，后续调用不受影响。
+- 扩展在发送 `tool_result` 前自检序列化后的 UTF-8 字节数，超限则改发 `{error, code:"result_too_large"}`（同上文案前缀），连接保持不断。字节数按 UTF-8 计（JS `string.length` 是 UTF-16 码元数，多字节字符需换算）。
+
 ### 3.3 消息类型
 
 | 方向 | type | payload | 说明 |
@@ -178,29 +203,69 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 { "type": "tool_result", "responseToRequestId": "req-abc-1", "payload": { "error": "click: element not found: #x" } }
 ```
 
+失败 payload 允许可选 `code` / `details`（与 HTTP 信封一致）。无 `code` 时只发 `{error}`。
+
 - 工具默认超时 **120s**（可用 `POST /config` 修改 `tool_timeout_seconds`，5–600；navigate 内部页面加载超时 30s 由扩展自行处理）。
 - 扩展收到未知 `type` 时忽略并打日志。
 
 ### 3.4 daemon 注入的 session 内部字段
 
-daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, groupTitle: string}`。
+daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, borrowed: bool, groupTitle: string}`。
+
+同一 session 的 `POST /command` 按接收顺序 FIFO 执行完整生命周期（注入 → 调用扩展 → 按返回更新 session）。不同 session 可以并行。
 
 | 注入字段 | 类型 | 含义 |
 |---|---|---|
 | `_session` | string | 会话名（用于标签分组 `agent:<session>`） |
-| `_tabId` | int | 该 session 的"当前标签"（最近一次 navigate/find_tab 的 tabId）；**无当前标签时为 `0`**（0 不是合法 Chrome tabId，扩展按"无"处理） |
-| `_tabIds` | int[] | 该 session 拥有的全部 tabId；**无标签时为 `[]`** |
+| `_tabId` | int | 该 session 的**当前目标**（最近一次 `navigate` / `find_tab`，**包括** `active:true` 的借用）；**无当前目标时为 `0`**（0 不是合法 Chrome tabId） |
+| `_tabIds` | int[] | 该 session **拥有**的全部 tabId；**无 owned 标签时为 `[]`** |
+| `_borrowed` | bool | 当前 `_tabId` 是否 **不是** owned（`_tabId ∉ _tabIds`）。无当前目标时为 `false`。始终注入。owned 判定以 `_tabIds` 为准 |
 
-三个字段**始终注入**（缺省值 `0` / `[]`），扩展不得假设字段缺失。调用方传入的 `_` 前缀字段一律被 daemon 覆盖。
+四个字段**始终注入**（缺省值 `0` / `[]` / `false`），扩展不得假设字段缺失。调用方传入的 `_` 前缀字段一律被 daemon 覆盖。HTTP / MCP 调用方**不要**传 Chrome `tabId`；目标由 session 在 daemon 侧记住。
 
-工具返回中含有 `tabId` 时，daemon 更新 session 状态（记录/切换当前标签）。**例外：`find_tab(active:true)` 借用的标签（返回 `borrowed:true`）daemon 不得收编**——不记入 tabIds、不设为当前标签；借用标签只被当次/显式指定 `_tabId` 的工具就地操作，不出现在 `list_tabs`，不被 `close_tab`/`close_session` 关闭。`close_tab`/`close_session` 返回后 daemon 移除对应 tabId。
+工具返回中含有 `tabId` 时，daemon 更新当前目标。`find_tab` 返回 `borrowed:true` 时：**不**记入 `tabIds`，**但**设为当前目标（`_tabId`，`_borrowed:true`）。`borrowed` 的含义是命中 tab **不在**该 session 的 `tabIds` 中；`active:true` 命中用户正在看的 **owned** tab 时必须 `borrowed:false` 并走 owned 路径。`close_tab`/`close_session` 返回后 daemon 按下面规则更新 owned 集。
 
-扩展侧规则（与参考实现对齐）：
+扩展侧规则：
 
-- 单标签工具（snapshot/click/fill/...）作用于"当前标签"：优先 `_tabId`（**若该 id 已失效——如用户手动关闭——扩展必须静默回退**，不得报错），其次扩展内记录的最后操作标签，再次浏览器当前 active tab。
-- `navigate`：无当前标签或 `newTab:true` 时新建标签（`active:false`），否则在当前标签内跳转；`chrome://`/`edge://` 页面上一律新建，**新建的标签同样执行 attach + session 分组**，与其他新建分支一致。
-- `find_tab`：默认只在 `_tabIds` 内按 URL 域名匹配；`active:true` 时借用用户正在前台浏览的标签（返回 `borrowed:true`，不拉入分组）。
-- 标签分组：`navigate` 新建标签时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。
+- **owned 集只来自 `_tabIds`（过滤 `0`）。** 不得在 `_tabIds` 为空时把 `_tabId` 当作 owned。
+- 单标签工具（snapshot/click/fill/...）的目标就是注入的 `_tabId`（校验该 tab 仍存在之后）。**禁止**静默回退到 last-user / 当前窗口 active tab。
+- daemon 注入了非零 `_tabId` 而该 tab 已不存在：返回 `stale_target`，不得改打其它 tab。daemon 从 owned 集移除该 id（若在其中），若当前目标指向它则改到最后一个仍存活的 owned tab 或清空；**不**重放原工具。`details.nextTabId` 有则表示下一次 snapshot 可恢复到哪个 owned tab。
+- `_tabId === 0`：需要页面目标的工具返回 `no_session_target`。例外：`navigate`（无 **owned** 可复用时新建 owned tab）；`find_tab(active:true)`（按用户前台选）。
+- `navigate`：**只复用 owned 当前 tab**（`_tabId ∈ _tabIds` 且 tab 仍在且不是 `chrome://`/`edge://`）。当前目标为 borrowed、`newTab:true`、无 owned 可复用、或处于内部页时，一律 `tabs.create` 新 owned tab（`active:false`），**不得** `Page.navigate` / `reload` 用户 tab，不得把用户 tab 拉进 session 分组。随后当前目标切到这个新 owned tab。
+- `find_tab`：默认只在 `_tabIds` 内按 URL 域名匹配；`active:true` 时选用户正在前台浏览、且 URL 匹配的标签。命中非 owned → `borrowed:true`（不拉入分组，但是当前目标）；命中 owned → `borrowed:false`。
+- `close_tab`：当前目标 **不在** `_tabIds`（含 `_tabId === 0`）时返回 `{success:true, closed:false, code:"not_owned"}`，不关 tab、不改 owned 集。`_tabId ∈ _tabIds` 时关闭该 tab（即使 `_borrowed` 误为 true），成功返回 `{success:true, closed:true}`。`closed:false` 时必带机器可读 `code`：`not_owned`（borrowed 或无目标，不动作）、`already_closed`（tab 已不存在，daemon 将其移出 owned 集）、`close_failed`（关闭动作失败且 tab 仍在，daemon **不得**改动 owned 集）。`reason` 仅为人类可读说明；daemon 对账只看 `closed` 与 `code`，**不**做英文字符串匹配。
+- `close_session`：只关闭 `_tabIds`（owned）；即使当前目标是 borrowed，也只清 session 状态，不关用户 tab。空 `_tabIds` + 非零 `_tabId` 不得关掉那个 `_tabId`。
+- `list_tabs.tabs` 只列 owned。当前目标为 borrowed 时增加 `currentTarget:{tabId,borrowed:true,url,title}`，不得把 borrowed 混入 `tabs`。
+- 标签分组：`navigate` **新建 owned 标签**时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。不得对 borrowed tab 分组。
+
+### 3.5 artifact 信封（extension → daemon 内部契约）
+
+工具结果超过内联预算时（snapshot full > 80000、network detail `body_mode:file`、evaluate/cdp 超 `max_chars`），扩展在 `tool_result.payload.data` 里返回 artifact 信封，而非内联完整内容：
+
+```json
+{
+  "artifact": {
+    "encoding": "utf8",
+    "mimeType": "application/json",
+    "suggestedName": "csi-evaluate-result.json",
+    "data": "..."
+  },
+  "preview": "...",
+  "sourceChars": 240000
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `artifact.encoding` | string | 是 | 固定 `"utf8"` |
+| `artifact.mimeType` | string | 是 | 完整内容的 MIME 类型 |
+| `artifact.suggestedName` | string | 是 | 建议文件名；无 `path` 时落盘命名参考 |
+| `artifact.data` | string | 是 | 完整内容（utf8 字符串） |
+| `preview` | string | 是 | 给客户端看的裁剪预览（内联） |
+| `sourceChars` | int | 是 | 完整内容的字符数（裁剪前规模） |
+
+- artifact 仅是 **WS 层内部契约**（extension → daemon）。daemon 收到后按 §5 落盘并改写为客户端信封；HTTP/MCP 客户端**永不**收到原始 `artifact.data`。
+- daemon 落盘失败，或结果大到 WS 层本身无法传输时，才返回 `result_too_large`（§2.1）。
 
 ## 4. 工具清单（21 个）
 
@@ -208,25 +273,25 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 
 | # | name | args | 返回 data | 备注 |
 |---|---|---|---|---|
-| 1 | `navigate` | `url`*, `newTab`, `group_title` | `{success, url, tabId, frameId?}` | 等待 load 完成（30s 超时） |
-| 2 | `find_tab` | `url`*, `active` | `{success, url, tabId, borrowed}` | 见 §3.4 |
-| 3 | `snapshot` | `mode`(compact/interactive/full，默认 compact), `selector`, `max_chars`(默认 24000，1000–80000), `frame`(frameId 或未截断 URL 子串) | `{url, title, mode, chars, truncated, tree}` | compact/interactive 的 tree 是 YAML 字符串；full 的 tree 是既有 JSON 数组。iframe 只输出一行不下行，但带 `[ref=@eN]`，跨域行带 `[isolated]`；`frame` 或指向 iframe 的 `selector` 进入该帧再拍。 |
+| 1 | `navigate` | `url`*, `newTab`, `group_title` | `{success, url, tabId, frameId?}` | 等待 load 完成（30s 超时）。只复用 owned 当前 tab；当前为 borrowed 时一律新建 owned tab，不改写用户 tab |
+| 2 | `find_tab` | `url`*, `active` | `{success, url, tabId, borrowed}` | 见 §3.4。`borrowed:true` 当且仅当命中 tab 不在该 session 的 `tabIds` 中 |
+| 3 | `snapshot` | `mode`(compact/interactive/full，默认 compact), `selector`, `match`({role?, name*, exact?}), `max_chars`(compact/interactive 默认 24000，1000–80000), `frame`(frameId 或未截断 URL 子串) | `{url, title, mode, chars, source_chars, returned_chars, matches?, truncated, tree}`；full 树 >80000 字符转 artifact（§3.5/§5） | compact/interactive 的 tree 是 YAML 字符串；full 的 tree 是既有 JSON 数组。interactive 带最多两层最小祖先上下文；`match` 做确定性 role/name 过滤，见 §4.3。iframe 只输出一行不下行，但带 `[ref=@eN]`，跨域行带 `[isolated]`；`frame` 或指向 iframe 的 `selector` 进入该帧再拍。 |
 | 4 | `click` | `selector`*, `frame` | `{success, tag, text}` | DOM 级 `el.click()`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 5 | `fill` | `selector`*, `value`*, `frame` | `{success, tag, mode}` | input/textarea → `mode:"value"`；contenteditable → `mode:"contenteditable"`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
-| 6 | `evaluate` | `code`*, `frame` | `{type, value}` | `Runtime.evaluate`，`awaitPromise:true`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
-| 7 | `network` | `cmd`* (start/stop/list/detail), `filter`, `requestId` | 见参考实现 | detail 返回 `{requestId,url,method,status,mimeType,base64Encoded,body}` |
+| 6 | `evaluate` | `code`*, `max_chars`(默认 12000，最大 80000), `frame` | `{type, value}`；序列化结果超 `max_chars` 转 artifact（§3.5/§5） | `Runtime.evaluate`，`awaitPromise:true`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效。超限语义见 §4.4 |
+| 7 | `network` | `cmd`* (start/stop/list/detail), `filter`, `requestId`；list：`limit`(默认 50，最大 500), `cursor`；detail：`body_mode`(preview\|file\|full，默认 preview) | list：`{requests:[...], nextCursor?, droppedCount}`；detail：`{requestId,url,method,status,mimeType,base64Encoded,body, sourceChars?, truncated?}`，`body_mode:file` 转 artifact（§3.5/§5） | 每 tab 捕获表为最多 2000 条 ring buffer，溢出丢最旧并累计 `droppedCount`；分页与 body 预算见 §4.4 |
 | 8 | `mouse_click` | `selector`*, `frame` | `{success, x, y, tag, text}` | 坐标级 Input.dispatchMouseEvent，可过 isTrusted 检查。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 9 | `wait` | 恰好 `text`/`selector`/`url` 之一；`gone`；`timeout_ms`(默认 15000，100–120000)；`interval_ms`(默认 200，50–2000), `frame` | `{success, waitedMs, matched}` | 扩展内轮询。@e 不在 ref 表则立刻失败。超时文案带 last url。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 10 | `scroll` | 恰好 `selector` / `to`(top\|bottom) / `direction`(up\|down\|left\|right) 之一；`amount`(number\|"page"，仅 direction，默认 page) | `{success, x, y, maxX, maxY}` | page = 0.9 * innerHeight/innerWidth |
 | 11 | `hover` | `selector`*, `frame` | `{success, x, y, tag, text}` | Input.dispatchMouseEvent mouseMoved，不过 mousePressed。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 12 | `key_type` | `text`* | `{success, length}` | `Input.insertText` |
 | 13 | `send_keys` | `keys`* , `repeat`(1-100) | `{success, dispatched, os}` | 支持 `Enter`/`Escape`/`Tab`/`F1-F12`/单字母数字、修饰键 `Alt/Ctrl/Cmd/Meta/Shift/Mod`（Mod 自动解析）、空格分隔多段 |
-| 14 | `cdp` | `method`*, `params` | 规范化后的 CDP 结果（见 §4.2） | 命令 params 裸透传 escape hatch；返回不是字面「原始 CDP」 |
+| 14 | `cdp` | `method`*, `params`, `max_chars`(默认 12000，最大 80000) | 规范化后的 CDP 结果（见 §4.2）；序列化结果超 `max_chars` 转 artifact（§3.5/§5） | 命令 params 裸透传 escape hatch；返回不是字面「原始 CDP」。超限语义见 §4.4 |
 | 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
 | 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
-| 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}]}` | 仅当前 session |
-| 19 | `close_tab` | — | `{success, closed, reason?}` | 关当前标签 |
+| 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}], currentTarget?}` | `tabs` 仅 owned；borrowed 当前目标走独立的 `currentTarget` |
+| 19 | `close_tab` | — | `{success, closed, code?, reason?}` | 关当前 **owned** 标签；`closed:false` 时 `code` ∈ `not_owned`/`already_closed`/`close_failed`（§3.4），daemon 仅对 `already_closed` 移出 owned 集 |
 | 20 | `close_session` | — | `{success, closed}` | 关 session 全部标签 |
 | 21 | `list_frames` | — | `{success, frames:[{frameId,parentId,url,name,isolated}]}` | 含顶层帧（`parentId` 为 `""`）。`isolated:true` 的帧本期进不去；无 CDP frameId 的 isolated 帧用 `isolated:<url>` 占位。不含 targetId |
 
@@ -236,9 +301,9 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - 匹配 0 个 → `iframe: no frame matching "<value>"`；≥2 个 → `iframe: multiple frames match "<value>": <url1>, <url2>, …`（最多 5 个）。
 - 命中帧 isolated → `iframe: cross-origin frame "<url>" is not supported yet. If it is a full page, navigate to its URL.` 禁止返回成功空树。
 - 同域帧已卸载 / context 失效 → `iframe: frame is gone; run snapshot again`。
-- 进框 snapshot 返回 `{url, title, mode, chars, truncated, tree}`，`url`/`title` 用该帧的（title 没有就 `""`），`max_chars` 作用在该帧 YAML 上。只下一层。
-- ref 表：`RefEntry` 加可选 `frameId`（空 = 顶层）。整页 snapshot 与非 iframe 的 selector 子树 → reset（`@e1` 起）；进帧 snapshot → 不 reset，序号续编，父页旧 `@e` 保留。navigate / 关 tab / 主文档 commit 导航 → 清空 ref 表。
-- `frame` 在七个工具上：`@e` 忽略 `frame`（以 ref 表 frameId 为准）；CSS / evaluate 的 `code` 无 `frame` 在顶层、有 `frame` 在该帧（跨域走跨域错误）。
+- 进框 snapshot 返回 `{url, title, mode, chars, source_chars, returned_chars, matches?, truncated, tree}`，`url`/`title` 用该帧的（title 没有就 `""`），`max_chars` 作用在该帧 YAML 上。只下一层。
+- ref 表：按 tab 分区；`RefEntry` 加可选 `frameId`（空 = 顶层）与 `documentEpoch`。整页 snapshot 与非 iframe 的 selector 子树 → 只 reset **该 tab**（`@e1` 起）；进帧 snapshot → 不 reset，序号续编，父页旧 `@e` 保留。主文档 commit / reload / 关该 tab → 只影响该 tab。主文档 commit 提升该 tab 的 `documentEpoch`；消费 `@e` 时 epoch 不一致 → `stale_ref`。不同 tab 允许相同 `@e` 编号。任意其它 tab 关闭不得清空本 tab 的 ref。
+- `frame` 在八个工具上（snapshot/click/fill/evaluate/mouse_click/wait/hover/screenshot）：`@e` 忽略 `frame`（以 ref 表 frameId 为准）；CSS / evaluate 的 `code` 无 `frame` 在顶层、有 `frame` 在该帧（跨域走跨域错误）。
 - `screenshot`：`fullPage` 与 `selector` 仍互斥；`fullPage + frame` clip 到该 iframe 元素在父页视口里的可见盒（不是子文档完整滚动高度）。
 - `wait`：`url` 仍看 tab URL；`text`/`selector` 在指定帧（或 `@e` 所在帧）轮询。
 
@@ -260,11 +325,68 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 
 绝大多数 CDP 方法走「非数组 object 原样」（例如 `Runtime.evaluate` 得到 `{result:{type,value,...}}`）。`{value}` 包装只出现在结果本身是数组或原始值时，用来保证 `data` 始终是 JSON object。
 
+### 4.3 snapshot：上下文化 interactive、`match` 与结果预算
+
+**上下文化 interactive**：interactive 模式对每个交互节点保留**最多两个**最近的、角色属于 `dialog form row listitem article region navigation main` 的**有名称**祖先；共享同一祖先的节点用 YAML 分组、不重复整条路径：
+
+```yaml
+- dialog "Delete project"
+  - button "Cancel" [ref=@e8]
+  - button "Delete" [ref=@e9]
+- row "Alice"
+  - button "Edit" [ref=@e12]
+```
+
+没有有名称候选祖先的交互节点维持单行输出（不包分组）。
+
+**`match`**（object，可选）：按 role/name 对 snapshot 输出做确定性过滤：
+
+| 字段 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| `role` | string | 否 | — | 候选角色过滤 |
+| `name` | string | **是** | — | 匹配的可访问名称 |
+| `exact` | bool | 否 | `true` | `true` 为完全相等；子串匹配必须显式传 `false` |
+
+- 大小写按 Unicode 简单 case-fold 比较。
+- `match` **只过滤输出**：不自动点击，不自动选择第一个结果。`selector` 继续承担 scope 作用（先限定子树再过滤）。
+- 返回增加 `matches`(int)：命中数量。多命中全部返回，并附与上表一致的最小祖先上下文；零命中是 `matches:0` 的成功结果（空树），**不是**工具错误。
+- `match` 过滤之后仍应用 `max_chars`。
+
+**字符数字段**：返回包含 `source_chars`(int，裁剪前完整树的字符数) 与 `returned_chars`(int，`tree`/`preview` 实际返回内容的字符数)。既有 `chars` 字段保留，语义为「返回内容的字符数」，与 `returned_chars` 一致；此前 `chars` 无法表示截断前规模的歧义由 `source_chars` 解决。
+
+**full 模式语义**：`full` 承诺的是**数据完整性**（节点、属性、层级不裁剪），不是「无限字节内联」。
+
+- 树 ≤ 80000 字符：原样内联返回。
+- 树 > 80000 字符：**自动转 artifact**（§3.5/§5）——完整 JSON 由 daemon 落盘，返回 preview、path、sourceChars，并附引导提示：多数任务用 `selector`/`match` 缩小范围更省。**不**返回 `result_too_large`（它是可满足的请求，不是错误用法），也**不得**截断成非法 JSON。
+- 转 artifact 不影响 ref 分配：refs 在树构建时已写入该 tab 的 ref store（含 full 模式的 iframe 节点），与结果是否内联无关。
+
+### 4.4 结果预算：network 分页与 body、evaluate/cdp
+
+**network list**：
+
+- `limit`(int，可选，默认 50，最大 500)；`cursor`(string，可选)为续页游标；返回 `nextCursor`(string，耗尽时省略)。
+- 每个 tab 的捕获表为最多 2000 条的 ring buffer：溢出丢最旧记录，并在 list 结果中累计返回 `droppedCount`(int)。
+
+**network detail**：
+
+- `body_mode`(string，可选，`preview|file|full`，默认 `preview`)。
+- `preview`：body 默认最多 12000 字符，并返回 `sourceChars`(int) 与 `truncated`(bool)。
+- `file`：body 经 artifact 落盘（§3.5/§5），只向客户端返回 preview + path。
+- `full`：仅显式请求时内联完整 body，仍受 80000 字符上限；更大的 body 必须改用 `file`。
+
+**evaluate / cdp**：
+
+- `max_chars`(int，可选，默认 12000，最大 80000)，作用于序列化后的结果。
+- 序列化后未超限则正常返回；超限默认转 artifact（preview + path），不向模型内联完整结果。
+- **不允许**从 JSON 中间裁切后伪装成合法对象——要么完整内联，要么走 artifact。
+
 ## 5. 大结果后处理（daemon 侧）
 
-- `screenshot`：扩展返回 `{format, dataLength, data(base64)}`。daemon base64 解码后写入 `args.path`（父目录自动创建、覆盖写）；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>.<ext>`。最终响应 `{format, path, sizeBytes, mimeType}`。
+- `screenshot`：扩展返回 `{format, dataLength, data(base64)}`。daemon base64 解码后写入 `args.path`（父目录自动创建、覆盖写）；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>-<rand>.<ext>`。最终响应 `{format, path, sizeBytes, mimeType}`。
 - `save_as_pdf`：扩展返回 `{data(base64), dataLength, pageTitle, requestedFileName}`。落盘规则同上；默认文件名取页面标题（清洗非法字符）+ `.pdf`。解码后 >100MB 拒绝并返回错误。
+- artifact（snapshot full >80000、network detail `body_mode:file`、evaluate/cdp 超 `max_chars`；内部信封见 §3.5）：扩展返回 `{artifact:{encoding:"utf8", mimeType, suggestedName, data}, preview, sourceChars}`。daemon 将 `artifact.data` 落盘（父目录自动创建、覆盖写）：工具带 `path` 参数且调用方显式提供时沿用本节 `path` 语义，否则写入 `$TMPDIR/csi-<suggestedName>-<ts>-<rand>`。客户端最终收到 `{truncated:true, preview, path, sizeBytes, mimeType}` ——`truncated:true` 表示**内联被省略、完整内容在 path**，不是数据缺失。HTTP/MCP 客户端永不收到原始 `artifact.data`。落盘写盘失败按 `result_too_large` 返回（§2.1）。
 - `path` 按调用方字面写入：不校验 `..`、不要求绝对路径、不限制基目录。相对路径相对 **daemon 进程的 cwd**（与调用方 cwd 无关；登录自启时 cwd 通常是 `/` 或 `$HOME`，不是项目目录）。调用方应传绝对路径。未提供 `path` 才落到 `$TMPDIR`。这是产品能力（要把截图/PDF 存到项目目录），不是路径遍历漏洞，威胁模型见 §7。
+- `<rand>` 是每次落盘生成的随机后缀：§3.4 的 per-session FIFO 只串行单 session 内，跨 session 并行可能同毫秒触发同名默认路径，`<rand>` 保证互不覆盖。`save_as_pdf` 默认路径按页面标题确定性命名（同名覆盖写，是既有语义），要区分并发产物须显式传 `path`。
 
 ## 6. 版本与兼容
 
@@ -276,6 +398,8 @@ daemon 维护 session 状态：`session → {tabIds: []int, lastTabId: int, grou
 - `list_frames` 与工具参数 `frame` 自 0.6.0 引入；旧扩展由 daemon 按 §3.3 改写（`frame` 按参数闸）。
 - 对 iframe 的 `@e` 再 snapshot 无法被 daemon 识别：0.5 扩展会拍到空壳，客户端应按 `/status.version` 与 `extension_tools` 规避。
 - 0.6.0 起同域 iframe 可进入；`isolated:true`（跨域 OOPIF、不透明源、sandbox 无 allow-same-origin 等）只列不进。
+- 从本版本起，stale `_tabId` 由静默回退改为 `stale_target` 错误；`_tabId===0` 的单标签工具改为 `no_session_target`。旧 HTTP 客户端仍能读 `error` 字符串，但不再得到「碰巧打到用户当前页」的成功。`find_tab(active:true)` 的借用 tab 成为 session 当前目标（不进入 owned 列表）。
+- snapshot 的 `match`、network 的 `limit`/`cursor`/`body_mode`、evaluate/cdp 的 `max_chars` 是**输出加工参数**：它们只决定结果的裁剪、分页或落盘方式，不改变操作目标与语义。旧扩展忽略这些参数后返回的是**安全超集**（未裁剪的更大结果，仍然是合法数据），而不是错误目标或错误数据。因此这些参数**不做 daemon 版本闸**——与 `frame` 的参数闸（§3.3）不同：`frame` 必须闸是因为旧扩展会把进帧意图静默打到顶层帧、操作错误对象；结果预算参数被忽略最坏只是结果偏大。客户端对偏大结果自行分块或改用显式 `body_mode:file` 等规避。
 
 ## 7. 安全约束（威胁模型）
 

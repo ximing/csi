@@ -1,13 +1,16 @@
 /**
- * Tool registry + dispatcher. Handles the daemon-injected `_tabId` field
- * (protocol §3.4): for tab-targeted tools it attaches the debugger to that
- * tab first; close_tab / list_tabs / close_session consume `_tabId`
- * themselves.
+ * Tool registry + dispatcher. Resolves the target tab, then enqueues on
+ * that tab's queue. No silent fallback to last-user / active tab (协议 §3.4).
  */
 import type { ToolArgs } from '../shared/messages';
-import type { Tool } from './tools/types';
-import { ensureAttached, setAttachedTabId } from './debugger-session';
+import type { TargetContext, Tool } from './tools/types';
+import { ensureAttached } from './debugger-session';
 import { ensureGroupRemovedListener } from './tab-group';
+import { currentEpoch } from './refs';
+import { enqueueTab } from './tab-queue';
+import { sessionTabIds } from './session-tabs';
+import { asStaleTarget, staleTargetError } from './stale-target';
+import { ToolError } from './tool-error';
 
 import { NavigateTool } from './tools/navigate';
 import { FindTabTool } from './tools/find-tab';
@@ -37,8 +40,24 @@ function register(tool: Tool): void {
   registry.set(tool.name, tool);
 }
 
-/** Tools that manage `_tabId` themselves instead of being aimed at it. */
-const SESSION_SCOPED_TOOLS = new Set(['close_tab', 'list_tabs', 'close_session']);
+const TAB_AIMED = new Set([
+  'snapshot',
+  'click',
+  'fill',
+  'evaluate',
+  'network',
+  'mouse_click',
+  'wait',
+  'scroll',
+  'hover',
+  'key_type',
+  'send_keys',
+  'cdp',
+  'screenshot',
+  'save_as_pdf',
+  'upload',
+  'list_frames',
+]);
 
 export function toolNames(): string[] {
   return [...registry.keys()];
@@ -69,32 +88,71 @@ export function registerAllTools(): void {
   register(new CloseSessionTool());
 }
 
+const noneTarget: TargetContext = { tabId: 0, documentEpoch: 0 };
+
+export async function resolveTabTarget(args: ToolArgs): Promise<number> {
+  const tabId = args._tabId;
+  const session = typeof args._session === 'string' ? args._session : 'default';
+  if (tabId == null || tabId === 0) {
+    throw new ToolError(
+      "session has no current tab; call navigate first, or find_tab(active:true) to borrow the user's tab",
+      'no_session_target',
+      { session },
+    );
+  }
+  try {
+    await chrome.tabs.get(tabId);
+  } catch {
+    throw staleTargetError(tabId, session);
+  }
+  return tabId;
+}
+
 export async function dispatchTool(name: string, args: ToolArgs): Promise<unknown> {
   const tool = registry.get(name);
   if (!tool) {
     throw new Error(`unknown tool: ${name}. Available: ${[...registry.keys()].join(', ')}`);
   }
 
-  // The daemon always injects `_tabId`; 0 means "this session has no
-  // current tab" (0 is never a valid Chrome tabId) — treat it as absent.
-  const tabId = args._tabId;
-  if (tabId != null && tabId !== 0 && !SESSION_SCOPED_TOOLS.has(name)) {
-    // The daemon's `_tabId` may be stale (user closed the tab manually).
-    // Probe first; if the tab is gone, fall through silently so the tool's
-    // own getCurrentTab fallback chain (last user tab → active tab) applies
-    // (protocol §3.4). Real attach errors for existing tabs still propagate.
-    let tabExists = true;
-    try {
-      await chrome.tabs.get(tabId);
-    } catch {
-      tabExists = false;
-    }
-    if (tabExists) {
-      await ensureAttached(tabId);
-      setAttachedTabId(tabId);
-    }
-    delete args._tabId;
+  if (name === 'list_tabs') {
+    return tool.execute(args, noneTarget);
+  }
+  if (name === 'find_tab' || name === 'navigate' || name === 'close_tab' || name === 'close_session') {
+    return tool.execute(args, noneTarget);
   }
 
-  return tool.execute(args);
+  if (TAB_AIMED.has(name)) {
+    const tabId = await resolveTabTarget(args);
+    const session = typeof args._session === 'string' ? args._session : 'default';
+    return enqueueTab(tabId, async () => {
+      try {
+        await ensureAttached(tabId);
+      } catch (err) {
+        // TOCTOU：resolveTabTarget 的 tabs.get 探针通过后、本任务真正跑到
+        // attach 之前，tab 仍可能被用户关掉 → 与探针失败同语义，报 stale_target
+        // （daemon 据此 ForgetTab 并补 nextTabId，协议 §3.4）。
+        const stale = await asStaleTarget(tabId, session, err);
+        if (stale) throw stale;
+        // tab 存在但不可 attach（chrome:// 等受限页）：协议暂无对应 code，
+        // 保持无 code 的裸错，但补齐 tab 上下文让错误可读。
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`cannot attach debugger to session target tab ${tabId}: ${msg}`);
+      }
+      try {
+        const ctx: TargetContext = { tabId, documentEpoch: currentEpoch(tabId) };
+        return await tool.execute(args, ctx);
+      } catch (err) {
+        // tool.execute 执行期 tab 被关：CDP/tabs API 抛的是无 code 裸错，
+        // daemon 只认 stale_target 才 ForgetTab（协议 §3.3/§3.4），这里统一归类。
+        // 已是 ToolError 的业务错误（stale_ref 等）由 asStaleTarget 原样放行。
+        const stale = await asStaleTarget(tabId, session, err);
+        if (stale) throw stale;
+        throw err;
+      }
+    });
+  }
+
+  return tool.execute(args, noneTarget);
 }
+
+export { sessionTabIds };

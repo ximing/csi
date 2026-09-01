@@ -5,9 +5,8 @@
  * repeat counts. Modifier bitmask: alt=1 ctrl=2 cmd=4 shift=8.
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
 
 interface KeySpec {
   key: string;
@@ -131,7 +130,7 @@ function applyShift(spec: KeySpec, shiftHeld: boolean): KeySpec {
 export class SendKeysTool implements Tool {
   readonly name = 'send_keys';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const keys = args.keys;
     if (typeof keys !== 'string' || !keys.trim()) {
       throw new Error(
@@ -151,8 +150,6 @@ export class SendKeysTool implements Tool {
       .split(/\s+/)
       .map((segment) => parseSegment(segment, mod));
 
-    await ensureAttached((await getCurrentTab()).id!);
-
     let dispatched = 0;
     for (let round = 0; round < repeat; round++) {
       for (const { modifierBits, modifierKeys, spec } of segments) {
@@ -162,7 +159,7 @@ export class SendKeysTool implements Tool {
         let heldBits = 0;
         for (const modifier of modifierKeys) {
           heldBits |= modifier.bit;
-          await sendCommand('Input.dispatchKeyEvent', {
+          await sendCommand(target.tabId, 'Input.dispatchKeyEvent', {
             type: 'keyDown',
             modifiers: heldBits,
             key: modifier.key,
@@ -176,7 +173,7 @@ export class SendKeysTool implements Tool {
           (modifierBits & ~SHIFT_BIT) === 0 && resolved.text !== undefined
             ? { text: resolved.text }
             : {};
-        await sendCommand('Input.dispatchKeyEvent', {
+        await sendCommand(target.tabId, 'Input.dispatchKeyEvent', {
           type: 'keyDown',
           modifiers: modifierBits,
           key: resolved.key,
@@ -184,7 +181,7 @@ export class SendKeysTool implements Tool {
           windowsVirtualKeyCode: resolved.vkc,
           ...textParams,
         });
-        await sendCommand('Input.dispatchKeyEvent', {
+        await sendCommand(target.tabId, 'Input.dispatchKeyEvent', {
           type: 'keyUp',
           modifiers: modifierBits,
           key: resolved.key,
@@ -196,7 +193,7 @@ export class SendKeysTool implements Tool {
         for (let i = modifierKeys.length - 1; i >= 0; i--) {
           const modifier = modifierKeys[i]!;
           heldBits &= ~modifier.bit;
-          await sendCommand('Input.dispatchKeyEvent', {
+          await sendCommand(target.tabId, 'Input.dispatchKeyEvent', {
             type: 'keyUp',
             modifiers: heldBits,
             key: modifier.key,

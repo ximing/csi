@@ -1,30 +1,18 @@
 /**
- * list_tabs (protocol §4.15): list the tabs owned by this session
- * (`_tabIds`, falling back to `_tabId`), with group titles.
+ * list_tabs (protocol §4.18): list owned tabs (`_tabIds` only). Borrowed
+ * current target is a separate `currentTarget` field.
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
+import type { TargetContext, Tool } from './types';
+import { isOwnedTab, sessionTabIds } from '../session-tabs';
 
-/**
- * Session tab ids from the daemon-injected fields (§3.4). Both fields are
- * always injected: an empty `_tabIds` and `_tabId: 0` both mean the session
- * owns no tabs (0 is never a valid Chrome tabId).
- */
-export function sessionTabIds(args: ToolArgs): number[] {
-  if (Array.isArray(args._tabIds) && args._tabIds.length > 0) {
-    return args._tabIds.filter((id) => id !== 0);
-  }
-  const tabId = args._tabId;
-  return tabId == null || tabId === 0 ? [] : [tabId];
-}
+export { sessionTabIds };
 
 export class ListTabsTool implements Tool {
   readonly name = 'list_tabs';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, _target: TargetContext): Promise<unknown> {
     const tabIds = sessionTabIds(args);
-    if (tabIds.length === 0) return { success: true, tabs: [] };
-
     const tabs: unknown[] = [];
     for (const tabId of tabIds) {
       try {
@@ -48,6 +36,27 @@ export class ListTabsTool implements Tool {
         // tab already closed — skip
       }
     }
-    return { success: true, tabs };
+
+    const currentId = args._tabId;
+    const borrowedCurrent =
+      currentId != null && currentId !== 0 && !isOwnedTab(args, currentId);
+    if (!borrowedCurrent) {
+      return { success: true, tabs };
+    }
+
+    let url = '';
+    let title = '';
+    try {
+      const tab = await chrome.tabs.get(currentId);
+      url = tab.url ?? '';
+      title = tab.title ?? '';
+    } catch {
+      // still report the id
+    }
+    return {
+      success: true,
+      tabs,
+      currentTarget: { tabId: currentId, borrowed: true, url, title },
+    };
   }
 }

@@ -26,10 +26,30 @@ interface DesiredState {
   url: string;
 }
 
+/**
+ * WS 单消息字节上限（协议 §3.2），与 daemon 读上限一致：160MiB。
+ * 取值依据：协议 §5 的 PDF 落盘上限 100MB（解码后）经 base64 传输约 133MiB，
+ * 再加 JSON 信封余量。
+ */
+export const WS_MAX_MESSAGE_BYTES = 160 * 1024 * 1024;
+
+/**
+ * 序列化后的 UTF-8 字节数是否超 limit。
+ * JS string.length 是 UTF-16 码元数：字节数 ∈ [码元数, 3×码元数]，
+ * 两端直接判定，只有中间地带才花一次 TextEncoder 精确测量。
+ */
+export function utf8ByteLengthExceeds(text: string, limit: number): boolean {
+  if (text.length > limit) return true; // 字节数 ≥ 码元数，必超
+  if (text.length * 3 <= limit) return false; // 字节数 ≤ 3×码元数，必不超
+  return new TextEncoder().encode(text).length > limit;
+}
+
 export interface WsClientOptions {
   onToolCall: (name: string, args: Record<string, unknown>) => Promise<unknown>;
   tools: string[];
   onConnectionStateChange?: (state: ConnectionState, serverUrl: string) => void;
+  /** WS 单消息字节上限，默认 WS_MAX_MESSAGE_BYTES（协议 §3.2）；测试可注入小值。 */
+  maxMessageBytes?: number;
 }
 
 function sameHost(a: string, b: string): boolean {
@@ -48,11 +68,13 @@ export class WsClient {
   private readonly onToolCall: WsClientOptions['onToolCall'];
   private readonly tools: string[];
   private readonly onConnectionStateChange?: WsClientOptions['onConnectionStateChange'];
+  private readonly maxMessageBytes: number;
 
   constructor(options: WsClientOptions) {
     this.onToolCall = options.onToolCall;
     this.tools = options.tools;
     this.onConnectionStateChange = options.onConnectionStateChange;
+    this.maxMessageBytes = options.maxMessageBytes ?? WS_MAX_MESSAGE_BYTES;
   }
 
   isConnected(): boolean {
@@ -172,8 +194,9 @@ export class WsClient {
     });
 
     socket.addEventListener('message', (event) => {
+      if (this.socket !== socket) return; // 迟到消息：连接已被替换/拆除，丢弃
       try {
-        this.handleMessage(JSON.parse(String(event.data)) as WsEnvelope);
+        this.handleMessage(JSON.parse(String(event.data)) as WsEnvelope, socket);
       } catch (err) {
         console.error('[ws] invalid message:', err);
       }
@@ -235,7 +258,7 @@ export class WsClient {
     });
   }
 
-  private handleMessage(message: WsEnvelope): void {
+  private handleMessage(message: WsEnvelope, socket: WebSocket): void {
     switch (message.type) {
       case 'ping':
         this.send({ type: 'pong' });
@@ -243,36 +266,53 @@ export class WsClient {
       case 'hello_ack':
         break;
       case 'tool_call':
-        void this.handleToolCall(message);
+        void this.handleToolCall(message, socket);
         break;
       default:
         console.log('[ws] unhandled message type:', message.type);
     }
   }
 
-  private async handleToolCall(message: WsEnvelope): Promise<void> {
-    const payload = message.payload as ToolCallPayload | undefined;
-    if (!payload?.name) {
-      this.send({
+  private async handleToolCall(message: WsEnvelope, socket: WebSocket): Promise<void> {
+    // 结果只回给收到调用的那个连接：执行期间连接被替换的话，
+    // daemon 侧已按代数清扫旧 pending，结果不能串到新连接上。
+    const reply = (payload: ToolResultPayload): void => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      let text = JSON.stringify({
         type: 'tool_result',
         responseToRequestId: message.requestId,
-        payload: { error: 'missing tool name' } satisfies ToolResultPayload,
-      });
+        payload,
+      } satisfies WsEnvelope);
+      if (utf8ByteLengthExceeds(text, this.maxMessageBytes)) {
+        // 超限帧发出去只会被 daemon 拒收并断连（协议 §3.2）；
+        // 改发干净的 result_too_large，连接保持不断（协议 §2.1）。
+        text = JSON.stringify({
+          type: 'tool_result',
+          responseToRequestId: message.requestId,
+          payload: {
+            error: `result too large to deliver: ws transport limit exceeded (message exceeds ${this.maxMessageBytes} bytes)`,
+            code: 'result_too_large',
+          } satisfies ToolResultPayload,
+        } satisfies WsEnvelope);
+      }
+      socket.send(text);
+    };
+    const payload = message.payload as ToolCallPayload | undefined;
+    if (!payload?.name) {
+      reply({ error: 'missing tool name' });
       return;
     }
     try {
       const data = await this.onToolCall(payload.name, payload.args || {});
-      this.send({
-        type: 'tool_result',
-        responseToRequestId: message.requestId,
-        payload: { data } satisfies ToolResultPayload,
-      });
+      reply({ data } satisfies ToolResultPayload);
     } catch (err) {
-      this.send({
-        type: 'tool_result',
-        responseToRequestId: message.requestId,
-        payload: { error: (err as Error)?.message ?? String(err) } satisfies ToolResultPayload,
-      });
+      const result: ToolResultPayload = {
+        error: (err as Error)?.message ?? String(err),
+      };
+      const te = err as { code?: string; details?: Record<string, unknown> };
+      if (typeof te.code === 'string' && te.code) result.code = te.code;
+      if (te.details) result.details = te.details;
+      reply(result);
     }
   }
 

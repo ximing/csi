@@ -3,6 +3,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -84,9 +85,11 @@ type commandRequest struct {
 
 // commandResponse /command 响应体：错误一律放 body，HTTP 200。
 type commandResponse struct {
-	Success bool   `json:"success"`
-	Data    any    `json:"data,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Success bool           `json:"success"`
+	Data    any            `json:"data,omitempty"`
+	Error   string         `json:"error,omitempty"`
+	Code    string         `json:"code,omitempty"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +108,13 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	data, err := s.Executor.Execute(r.Context(), req.Action, req.Session, req.Args)
 	if err != nil {
 		s.logger.Printf("command %s failed: %v", req.Action, err)
-		writeJSON(w, commandResponse{Success: false, Error: err.Error()})
+		resp := commandResponse{Success: false, Error: err.Error()}
+		var te *ws.ToolError
+		if errors.As(err, &te) {
+			resp.Code = te.Code
+			resp.Details = te.Details
+		}
+		writeJSON(w, resp)
 		return
 	}
 	writeJSON(w, commandResponse{Success: true, Data: data})

@@ -3,18 +3,16 @@
  * focused element.
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
 
 export class KeyTypeTool implements Tool {
   readonly name = 'key_type';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const text = args.text;
     if (typeof text !== 'string') throw new Error('key_type: text is required (string)');
-    await ensureAttached((await getCurrentTab()).id!);
-    await sendCommand('Input.insertText', { text });
+    await sendCommand(target.tabId, 'Input.insertText', { text });
     return { success: true, length: text.length };
   }
 }

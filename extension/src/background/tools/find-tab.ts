@@ -1,14 +1,13 @@
 /**
- * find_tab (protocol §4.2 / §3.4): locate a tab by URL domain. By default
- * only the session's own tabs (`_tabIds`) are searched; `active:true`
- * borrows the tab the user is currently viewing (returned with
- * `borrowed:true`, never pulled into the session group).
+ * find_tab (protocol §4.2 / §3.4): locate a tab by URL domain.
+ * borrowed = foundId ∉ owned _tabIds.
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, setLastUserTabId } from '../debugger-session';
+import type { TargetContext, Tool } from './types';
+import { ensureAttached } from '../debugger-session';
+import { enqueueTab } from '../tab-queue';
+import { isOwnedTab, sessionTabIds } from '../session-tabs';
 
-/** Normalize user input into a match-pattern-ish `*://host/*` string. */
 function toHostPattern(url: string): string {
   if (url.includes('*')) return url;
   try {
@@ -30,14 +29,15 @@ function hostMatches(tabUrl: string, pattern: string): boolean {
 export class FindTabTool implements Tool {
   readonly name = 'find_tab';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, _target: TargetContext): Promise<unknown> {
     const url = args.url as string | undefined;
     if (!url) throw new Error('find_tab: url is required');
 
     const useActive = args.active as boolean | undefined;
-    const sessionTabIds = args._tabIds ?? [];
     const pattern = toHostPattern(url);
 
+    let foundId: number;
+    let foundUrl: string;
     if (useActive) {
       const window = await chrome.windows.getLastFocused({
         populate: true,
@@ -49,27 +49,34 @@ export class FindTabTool implements Tool {
           `find_tab(active:true): no foreground tab matching ${url} — the user isn't viewing that page right now`,
         );
       }
-      await ensureAttached(tab.id);
-      setLastUserTabId(tab.id);
-      return { success: true, url: tab.url ?? url, tabId: tab.id, borrowed: true };
+      foundId = tab.id;
+      foundUrl = tab.url ?? url;
+    } else {
+      let hit: { id: number; url: string } | undefined;
+      for (const tabId of sessionTabIds(args)) {
+        try {
+          const tab = await chrome.tabs.get(tabId);
+          if (tab.url && hostMatches(tab.url, pattern)) {
+            hit = { id: tabId, url: tab.url };
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+      if (!hit) {
+        throw new Error(
+          `find_tab: no tab matching ${url} in this session — use navigate to open it, or pass active:true to act on a tab you already have open`,
+        );
+      }
+      foundId = hit.id;
+      foundUrl = hit.url;
     }
 
-    for (const tabId of sessionTabIds) {
-      let tab: chrome.tabs.Tab;
-      try {
-        tab = await chrome.tabs.get(tabId);
-      } catch {
-        continue;
-      }
-      if (tab.url && hostMatches(tab.url, pattern)) {
-        await ensureAttached(tabId);
-        setLastUserTabId(tabId);
-        return { success: true, url: tab.url, tabId, borrowed: false };
-      }
-    }
-
-    throw new Error(
-      `find_tab: no tab matching ${url} in this session — use navigate to open it, or pass active:true to act on a tab you already have open`,
-    );
+    const borrowed = !isOwnedTab(args, foundId);
+    return enqueueTab(foundId, async () => {
+      await ensureAttached(foundId);
+      return { success: true, url: foundUrl, tabId: foundId, borrowed };
+    });
   }
 }

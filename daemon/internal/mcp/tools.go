@@ -66,7 +66,7 @@ func (t toolDef) inputSchema() map[string]any {
 var toolDefs = []toolDef{
 	{
 		name:        "navigate",
-		description: "Navigate the browser to a URL and wait for page load (reuses the session's current tab unless newTab is true).",
+		description: "Navigate the browser to a URL and wait for page load. Reuses the session's owned current tab unless newTab is true or the current target is a borrowed user tab (then opens a new owned tab; never rewrites the user's URL).",
 		props: map[string]any{
 			"url":         strProp("URL to navigate to."),
 			"newTab":      boolProp("Open in a new background tab instead of reusing the current tab."),
@@ -76,7 +76,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		name:        "find_tab",
-		description: "Find an open tab by URL domain within the session's tabs and make it the session's current tab.",
+		description: "Find an open tab by URL domain within the session's tabs and make it the session's current tab. active:true borrows the user's foreground tab (current target, not added to the session group) unless that tab is already owned (borrowed:false).",
 		props: map[string]any{
 			"url":    strProp("URL or domain to match against the session's tabs."),
 			"active": boolProp("Borrow the tab the user is currently viewing (not added to the session group)."),
@@ -87,8 +87,18 @@ var toolDefs = []toolDef{
 		name:        "snapshot",
 		description: "Capture the accessibility tree of the current page; interactive elements are tagged with @eN refs usable as selectors.",
 		props: map[string]any{
-			"mode":      strEnumProp("Snapshot verbosity. compact=YAML with structure+refs (default); interactive=refs only; full=JSON tree.", "compact", "interactive", "full"),
-			"selector":  strProp("Limit the snapshot to this element (@e ref or CSS)."),
+			"mode":     strEnumProp("Snapshot verbosity. compact=YAML with structure+refs (default); interactive=refs only; full=JSON tree (>80000 chars is saved to a file).", "compact", "interactive", "full"),
+			"selector": strProp("Limit the snapshot to this element (@e ref or CSS)."),
+			"match": map[string]any{
+				"type":        "object",
+				"description": "Deterministic output filter by role/name, e.g. {\"role\":\"button\",\"name\":\"Delete\"}. name required; exact defaults true (pass false for substring).",
+				"properties": map[string]any{
+					"role":  strProp("ARIA role to match (optional)."),
+					"name":  strProp("Accessible name to match (required)."),
+					"exact": boolProp("Exact name match (default true); pass false for substring."),
+				},
+				"required": []any{"name"},
+			},
 			"max_chars": intProp("Max YAML characters for compact/interactive (default 24000, range 1000-80000)."),
 			"frame":     strProp("Enter a same-origin iframe and snapshot only it: CDP frameId or an untruncated substring of the frame URL. Alternative to passing a selector that points at an iframe @e ref."),
 		},
@@ -116,8 +126,9 @@ var toolDefs = []toolDef{
 		name:        "evaluate",
 		description: "Evaluate JavaScript in the current page (awaitPromise enabled) and return the result.",
 		props: map[string]any{
-			"code":  strProp("JavaScript expression or statements to evaluate."),
-			"frame": strProp("Frame to run the code in (frameId or URL substring). Default: top frame."),
+			"code":      strProp("JavaScript expression or statements to evaluate."),
+			"max_chars": intProp("Max serialized result characters (default 12000, max 80000); larger results are saved to a file."),
+			"frame":     strProp("Frame to run the code in (frameId or URL substring). Default: top frame."),
 		},
 		required: []string{"code"},
 	},
@@ -128,6 +139,9 @@ var toolDefs = []toolDef{
 			"cmd":       strEnumProp("Sub-command.", "start", "stop", "list", "detail"),
 			"filter":    strProp("Substring filter applied to request URLs (for list)."),
 			"requestId": strProp("Request ID from list output (for detail)."),
+			"limit":     intProp("list: max requests per page (default 50, max 500)."),
+			"cursor":    strProp("list: pagination cursor from a previous response's nextCursor."),
+			"body_mode": strEnumProp("detail: how to return the body (default preview; file saves the full body to a file; full inlines up to 80000 chars).", "preview", "file", "full"),
 		},
 		required: []string{"cmd"},
 	},
@@ -193,8 +207,9 @@ var toolDefs = []toolDef{
 		name:        "cdp",
 		description: "Raw Chrome DevTools Protocol command passthrough on the current tab (escape hatch). Returns the CDP result object as-is; empty/null becomes {}; arrays and primitives are wrapped as {value}. This is the tool data inside the HTTP {success,data} envelope; the daemon does not wrap again.",
 		props: map[string]any{
-			"method": strProp("CDP method, e.g. \"Page.captureScreenshot\"."),
-			"params": map[string]any{"type": "object", "description": "CDP method parameters."},
+			"method":    strProp("CDP method, e.g. \"Page.captureScreenshot\"."),
+			"params":    map[string]any{"type": "object", "description": "CDP method parameters."},
+			"max_chars": intProp("Max serialized result characters (default 12000, max 80000); larger results are saved to a file."),
 		},
 		required: []string{"method"},
 	},
@@ -238,12 +253,12 @@ var toolDefs = []toolDef{
 	},
 	{
 		name:        "close_tab",
-		description: "Close the session's current tab.",
+		description: "Close the session's current owned tab. Refuses (closed:false) if the current target is a borrowed user tab.",
 		props:       map[string]any{},
 	},
 	{
 		name:        "close_session",
-		description: "Close all tabs of the session.",
+		description: "Close all tabs owned by the session (_tabIds). Does not close a borrowed user tab, even if it is the current target.",
 		props:       map[string]any{},
 	},
 	{

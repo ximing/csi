@@ -3,28 +3,41 @@
  * CDP RemoteObject, and for scrolling elements into view.
  */
 import { sendCommand } from '../debugger-session';
-import { isRefSelector, lookupRef } from '../refs';
+import { consumeRef, isRefSelector, staleRefError, type RefEntry } from '../refs';
 import { contextIdForFrame, FRAME_GONE_ERROR } from '../frames';
 
+export interface ResolvedRefNode {
+  objectId?: string;
+  entry: RefEntry;
+}
+
 /**
- * Resolve a selector to a CDP objectId. `toolName` prefixes error messages
- * so failures read e.g. "mouse_click: unknown ref ...".
- *
- * `frameId` (协议 §4.1)：CSS 路径有 frameId 时进该帧 default world；
- * ref 路径不带 contextId（Blink 按 node 所在 LocalFrame 的 main world 解析），
- * 但 ref 解析失败且 ref 带 frameId 时报帧没了。
+ * consumeRef（unknown_ref/stale_ref 照旧抛 ToolError）+ DOM.resolveNode。
+ * 节点已不在文档中（同文档移除、帧已卸载）时不抛，objectId 为空，语义由调用方定。
  */
+export async function resolveRefNode(
+  toolName: string,
+  selector: string,
+  tabId: number,
+): Promise<ResolvedRefNode> {
+  const entry = consumeRef(tabId, toolName, selector);
+  const { object } = await sendCommand<{ object?: { objectId?: string } }>(tabId, 'DOM.resolveNode', {
+    backendNodeId: entry.backendDOMNodeId,
+  });
+  return { objectId: object?.objectId, entry };
+}
+
 export async function resolveObjectId(
   toolName: string,
   selector: string,
+  tabId: number,
   frameId?: string,
 ): Promise<string> {
   return isRefSelector(selector)
-    ? objectIdFromRef(toolName, selector)
-    : objectIdFromCss(toolName, selector, frameId);
+    ? objectIdFromRef(toolName, selector, tabId)
+    : objectIdFromCss(toolName, selector, tabId, frameId);
 }
 
-/** 解析可选 frame 参数：null/缺省/空字符串 = 未传；非字符串真值报错（协议 §3.3）。 */
 export function parseFrameArg(toolName: string, raw: unknown): string | undefined {
   if (raw === undefined || raw === null || raw === '') return undefined;
   if (typeof raw !== 'string') {
@@ -33,35 +46,30 @@ export function parseFrameArg(toolName: string, raw: unknown): string | undefine
   return raw;
 }
 
-async function objectIdFromRef(toolName: string, selector: string): Promise<string> {
-  const entry = lookupRef(selector);
-  if (!entry) {
-    throw new Error(`${toolName}: unknown ref "${selector}". Run snapshot first to get refs.`);
-  }
-  const { object } = await sendCommand<{ object?: { objectId?: string } }>('DOM.resolveNode', {
-    backendNodeId: entry.backendDOMNodeId,
-  });
-  if (!object?.objectId) {
+async function objectIdFromRef(toolName: string, selector: string, tabId: number): Promise<string> {
+  const { objectId, entry } = await resolveRefNode(toolName, selector, tabId);
+  if (!objectId) {
     if (entry.frameId) throw new Error(FRAME_GONE_ERROR);
-    throw new Error(`${toolName}: could not resolve ref "${selector}" to DOM element`);
+    throw staleRefError(toolName, selector, tabId);
   }
-  return object.objectId;
+  return objectId;
 }
 
 async function objectIdFromCss(
   toolName: string,
   selector: string,
+  tabId: number,
   frameId?: string,
 ): Promise<string> {
   const params: Record<string, unknown> = {
     expression: `document.querySelector(${JSON.stringify(selector)})`,
     returnByValue: false,
   };
-  if (frameId) params.contextId = await contextIdForFrame(frameId);
+  if (frameId) params.contextId = await contextIdForFrame(tabId, frameId);
   const result = await sendCommand<{
     exceptionDetails?: { text: string };
     result: { subtype?: string; objectId?: string };
-  }>('Runtime.evaluate', params);
+  }>(tabId, 'Runtime.evaluate', params);
   if (result.exceptionDetails) {
     throw new Error(`${toolName}: ${result.exceptionDetails.text}`);
   }
@@ -71,8 +79,8 @@ async function objectIdFromCss(
   return result.result.objectId;
 }
 
-export async function scrollIntoView(objectId: string): Promise<void> {
-  await sendCommand('Runtime.callFunctionOn', {
+export async function scrollIntoView(tabId: number, objectId: string): Promise<void> {
+  await sendCommand(tabId, 'Runtime.callFunctionOn', {
     objectId,
     functionDeclaration: `function() { this.scrollIntoView({ block: 'center', inline: 'center' }); }`,
   });

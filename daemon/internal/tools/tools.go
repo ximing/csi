@@ -3,6 +3,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"csi/daemon/internal/backend"
 	"csi/daemon/internal/session"
+	"csi/daemon/internal/ws"
 )
 
 // 协议 §4 的 21 个工具名。
@@ -38,7 +40,7 @@ var validTools = map[string]bool{
 }
 
 // toolSince 记录各工具/参数引入版本：旧扩展未上报 tools 时按此表视为缺失；
-// "frame" 不是工具，是 0.6.0 起七个旧工具上的新参数闸（协议 §3.3、§4.1）。
+// "frame" 不是工具，是 0.6.0 起八个旧工具上的新参数闸（协议 §3.3、§4.1）。
 var toolSince = map[string]string{
 	"wait":        "0.4.0",
 	"scroll":      "0.4.0",
@@ -94,20 +96,66 @@ func (e *Executor) Execute(ctx context.Context, action, sess string, args map[st
 		return nil, err
 	}
 
+	release, err := e.Sessions.Acquire(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// 1. 注入 session 内部字段（协议 §3.4）
 	args = e.Sessions.Inject(sess, args)
 
 	// 2. 调用后端执行
 	data, err := e.Backend.CallTool(ctx, action, args)
 	if err != nil {
+		var te *ws.ToolError
+		if errors.As(err, &te) && te.Code == "stale_target" {
+			tabId := detailTabID(te)
+			if tabId == 0 {
+				// 当前扩展总带 details.tabId；缺失时 stale 的仍只能是注入的
+				// _tabId（协议 §3.4 注入＝当前目标），回退清理它。否则
+				// ForgetTab(0) 是 no-op，CurrentTabID 继续指着死 tab，
+				// nextTabId 会把客户端循环引回故障点。
+				tabId = e.Sessions.CurrentTab(sess)
+			}
+			next := e.Sessions.ForgetTab(sess, tabId)
+			if te.Details == nil {
+				te.Details = map[string]any{}
+			}
+			te.Details["session"] = sess
+			if next != 0 {
+				te.Details["nextTabId"] = next
+			}
+			return nil, te
+		}
 		return nil, err
 	}
 
 	// 3. 按返回更新 session 状态（用原始返回，含 tabId）
 	e.Sessions.Update(sess, action, data)
 
-	// 4. 大结果后处理（协议 §5：截图/PDF 落盘）
+	// 4. 大结果后处理（协议 §5：截图/PDF 落盘）。留在 session 锁内。
 	return PostProcess(action, args, data)
+}
+
+func detailTabID(te *ws.ToolError) int {
+	if te.Details == nil {
+		return 0
+	}
+	switch n := te.Details["tabId"].(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	default:
+		return 0
+	}
 }
 
 // checkExtension 对照扩展清单；未实现则不转发，返回升级提示（协议 §3.3）。

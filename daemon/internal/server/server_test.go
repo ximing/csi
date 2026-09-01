@@ -231,6 +231,9 @@ func TestSessionDefaultAndInjection(t *testing.T) {
 	t.Parallel()
 	srv, ts := newTestServer(t)
 	ext := connectExt(t, ts, func(name string, args map[string]any) (any, string) {
+		if name == "close_tab" {
+			return map[string]any{"success": true, "closed": true}, ""
+		}
 		return map[string]any{"success": true, "tabId": 7}, ""
 	})
 	waitFor(t, srv.Hub.Connected, "extension connected")
@@ -254,7 +257,7 @@ func TestSessionDefaultAndInjection(t *testing.T) {
 		t.Fatalf("close_tab resp = %v", resp)
 	}
 	snap := srv.Sessions.Snapshot("default")
-	if len(snap.TabIDs) != 0 || snap.LastTabID != 0 {
+	if len(snap.TabIDs) != 0 || snap.CurrentTabID != 0 {
 		t.Fatalf("after close_tab: %+v (want empty)", snap)
 	}
 }
@@ -679,5 +682,93 @@ func TestRestartEndpoint(t *testing.T) {
 	json.Unmarshal(w2.Body.Bytes(), &body)
 	if !body["success"].(bool) || !called {
 		t.Fatalf("restart should call Restarter and succeed, got %v called=%v", body, called)
+	}
+}
+
+// handleCommand 把 *ws.ToolError 的 code/details 序列化进 HTTP body（协议 §2.1）：
+// stale_target 经 Executor 清理失效 tab 后补上 nextTabId。
+func TestToolErrorCodeDetailsInHTTPBody(t *testing.T) {
+	t.Parallel()
+	_, ts := newTestServer(t)
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+	sendHello(t, conn)
+
+	go func() {
+		for {
+			var msg ws.Message
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+			if msg.Type != ws.MsgToolCall {
+				continue
+			}
+			var p struct {
+				Name string         `json:"name"`
+				Args map[string]any `json:"args"`
+			}
+			if err := json.Unmarshal(msg.Payload, &p); err != nil {
+				continue
+			}
+			var payload []byte
+			if p.Name == "snapshot" {
+				payload, _ = json.Marshal(map[string]any{
+					"error":   "session target tab 11 is no longer available",
+					"code":    "stale_target",
+					"details": map[string]any{"tabId": 11},
+				})
+			} else {
+				// navigate：按 url 给不同 tabId，session 变为 [10, 11]、current=11
+				tabId := 10
+				if u, _ := p.Args["url"].(string); strings.Contains(u, "b.com") {
+					tabId = 11
+				}
+				d, _ := json.Marshal(map[string]any{"success": true, "tabId": tabId})
+				payload, _ = json.Marshal(map[string]any{"data": json.RawMessage(d)})
+			}
+			if err := conn.WriteJSON(ws.Message{
+				Type:                ws.MsgToolResult,
+				ResponseToRequestID: msg.RequestID,
+				Payload:             payload,
+			}); err != nil {
+				return
+			}
+		}
+	}()
+
+	if resp := postCommand(t, ts, `{"action":"navigate","args":{"url":"https://a.com"},"session":"s"}`); resp["success"] != true {
+		t.Fatalf("navigate a: %v", resp)
+	}
+	if resp := postCommand(t, ts, `{"action":"navigate","args":{"url":"https://b.com"},"session":"s"}`); resp["success"] != true {
+		t.Fatalf("navigate b: %v", resp)
+	}
+
+	resp := postCommand(t, ts, `{"action":"snapshot","session":"s"}`)
+	if resp["success"] != false {
+		t.Fatalf("success = %v, resp %v", resp["success"], resp)
+	}
+	if resp["error"] != "session target tab 11 is no longer available" {
+		t.Fatalf("error = %v", resp["error"])
+	}
+	if resp["code"] != "stale_target" {
+		t.Fatalf("code = %v, want stale_target", resp["code"])
+	}
+	details, ok := resp["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("details missing: %v", resp)
+	}
+	if details["tabId"].(float64) != 11 {
+		t.Fatalf("details.tabId = %v, want 11", details["tabId"])
+	}
+	// Executor 忘掉 11 之后 current 回退到仍存活的 10
+	if details["nextTabId"].(float64) != 10 {
+		t.Fatalf("details.nextTabId = %v, want 10", details["nextTabId"])
+	}
+	if details["session"] != "s" {
+		t.Fatalf("details.session = %v, want s", details["session"])
 	}
 }

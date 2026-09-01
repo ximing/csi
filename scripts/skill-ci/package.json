@@ -1,0 +1,10 @@
+{
+  "name": "csi-skill-ci",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Pinned deps for skills/csi CI checks (token budget, link check, tool-list consistency).",
+  "type": "module",
+  "dependencies": {
+    "js-tiktoken": "1.0.21"
+  }
+}

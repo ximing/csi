@@ -3,11 +3,12 @@
  * matches (or is gone). One condition only; unknown @e fails immediately.
  */
 import type { ToolArgs } from '../../shared/messages';
-import type { Tool } from './types';
-import { ensureAttached, sendCommand } from '../debugger-session';
-import { getCurrentTab } from '../tab-manager';
-import { isRefSelector, lookupRef } from '../refs';
-import { parseFrameArg, resolveObjectId } from './element';
+import type { TargetContext, Tool } from './types';
+import { sendCommand } from '../debugger-session';
+import { consumeRef, isRefSelector } from '../refs';
+import { asStaleTarget } from '../stale-target';
+import { ToolError } from '../tool-error';
+import { parseFrameArg, resolveRefNode } from './element';
 import { resolveFrame, contextIdForFrame } from '../frames';
 
 type WaitKind = 'text' | 'selector' | 'url';
@@ -22,7 +23,7 @@ const MAX_INTERVAL_MS = 2_000;
 export class WaitTool implements Tool {
   readonly name = 'wait';
 
-  async execute(args: ToolArgs): Promise<unknown> {
+  async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
     const picked = pickCondition(args);
     const gone = args.gone === true;
     const timeout = parseIntRange(
@@ -40,15 +41,12 @@ export class WaitTool implements Tool {
       'interval_ms',
     );
 
-    if (picked.kind === 'selector' && isRefSelector(picked.value) && !lookupRef(picked.value)) {
-      throw new Error(
-        `wait: unknown ref "${picked.value}". Run snapshot first, or wait on a CSS selector / text instead.`,
-      );
+    const currentId = target.tabId;
+    // 未知/过期 @e 立刻失败，带 code 的 ToolError（unknown_ref/stale_ref），
+    // 与 click/snapshot 等工具的错误契约一致（协议 §3.3、§4 wait「@e 不在 ref 表则立刻失败」）。
+    if (picked.kind === 'selector' && isRefSelector(picked.value)) {
+      consumeRef(currentId, this.name, picked.value);
     }
-
-    const tab = await getCurrentTab();
-    const currentId = tab.id!;
-    await ensureAttached(currentId);
 
     // frameArg 在进循环之前解析成 frameId（resolveFrame 的错误要立刻抛，不能被轮询吃掉）。
     // @e 忽略 frame（ref 自带帧）；url 不看 frame（仍看 tab URL，协议 §4.1）。
@@ -56,16 +54,17 @@ export class WaitTool implements Tool {
     const isRefSel = picked.kind === 'selector' && isRefSelector(picked.value);
     const frameId =
       frameArg && picked.kind !== 'url' && !isRefSel
-        ? (await resolveFrame(frameArg)).frameId
+        ? (await resolveFrame(target.tabId, frameArg)).frameId
         : undefined;
 
     const kindLabel = gone ? `gone:${picked.kind}` : picked.kind;
     const matched = `${kindLabel}:${picked.value}`;
+    const session = typeof args._session === 'string' ? args._session : 'default';
 
     const start = Date.now();
     const deadline = start + timeout;
     while (true) {
-      const hit = await this.check(picked.kind, picked.value, currentId, frameId);
+      const hit = await this.check(picked.kind, picked.value, currentId, frameId, session);
       if (gone ? !hit : hit) {
         return { success: true, waitedMs: Date.now() - start, matched };
       }
@@ -88,13 +87,22 @@ export class WaitTool implements Tool {
     kind: WaitKind,
     value: string,
     currentId: number,
-    frameId?: string,
+    frameId: string | undefined,
+    session: string,
   ): Promise<boolean> {
     try {
       if (kind === 'url') return await checkUrl(currentId, value);
-      if (kind === 'text') return await checkText(value, frameId);
-      return await checkSelector(value, frameId);
-    } catch {
+      if (kind === 'text') return await checkText(currentId, value, frameId);
+      return await checkSelector(currentId, value, frameId);
+    } catch (err) {
+      // ToolError（轮询中途导航导致的 stale_ref 等）是确定性失败，原样上抛，
+      // 不能吞成超时；其余错误按导航途中的瞬时不可用处理，视为未命中继续轮询。
+      if (err instanceof ToolError) throw err;
+      // tab 在轮询中途被关：后续 CDP/tabs 调用抛无 code 裸错，必须立刻归类
+      // stale_target（协议 §3.3/§3.4），不能当瞬时未命中烧满整个 timeout、
+      // 占着该 tab 的 per-tab 队列槽。
+      const stale = await asStaleTarget(currentId, session, err);
+      if (stale) throw stale;
       return false;
     }
   }
@@ -134,19 +142,20 @@ async function checkUrl(currentId: number, needle: string): Promise<boolean> {
   return (tab.url ?? '').includes(needle);
 }
 
-async function checkText(needle: string, frameId?: string): Promise<boolean> {
+async function checkText(tabId: number, needle: string, frameId?: string): Promise<boolean> {
   const params: Record<string, unknown> = {
     expression: `document.body && document.body.innerText.includes(${JSON.stringify(needle)})`,
     returnByValue: true,
   };
-  if (frameId) params.contextId = await contextIdForFrame(frameId);
+  if (frameId) params.contextId = await contextIdForFrame(tabId, frameId);
   const result = await sendCommand<{
     exceptionDetails?: { text: string };
     result?: { value?: unknown };
-  }>('Runtime.evaluate', params);
+  }>(tabId, 'Runtime.evaluate', params);
   if (!result.exceptionDetails && result.result?.value === true) return true;
 
   const { nodes } = await sendCommand<{ nodes?: { name?: { value?: unknown } }[] }>(
+    tabId,
     'Accessibility.getFullAXTree',
     frameId ? { frameId } : undefined,
   );
@@ -155,24 +164,24 @@ async function checkText(needle: string, frameId?: string): Promise<boolean> {
   );
 }
 
-async function checkSelector(selector: string, frameId?: string): Promise<boolean> {
+async function checkSelector(tabId: number, selector: string, frameId?: string): Promise<boolean> {
   let objectId: string | undefined;
   if (isRefSelector(selector)) {
-    try {
-      objectId = await resolveObjectId('wait', selector);
-    } catch {
-      return false;
-    }
+    // consumeRef 的 unknown_ref/stale_ref 是确定性失败（ToolError 经 check 原样透出）；
+    // 节点已从文档移除只是未命中（gone:true 下即命中成功），不能上抛成 stale_ref。
+    const resolved = await resolveRefNode('wait', selector, tabId);
+    if (!resolved.objectId) return false;
+    objectId = resolved.objectId;
   } else {
     const params: Record<string, unknown> = {
       expression: `document.querySelector(${JSON.stringify(selector)})`,
       returnByValue: false,
     };
-    if (frameId) params.contextId = await contextIdForFrame(frameId);
+    if (frameId) params.contextId = await contextIdForFrame(tabId, frameId);
     const result = await sendCommand<{
       exceptionDetails?: { text: string };
       result?: { subtype?: string; objectId?: string };
-    }>('Runtime.evaluate', params);
+    }>(tabId, 'Runtime.evaluate', params);
     if (result.exceptionDetails || result.result?.subtype === 'null' || !result.result?.objectId) {
       return false;
     }
@@ -181,7 +190,7 @@ async function checkSelector(selector: string, frameId?: string): Promise<boolea
 
   let boxModel: { model?: { border?: number[]; content?: number[] } };
   try {
-    boxModel = await sendCommand('DOM.getBoxModel', { objectId });
+    boxModel = await sendCommand(tabId, 'DOM.getBoxModel', { objectId });
   } catch {
     return false;
   }
@@ -189,7 +198,7 @@ async function checkSelector(selector: string, frameId?: string): Promise<boolea
     return false;
   }
 
-  const hidden = await sendCommand<{ result?: { value?: unknown } }>('Runtime.callFunctionOn', {
+  const hidden = await sendCommand<{ result?: { value?: unknown } }>(tabId, 'Runtime.callFunctionOn', {
     objectId,
     functionDeclaration: `function() { return this.getAttribute('aria-hidden') === 'true'; }`,
     returnByValue: true,
