@@ -13,10 +13,16 @@ func enableWindows(exe string) error {
 		return err
 	}
 	defer k.Close()
-	return k.SetStringValue(WindowsValueName, WindowsRunValue(exe))
+	if err := k.SetStringValue(WindowsValueName, WindowsRunValue(exe)); err != nil {
+		return err
+	}
+	// 每日更新任务:与登录自启同生同灭;/F 幂等覆盖同名任务
+	return runCmd("schtasks", WindowsUpdateTaskCommand(exe, UpdateMinute())...)
 }
 
 func disableWindows() error {
+	// 忽略失败:任务可能本来不存在
+	_ = runCmd("schtasks", "/Delete", "/F", "/TN", WindowsUpdateTaskName)
 	k, err := registry.OpenKey(registry.CURRENT_USER, WindowsRunKey, registry.SET_VALUE)
 	if err != nil {
 		if err == registry.ErrNotExist {

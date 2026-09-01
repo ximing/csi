@@ -118,20 +118,36 @@ func enableDarwin(home, exe string, uid int, run runFunc) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	// 定时任务日志归口目录,launchd 不会代为创建
+	if err := os.MkdirAll(filepath.Join(home, ".csi", "logs"), 0o755); err != nil {
+		return err
+	}
 	if err := os.WriteFile(path, []byte(DarwinPlist(exe)), 0o644); err != nil {
 		return err
 	}
 	domain := "gui/" + strconv.Itoa(uid)
 	_ = run("launchctl", "bootout", domain+"/"+DarwinLabel) // 忽略：可能本来没加载
-	return run("launchctl", "bootstrap", domain, path)
+	if err := run("launchctl", "bootstrap", domain, path); err != nil {
+		return err
+	}
+	// 每日更新任务:与登录单元同生同灭
+	updPath := DarwinUpdatePlistPath(home)
+	if err := os.WriteFile(updPath, []byte(DarwinUpdatePlist(exe, UpdateMinute())), 0o644); err != nil {
+		return err
+	}
+	_ = run("launchctl", "bootout", domain+"/"+DarwinUpdateLabel)
+	return run("launchctl", "bootstrap", domain, updPath)
 }
 
 func disableDarwin(home string, uid int, run runFunc) error {
 	domain := "gui/" + strconv.Itoa(uid)
 	_ = run("launchctl", "bootout", domain+"/"+DarwinLabel)
-	err := os.Remove(DarwinPlistPath(home))
-	if err != nil && !os.IsNotExist(err) {
-		return err
+	_ = run("launchctl", "bootout", domain+"/"+DarwinUpdateLabel)
+	for _, path := range []string{DarwinPlistPath(home), DarwinUpdatePlistPath(home)} {
+		err := os.Remove(path)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return nil
 }
@@ -144,17 +160,31 @@ func enableLinux(home, exe string, run runFunc) error {
 	if err := os.WriteFile(path, []byte(LinuxUnit(exe)), 0o644); err != nil {
 		return err
 	}
+	// 每日更新 timer + 配对的 oneshot service
+	timer, service := LinuxUpdateTimer(exe, UpdateMinute())
+	if err := os.WriteFile(LinuxUpdateTimerPath(home), []byte(timer), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(LinuxUpdateServicePath(home), []byte(service), 0o644); err != nil {
+		return err
+	}
 	if err := run("systemctl", "--user", "daemon-reload"); err != nil {
 		return err
 	}
-	return run("systemctl", "--user", "enable", "--now", LinuxServiceName)
+	if err := run("systemctl", "--user", "enable", "--now", LinuxServiceName); err != nil {
+		return err
+	}
+	return run("systemctl", "--user", "enable", "--now", LinuxUpdateTimerName)
 }
 
 func disableLinux(home string, run runFunc) error {
 	_ = run("systemctl", "--user", "disable", LinuxServiceName)
-	err := os.Remove(LinuxUnitPath(home))
-	if err != nil && !os.IsNotExist(err) {
-		return err
+	_ = run("systemctl", "--user", "disable", LinuxUpdateTimerName)
+	for _, path := range []string{LinuxUnitPath(home), LinuxUpdateTimerPath(home), LinuxUpdateServicePath(home)} {
+		err := os.Remove(path)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return run("systemctl", "--user", "daemon-reload")
 }
