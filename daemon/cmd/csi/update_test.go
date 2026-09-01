@@ -3,6 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -172,5 +176,75 @@ func TestUpdateQuiet(t *testing.T) {
 	}
 	if stub.buf.Len() != 0 {
 		t.Fatalf("--quiet 正常路径不应输出,实际: %q", stub.buf.String())
+	}
+}
+
+// restartHTTPServer 起一个假 /restart 端点,按 body 原样返回(HTTP 恒 200,
+// 与 server.writeJSON 行为一致),返回其端口。
+func restartHTTPServer(t *testing.T, body string) int {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	_, portStr, err := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var port int
+	fmt.Sscanf(portStr, "%d", &port)
+	return port
+}
+
+func TestRestartDaemonSuccessFalseFallsBack(t *testing.T) {
+	// 业务失败也返回 HTTP 200(本项目约定:错误走 body 的 success:false),
+	// restartDaemon 必须解析 body,false 时走进程级回退。
+	port := restartHTTPServer(t, `{"success":false,"error":"spawn boom"}`)
+	fallbackCalled := false
+	err := restartDaemonHTTP(port, func() error {
+		fallbackCalled = true
+		return nil
+	})
+	if !fallbackCalled {
+		t.Fatal("success:false 应触发进程级回退")
+	}
+	if err != nil {
+		t.Fatalf("回退成功后整体应成功,实际: %v", err)
+	}
+}
+
+func TestRestartDaemonSuccessTrueNoFallback(t *testing.T) {
+	port := restartHTTPServer(t, `{"success":true}`)
+	fallbackCalled := false
+	if err := restartDaemonHTTP(port, func() error {
+		fallbackCalled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("success:true 不应报错: %v", err)
+	}
+	if fallbackCalled {
+		t.Fatal("success:true 不应触发回退")
+	}
+}
+
+func TestRestartDaemonUnreachableFallsBack(t *testing.T) {
+	// 端口无人监听:HTTP 层失败,走回退(原有行为,顺带锁定)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close() // 立即释放,保证连接被拒
+	fallbackCalled := false
+	if err := restartDaemonHTTP(port, func() error {
+		fallbackCalled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("回退成功后整体应成功,实际: %v", err)
+	}
+	if !fallbackCalled {
+		t.Fatal("HTTP 不可达应触发回退")
 	}
 }

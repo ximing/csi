@@ -9,6 +9,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -169,21 +170,39 @@ func daemonRunning() bool {
 }
 
 // restartDaemon 优先走 HTTP POST /restart(优雅:新进程拉起、旧进程等端口释放);
-// 不可达或非 200 时回退进程级 restart(stop+start,同 cmdRestart)。
+// 不可达、非 200 或 body success:false 时回退进程级 restart(stop+start,同 cmdRestart)。
 func restartDaemon() error {
+	return restartDaemonHTTP(daemon.Port(), cmdRestart)
+}
+
+// restartDaemonHTTP POST 127.0.0.1:<port>/restart 并解析响应。
+// 本项目约定业务错误走 body(writeJSON 恒 200):success:false 时
+// 重启实际失败(如 spawn 替代进程出错),必须回退 fallback。
+func restartDaemonHTTP(port int, fallback func() error) error {
 	client := &http.Client{Timeout: 5 * time.Second}
-	url := fmt.Sprintf("http://127.0.0.1:%d/restart", daemon.Port())
+	url := fmt.Sprintf("http://127.0.0.1:%d/restart", port)
 	resp, err := client.Post(url, "", nil)
 	if err == nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			return nil
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			err = fmt.Errorf("HTTP %d", resp.StatusCode)
+		} else {
+			var body struct {
+				Success bool   `json:"success"`
+				Error   string `json:"error"`
+			}
+			if decErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); decErr != nil {
+				err = fmt.Errorf("解析 /restart 响应失败: %w", decErr)
+			} else if !body.Success {
+				err = fmt.Errorf("/restart 返回失败: %s", body.Error)
+			}
 		}
-		err = fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	if err == nil {
+		return nil
 	}
 	fmt.Printf("POST /restart 失败(%v),回退进程级 restart\n", err)
-	return cmdRestart()
+	return fallback()
 }
 
 // updateSkills 下载 csi-skill.tar.gz / csi-e2e-skill.tar.gz 解到
