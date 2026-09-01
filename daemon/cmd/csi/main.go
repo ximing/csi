@@ -7,6 +7,7 @@
 //	stop       停止后台 daemon（--force 跳过身份校验）
 //	restart    重启后台 daemon
 //	status     查询运行状态
+//	update     更新到最新 release（--check|--quiet|--with-skills|--with-extension）
 //	autostart  登录自启（status | on | off；默认 status）
 //	version    打印版本
 //	mcp        stdio MCP server（21 个浏览器工具，转发到本机 daemon）
@@ -36,6 +37,8 @@ func main() {
 		err = cmdRestart()
 	case "status":
 		err = cmdStatus()
+	case "update":
+		err = cmdUpdate()
 	case "autostart":
 		err = cmdAutostart()
 	case "version":
@@ -68,6 +71,7 @@ commands:
   stop [--force]  stop background daemon
   restart         restart background daemon
   status          show daemon status
+  update          update daemon to the latest release (--check|--quiet|--with-skills|--with-extension)
   autostart       login autostart (status | on | off; default status)
   version         print version
   mcp             run MCP server over stdio (forwards to the local daemon)
