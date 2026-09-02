@@ -8,7 +8,7 @@
       "name": "csi",
       "source": "./",
       "description": "CSI skills for coding agents: csi (drive the user's real Chrome browser — navigate, click, type, screenshot, save PDF — via the local daemon), csi-e2e (turn natural-language browser scenarios into replayable e2e regression suites)",
-      "version": "0.7.0",
+      "version": "0.7.1",
       "author": {
         "name": "ximing"
       },
