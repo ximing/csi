@@ -3,7 +3,7 @@ name: csi
 description: |
   CSI lets AI control the user's real Chrome browser — navigate, click, type, read, screenshot, save as PDF, and interact with any website using the user's actual login sessions. Use whenever the user wants to operate, read, or scrape a live website, automate browser tasks, or do anything that needs a real browser with real login state — including when they mention "browser", "webpage", "open URL", or a screenshot of a live site. Do NOT use when the user is only discussing browser internals, frontend code, URL formats, or screenshot concepts without opening a page; when they ask for headless, an isolated profile, or plain HTTP fetching (CSI is not the default there); or when "browser"/"webpage" merely appears in a code review.
 metadata:
-  version: "0.7.1"
+  version: "0.7.2"
 ---
 
 # CSI

@@ -1,6 +1,6 @@
 {
   "name": "csi",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "type": "module",
   "description": "CSI — let AI control your real Chrome browser (daemon + extension + coding-agent skills)",
