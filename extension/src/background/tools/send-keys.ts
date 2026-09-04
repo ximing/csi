@@ -1,5 +1,5 @@
 /**
- * send_keys (protocol §4.10): synthesize key events via
+ * send_keys (protocol §4.4): synthesize key events via
  * Input.dispatchKeyEvent. Supports modifiers (Alt/Ctrl/Cmd/Meta/Shift/Mod),
  * F1-F12, named keys, single letters/digits, space-separated segments and
  * repeat counts. Modifier bitmask: alt=1 ctrl=2 cmd=4 shift=8.
@@ -29,6 +29,100 @@ const MODIFIERS: Record<string, ModifierSpec> = {
 };
 
 const SHIFT_BIT = MODIFIERS.shift!.bit;
+const CTRL_BIT = MODIFIERS.ctrl!.bit;
+const CMD_BIT = MODIFIERS.cmd!.bit;
+const ALT_BIT = MODIFIERS.alt!.bit;
+
+interface EditingMapping {
+  commands: string[];
+  /** Shift 同按时的替代映射；缺省沿用 commands。 */
+  shift?: string[];
+}
+
+/**
+ * 平台主修饰键 + 主键 → CDP editing command（协议 §4.4）。真实 Chrome 里全选、
+ * 复制等编辑快捷键由 Chromium 内部 editing command 生效，不是 keyDown 事件
+ * 本身；keyDown 必须附带 `commands` 参数，否则组合键在真实页面上是空操作。
+ * 两张表各按平台真实语义：macOS 是行级/文档级，Windows/Linux 是词级/段落级。
+ * Alt 同按不映射（Alt 组合不是编辑命令）；Shift+Z 在两平台都是 redo。
+ * Shift+移动键必须用 ...AndModifySelection 变体：CDP commands 按名 verbatim
+ * 执行，不会从 Shift 修饰位推导选区扩展，沿用基础移动命令会折叠已有选区。
+ */
+const EDITING_COMMANDS_MAC: Record<string, EditingMapping> = {
+  a: { commands: ['selectAll'] },
+  c: { commands: ['copy'] },
+  x: { commands: ['cut'] },
+  v: { commands: ['paste'] },
+  z: { commands: ['undo'], shift: ['redo'] },
+  Backspace: { commands: ['deleteToBeginningOfLine'] },
+  Delete: { commands: ['deleteToEndOfLine'] },
+  ArrowLeft: {
+    commands: ['moveToBeginningOfLine'],
+    shift: ['moveToBeginningOfLineAndModifySelection'],
+  },
+  ArrowRight: {
+    commands: ['moveToEndOfLine'],
+    shift: ['moveToEndOfLineAndModifySelection'],
+  },
+  ArrowUp: {
+    commands: ['moveToBeginningOfDocument'],
+    shift: ['moveToBeginningOfDocumentAndModifySelection'],
+  },
+  ArrowDown: {
+    commands: ['moveToEndOfDocument'],
+    shift: ['moveToEndOfDocumentAndModifySelection'],
+  },
+  Home: {
+    commands: ['moveToBeginningOfDocument'],
+    shift: ['moveToBeginningOfDocumentAndModifySelection'],
+  },
+  End: {
+    commands: ['moveToEndOfDocument'],
+    shift: ['moveToEndOfDocumentAndModifySelection'],
+  },
+};
+
+const EDITING_COMMANDS_WIN: Record<string, EditingMapping> = {
+  a: { commands: ['selectAll'] },
+  c: { commands: ['copy'] },
+  x: { commands: ['cut'] },
+  v: { commands: ['paste'] },
+  z: { commands: ['undo'], shift: ['redo'] },
+  y: { commands: ['redo'] },
+  Backspace: { commands: ['deleteWordBackward'] },
+  Delete: { commands: ['deleteWordForward'] },
+  ArrowLeft: {
+    commands: ['moveWordLeft'],
+    shift: ['moveWordLeftAndModifySelection'],
+  },
+  ArrowRight: {
+    commands: ['moveWordRight'],
+    shift: ['moveWordRightAndModifySelection'],
+  },
+  ArrowUp: {
+    commands: ['moveToBeginningOfParagraph'],
+    shift: ['moveToBeginningOfParagraphAndModifySelection'],
+  },
+  ArrowDown: {
+    commands: ['moveToEndOfParagraph'],
+    shift: ['moveToEndOfParagraphAndModifySelection'],
+  },
+  Home: {
+    commands: ['moveToBeginningOfDocument'],
+    shift: ['moveToBeginningOfDocumentAndModifySelection'],
+  },
+  End: {
+    commands: ['moveToEndOfDocument'],
+    shift: ['moveToEndOfDocumentAndModifySelection'],
+  },
+};
+
+/** 按平台取主修饰键位与映射表：macOS = Cmd，Windows/Linux = Ctrl。 */
+function editingTableFor(os: string): { primaryBit: number; table: Record<string, EditingMapping> } {
+  return os === 'mac'
+    ? { primaryBit: CMD_BIT, table: EDITING_COMMANDS_MAC }
+    : { primaryBit: CTRL_BIT, table: EDITING_COMMANDS_WIN };
+}
 
 const NAMED_KEYS: Record<string, KeySpec> = {
   enter: { key: 'Enter', code: 'Enter', vkc: 13, text: '\r' },
@@ -173,6 +267,20 @@ export class SendKeysTool implements Tool {
           (modifierBits & ~SHIFT_BIT) === 0 && resolved.text !== undefined
             ? { text: resolved.text }
             : {};
+        // 平台主修饰键（mac=Cmd，其他=Ctrl；Mod 已解析）+ 主键映射 editing
+        // command（协议 §4.4）。Alt 同按不映射；查表用未升大写的 spec.key，
+        // 否则 Shift+字母组合（Cmd+Shift+Z 重做）会因大写键查空而丢失。
+        const { primaryBit, table } = editingTableFor(os);
+        const shiftHeld = (modifierBits & SHIFT_BIT) !== 0;
+        const mapping =
+          (modifierBits & primaryBit) !== 0 && (modifierBits & ALT_BIT) === 0
+            ? table[spec.key]
+            : undefined;
+        const commandParams = mapping
+          ? shiftHeld && mapping.shift
+            ? mapping.shift
+            : mapping.commands
+          : undefined;
         await sendCommand(target.tabId, 'Input.dispatchKeyEvent', {
           type: 'keyDown',
           modifiers: modifierBits,
@@ -180,6 +288,7 @@ export class SendKeysTool implements Tool {
           code: resolved.code,
           windowsVirtualKeyCode: resolved.vkc,
           ...textParams,
+          ...(commandParams ? { commands: commandParams } : {}),
         });
         await sendCommand(target.tabId, 'Input.dispatchKeyEvent', {
           type: 'keyUp',

@@ -1,5 +1,5 @@
 /**
- * close_tab 测试（协议 §3.4/§4.19）：
+ * close_tab 测试（协议 §3.4/§4）：
  * closed:false 的三个机器可读 code 分支 —— not_owned / already_closed /
  * close_failed，daemon 只对 already_closed 对账移除。
  */

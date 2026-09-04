@@ -1,5 +1,5 @@
 /**
- * hover (protocol §4.11): trusted-path mouseMoved at the element's
+ * hover (protocol §4): trusted-path mouseMoved at the element's
  * box-model center — CSS :hover menus without a click. No mousePressed.
  *
  * frame 内元素坐标同样是根视口像素，禁止累加 iframe 盒（DOM.getBoxModel

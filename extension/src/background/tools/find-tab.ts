@@ -1,5 +1,5 @@
 /**
- * find_tab (protocol §4.2 / §3.4): locate a tab by URL domain.
+ * find_tab (protocol §4 / §3.4): locate a tab by URL domain.
  * borrowed = foundId ∉ owned _tabIds.
  */
 import type { ToolArgs } from '../../shared/messages';

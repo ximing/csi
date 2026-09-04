@@ -65,7 +65,9 @@ export class WaitTool implements Tool {
     const deadline = start + timeout;
     while (true) {
       const hit = await this.check(picked.kind, picked.value, currentId, frameId, session);
-      if (gone ? !hit : hit) {
+      // hit 为 undefined 是「本轮无法判定」（瞬时 CDP 错误）：不算命中也不算
+      // 未命中，直接下一轮——尤其 gone:true 下不得把「没查成」当「元素消失」。
+      if (hit !== undefined && (gone ? !hit : hit)) {
         return { success: true, waitedMs: Date.now() - start, matched };
       }
       if (Date.now() >= deadline) break;
@@ -83,27 +85,31 @@ export class WaitTool implements Tool {
     );
   }
 
+  /**
+   * 轮一次条件。返回 true/false 是确定判定；undefined 是「本轮无法判定」
+   * （瞬时 CDP 错误，tab 仍在）——调用方不得把它当未命中（gone:true 下会假命中）。
+   */
   private async check(
     kind: WaitKind,
     value: string,
     currentId: number,
     frameId: string | undefined,
     session: string,
-  ): Promise<boolean> {
+  ): Promise<boolean | undefined> {
     try {
       if (kind === 'url') return await checkUrl(currentId, value);
       if (kind === 'text') return await checkText(currentId, value, frameId);
       return await checkSelector(currentId, value, frameId);
     } catch (err) {
       // ToolError（轮询中途导航导致的 stale_ref 等）是确定性失败，原样上抛，
-      // 不能吞成超时；其余错误按导航途中的瞬时不可用处理，视为未命中继续轮询。
+      // 不能吞成超时；其余错误按导航途中的瞬时不可用处理，本轮无法判定。
       if (err instanceof ToolError) throw err;
       // tab 在轮询中途被关：后续 CDP/tabs 调用抛无 code 裸错，必须立刻归类
       // stale_target（协议 §3.3/§3.4），不能当瞬时未命中烧满整个 timeout、
       // 占着该 tab 的 per-tab 队列槽。
       const stale = await asStaleTarget(currentId, session, err);
       if (stale) throw stale;
-      return false;
+      return undefined;
     }
   }
 }

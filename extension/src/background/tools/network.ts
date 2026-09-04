@@ -1,10 +1,10 @@
 /**
- * network (protocol §4.7 / §4.4): start/stop capture, list collected requests,
+ * network (protocol §4 / §4.5): start/stop capture, list collected requests,
  * fetch a response body. Capture state is per-tab; a single global
  * debugger.onEvent listener fans events into the per-tab tables.
  *
  * 每 tab 捕获表是最多 2000 条的 ring buffer：溢出丢最旧记录并累计
- * droppedCount（协议 §4.4）。list 分页返回，detail 按 body_mode 做预算。
+ * droppedCount（协议 §4.5）。list 分页返回，detail 按 body_mode 做预算。
  */
 import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';
@@ -21,7 +21,7 @@ interface CapturedRequest {
   timestamp?: number;
 }
 
-/** 每 tab 捕获表上限（协议 §4.4）。 */
+/** 每 tab 捕获表上限（协议 §4.5）。 */
 const CAPTURE_MAX = 2_000;
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 500;
@@ -53,7 +53,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   droppedByTab.delete(tabId);
 });
 
-/** 写入一条新请求；表满时丢最旧并累计 droppedCount（协议 §4.4）。 */
+/** 写入一条新请求；表满时丢最旧并累计 droppedCount（协议 §4.5）。 */
 function recordRequest(tabId: number, entry: CapturedRequest): void {
   const table = requestsFor(tabId);
   if (table.has(entry.requestId)) {
@@ -156,7 +156,7 @@ export class NetworkTool implements Tool {
     const cursor = parseCursor(rawCursor);
     let requests = [...requestsFor(tabId).values()];
     if (filter) requests = requests.filter((r) => r.url.includes(filter));
-    // cursor 是过滤后序列表里的下标（字符串），驱动方一页页翻即可（协议 §4.4）。
+    // cursor 是过滤后序列表里的下标（字符串），驱动方一页页翻即可（协议 §4.5）。
     const page = requests.slice(cursor, cursor + limit);
     const next = cursor + limit < requests.length ? String(cursor + limit) : undefined;
     return {
@@ -195,7 +195,7 @@ export class NetworkTool implements Tool {
     const sourceChars = text.length;
 
     if (bodyMode === 'preview') {
-      // preview：body 取前 12000 字符（协议 §4.4 未给可调参数，固定值）。
+      // preview：body 取前 12000 字符（协议 §4.5 未给可调参数，固定值）。
       if (sourceChars <= DEFAULT_PREVIEW_CHARS) {
         return { ...meta, body: maybeParseJson(text, body.base64Encoded) };
       }
@@ -208,7 +208,7 @@ export class NetworkTool implements Tool {
     }
 
     if (bodyMode === 'full') {
-      // full 仅显式请求；超 80000 是调用方的用法问题，提示改 file（协议 §4.4）。
+      // full 仅显式请求；超 80000 是调用方的用法问题，提示改 file（协议 §4.5）。
       if (sourceChars > INLINE_MAX_CHARS) {
         throw new Error(
           `network: body is ${sourceChars} chars, over the 80000 inline limit for body_mode=full; use body_mode=file`,
@@ -217,7 +217,7 @@ export class NetworkTool implements Tool {
       return { ...meta, body: maybeParseJson(text, body.base64Encoded) };
     }
 
-    // file：body 经 artifact 落盘，只内联 preview + 元信息（协议 §3.5/§4.4/§5）。
+    // file：body 经 artifact 落盘，只内联 preview + 元信息（协议 §3.5/§4.5/§5）。
     const env = makeArtifact({
       data: text,
       mimeType: entry.mimeType ?? 'application/octet-stream',

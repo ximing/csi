@@ -278,15 +278,15 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 | 3 | `snapshot` | `mode`(compact/interactive/full，默认 compact), `selector`, `match`({role?, name*, exact?}), `max_chars`(compact/interactive 默认 24000，1000–80000), `frame`(frameId 或未截断 URL 子串) | `{url, title, mode, chars, source_chars, returned_chars, matches?, truncated, tree}`；full 树 >80000 字符转 artifact（§3.5/§5） | compact/interactive 的 tree 是 YAML 字符串；full 的 tree 是既有 JSON 数组。interactive 带最多两层最小祖先上下文；`match` 做确定性 role/name 过滤，见 §4.3。iframe 只输出一行不下行，但带 `[ref=@eN]`，跨域行带 `[isolated]`；`frame` 或指向 iframe 的 `selector` 进入该帧再拍。 |
 | 4 | `click` | `selector`*, `frame` | `{success, tag, text}` | DOM 级 `el.click()`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 5 | `fill` | `selector`*, `value`*, `frame` | `{success, tag, mode}` | input/textarea → `mode:"value"`；contenteditable → `mode:"contenteditable"`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
-| 6 | `evaluate` | `code`*, `max_chars`(默认 12000，最大 80000), `frame` | `{type, value}`；序列化结果超 `max_chars` 转 artifact（§3.5/§5） | `Runtime.evaluate`，`awaitPromise:true`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效。超限语义见 §4.4 |
-| 7 | `network` | `cmd`* (start/stop/list/detail), `filter`, `requestId`；list：`limit`(默认 50，最大 500), `cursor`；detail：`body_mode`(preview\|file\|full，默认 preview) | list：`{requests:[...], nextCursor?, droppedCount}`；detail：`{requestId,url,method,status,mimeType,base64Encoded,body, sourceChars?, truncated?}`，`body_mode:file` 转 artifact（§3.5/§5） | 每 tab 捕获表为最多 2000 条 ring buffer，溢出丢最旧并累计 `droppedCount`；分页与 body 预算见 §4.4 |
+| 6 | `evaluate` | `code`*, `max_chars`(默认 12000，最大 80000), `frame` | `{type, value}`；序列化结果超 `max_chars` 转 artifact（§3.5/§5） | `Runtime.evaluate`，`awaitPromise:true`。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效。超限语义见 §4.5 |
+| 7 | `network` | `cmd`* (start/stop/list/detail), `filter`, `requestId`；list：`limit`(默认 50，最大 500), `cursor`；detail：`body_mode`(preview\|file\|full，默认 preview) | list：`{requests:[...], nextCursor?, droppedCount}`；detail：`{requestId,url,method,status,mimeType,base64Encoded,body, sourceChars?, truncated?}`，`body_mode:file` 转 artifact（§3.5/§5） | 每 tab 捕获表为最多 2000 条 ring buffer，溢出丢最旧并累计 `droppedCount`；分页与 body 预算见 §4.5 |
 | 8 | `mouse_click` | `selector`*, `frame` | `{success, x, y, tag, text}` | 坐标级 Input.dispatchMouseEvent，可过 isTrusted 检查。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 9 | `wait` | 恰好 `text`/`selector`/`url` 之一；`gone`；`timeout_ms`(默认 15000，100–120000)；`interval_ms`(默认 200，50–2000), `frame` | `{success, waitedMs, matched}` | 扩展内轮询。@e 不在 ref 表则立刻失败。超时文案带 last url。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 10 | `scroll` | 恰好 `selector` / `to`(top\|bottom) / `direction`(up\|down\|left\|right) 之一；`amount`(number\|"page"，仅 direction，默认 page) | `{success, x, y, maxX, maxY}` | page = 0.9 * innerHeight/innerWidth |
 | 11 | `hover` | `selector`*, `frame` | `{success, x, y, tag, text}` | Input.dispatchMouseEvent mouseMoved，不过 mousePressed。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 12 | `key_type` | `text`* | `{success, length}` | `Input.insertText` |
-| 13 | `send_keys` | `keys`* , `repeat`(1-100) | `{success, dispatched, os}` | 支持 `Enter`/`Escape`/`Tab`/`F1-F12`/单字母数字、修饰键 `Alt/Ctrl/Cmd/Meta/Shift/Mod`（Mod 自动解析）、空格分隔多段 |
-| 14 | `cdp` | `method`*, `params`, `max_chars`(默认 12000，最大 80000) | 规范化后的 CDP 结果（见 §4.2）；序列化结果超 `max_chars` 转 artifact（§3.5/§5） | 命令 params 裸透传 escape hatch；返回不是字面「原始 CDP」。超限语义见 §4.4 |
+| 13 | `send_keys` | `keys`* , `repeat`(1-100) | `{success, dispatched, os}` | 支持 `Enter`/`Escape`/`Tab`/`F1-F12`/单字母数字、修饰键 `Alt/Ctrl/Cmd/Meta/Shift/Mod`（Mod 自动解析）、空格分隔多段。带平台主修饰键（macOS=Cmd，Windows/Linux=Ctrl；`Mod` 自动解析）的键段会随 keyDown 附带 CDP editing `commands`（如 `Mod+A`→`selectAll`，映射表见 §4.4），否则真实页面里全选/复制等编辑快捷键不生效 |
+| 14 | `cdp` | `method`*, `params`, `max_chars`(默认 12000，最大 80000) | 规范化后的 CDP 结果（见 §4.2）；序列化结果超 `max_chars` 转 artifact（§3.5/§5） | 命令 params 裸透传 escape hatch；返回不是字面「原始 CDP」。超限语义见 §4.5 |
 | 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
 | 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
@@ -360,7 +360,53 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - 树 > 80000 字符：**自动转 artifact**（§3.5/§5）——完整 JSON 由 daemon 落盘，返回 preview、path、sourceChars，并附引导提示：多数任务用 `selector`/`match` 缩小范围更省。**不**返回 `result_too_large`（它是可满足的请求，不是错误用法），也**不得**截断成非法 JSON。
 - 转 artifact 不影响 ref 分配：refs 在树构建时已写入该 tab 的 ref store（含 full 模式的 iframe 节点），与结果是否内联无关。
 
-### 4.4 结果预算：network 分页与 body、evaluate/cdp
+### 4.4 send_keys 的 editing commands 映射
+
+真实 Chrome 中 `Cmd+A`/`Ctrl+A` 等编辑快捷键不是靠 keyDown 事件本身生效，而是靠 Chromium 内部 editing command。CDP 的 `Input.dispatchKeyEvent` 有 `commands` 参数承载它。因此扩展对带**平台主修饰键**（macOS = Cmd，Windows/Linux = Ctrl；`Mod` 自动解析为目标）的键段，在主键 keyDown 里附带对应 `commands`（数组）。
+
+规则：
+
+- 只认平台主修饰键：macOS 上显式 `Ctrl+X`、Windows 上显式 `Cmd+X` 不附带（那些在真实系统里不是这些编辑语义）。
+- `Alt` 同按不附带（Alt 组合不是编辑命令，如 `Ctrl+Alt+Delete` 不得触发删除）。
+- `Shift` 同按：移动类组合（Arrow/Home/End）改用对应的 `...AndModifySelection` 变体——真实快捷键是**扩展选区**，而 CDP `commands` 按名执行、不会从 Shift 修饰位自动推导，沿用基础移动命令会把选区折叠掉；`Shift+Z` 在两平台都是 `redo`（macOS 的 `Cmd+Shift+Z` 是通用重做快捷键）；其余组合沿用基础映射。
+- 查表按未升大写的主键：Shift 同按产生的只是大写 text，不改变映射查找。
+
+主键 → editing command 映射（Chromium `editor_command_names`）：
+
+**macOS（Cmd/Mod 触发，行级/文档级语义）**
+
+| 键段 | commands |
+|---|---|
+| `Cmd/Mod + A` / `C` / `X` / `V` | `['selectAll']` / `['copy']` / `['cut']` / `['paste']` |
+| `Cmd/Mod + Z` | `['undo']` |
+| `Cmd/Mod + Shift + Z` | `['redo']` |
+| `Cmd/Mod + Backspace` | `['deleteToBeginningOfLine']` |
+| `Cmd/Mod + Delete` | `['deleteToEndOfLine']` |
+| `Cmd/Mod + ArrowLeft` / `ArrowRight` | `['moveToBeginningOfLine']` / `['moveToEndOfLine']` |
+| `Cmd/Mod + ArrowUp` / `ArrowDown` | `['moveToBeginningOfDocument']` / `['moveToEndOfDocument']` |
+| `Cmd/Mod + Home` / `End` | `['moveToBeginningOfDocument']` / `['moveToEndOfDocument']` |
+| `Cmd/Mod + Shift + ArrowLeft` / `ArrowRight` | `['moveToBeginningOfLineAndModifySelection']` / `['moveToEndOfLineAndModifySelection']` |
+| `Cmd/Mod + Shift + ArrowUp` / `ArrowDown` 或 `Home` / `End` | `['moveToBeginningOfDocumentAndModifySelection']` / `['moveToEndOfDocumentAndModifySelection']` |
+
+**Windows/Linux（Ctrl/Mod 触发，词级/段落级语义）**
+
+| 键段 | commands |
+|---|---|
+| `Ctrl/Mod + A` / `C` / `X` / `V` | `['selectAll']` / `['copy']` / `['cut']` / `['paste']` |
+| `Ctrl/Mod + Z` | `['undo']` |
+| `Ctrl/Mod + Shift + Z` 或 `Ctrl/Mod + Y` | `['redo']` |
+| `Ctrl/Mod + Backspace` | `['deleteWordBackward']` |
+| `Ctrl/Mod + Delete` | `['deleteWordForward']` |
+| `Ctrl/Mod + ArrowLeft` / `ArrowRight` | `['moveWordLeft']` / `['moveWordRight']` |
+| `Ctrl/Mod + ArrowUp` / `ArrowDown` | `['moveToBeginningOfParagraph']` / `['moveToEndOfParagraph']` |
+| `Ctrl/Mod + Home` / `End` | `['moveToBeginningOfDocument']` / `['moveToEndOfDocument']` |
+| `Ctrl/Mod + Shift + ArrowLeft` / `ArrowRight` | `['moveWordLeftAndModifySelection']` / `['moveWordRightAndModifySelection']` |
+| `Ctrl/Mod + Shift + ArrowUp` / `ArrowDown` | `['moveToBeginningOfParagraphAndModifySelection']` / `['moveToEndOfParagraphAndModifySelection']` |
+| `Ctrl/Mod + Shift + Home` / `End` | `['moveToBeginningOfDocumentAndModifySelection']` / `['moveToEndOfDocumentAndModifySelection']` |
+
+其余组合不附带 `commands`，仍按裸键事件派发（页面自身的 JS 快捷键监听不受影响）。`Alt+Tab` 这类浏览器/OS 级快捷键不在此列。
+
+### 4.5 结果预算：network 分页与 body、evaluate/cdp
 
 **network list**：
 

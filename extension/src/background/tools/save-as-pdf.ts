@@ -1,5 +1,5 @@
 /**
- * save_as_pdf (protocol §4.13): Page.printToPDF. The base64 payload goes
+ * save_as_pdf (protocol §4): Page.printToPDF. The base64 payload goes
  * back to the daemon, which writes it to disk with a title-derived default
  * file name (protocol §5).
  */

@@ -1,5 +1,5 @@
 /**
- * scroll (protocol §4.10): exactly one of selector / to / direction.
+ * scroll (protocol §4): exactly one of selector / to / direction.
  * selector uses the shared scrollIntoView helper; to/direction touch
  * window via Runtime.evaluate. Always returns window scroll position.
  */

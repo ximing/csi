@@ -237,12 +237,19 @@ restartButton.addEventListener('click', async () => {
   }
   const newBase = `http://127.0.0.1:${newPort}`;
   if (await pollHealthz(newBase, 10_000)) {
-    // 切换 WS URL 并让 background 重连（CONNECT 会落 storage）
-    await chrome.runtime.sendMessage({ type: 'CONNECT', url: `ws://127.0.0.1:${newPort}/ws` });
-    pendingRestartPort = null;
-    restartButton.hidden = true;
-    showConfigResult('restartOk', true, String(newPort));
-    void refreshStatus();
+    // 切换 WS URL 并让 background 重连（CONNECT 会落 storage）。SW context
+    // 可能已失效：裸 await 的 rejection 会让按钮停在 disabled、UI 停在
+    // 「重启中…」、pendingRestartPort 不清，失败在所有界面不可见。
+    try {
+      await chrome.runtime.sendMessage({ type: 'CONNECT', url: `ws://127.0.0.1:${newPort}/ws` });
+      pendingRestartPort = null;
+      restartButton.hidden = true;
+      showConfigResult('restartOk', true, String(newPort));
+      void refreshStatus();
+    } catch {
+      // daemon 已起但扩展没连上：保留 pendingRestartPort，按钮保持可点可重试。
+      showConfigResult('restartFailedExt', false, String(newPort));
+    }
   } else if (await pollHealthz(oldBase, 2_000)) {
     showConfigResult('restartFailedOldAlive', false);
   } else {

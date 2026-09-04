@@ -32,11 +32,61 @@ export function addTab(tab: FakeTab): void {
   tabs.set(tab.id, { status: 'complete', ...tab });
 }
 
+/** 从 fake 中移除 tab 但不发 onRemoved（模拟事件尚未送达的竞态窗口）。 */
+export function removeTabSilently(tabId: number): void {
+  tabs.delete(tabId);
+}
+
 export function fireRemoved(tabId: number): void {
   tabs.delete(tabId);
   // 迭代快照：监听者（如 navigate 的 waitForLoad）会在回调里注销自己，
   // 直接迭代原数组会跳过后续监听者。
   for (const fn of [...onRemoved]) fn(tabId);
+}
+
+/** 模拟 chrome.tabs.onUpdated 事件；tab 参数缺省取当前存储的 tab。 */
+export function fireUpdated(
+  tabId: number,
+  changeInfo: { status?: string; url?: string },
+  tab?: FakeTab,
+): void {
+  const stored = tab ?? tabs.get(tabId) ?? { id: tabId };
+  for (const fn of [...onUpdated]) fn(tabId, changeInfo, stored);
+}
+
+/** 当前注册的 onUpdated / onRemoved 监听器数（断言监听泄漏用）。 */
+export function updatedListenerCount(): number {
+  return onUpdated.length;
+}
+
+export function removedListenerCount(): number {
+  return onRemoved.length;
+}
+
+/**
+ * 局部覆写 chrome.debugger.sendCommand：按 method 分发到 handlers（可抛错模拟
+ * 真实 Chrome 的 rejection），未命中的回退默认 fake。用完必须调 restore()。
+ */
+export function stubSendCommand(handlers: Record<string, (params: any) => unknown>): {
+  calls: { method: string; params: any }[];
+  restore: () => void;
+} {
+  const original = chrome.debugger.sendCommand;
+  const calls: { method: string; params: any }[] = [];
+  (chrome.debugger as { sendCommand: typeof chrome.debugger.sendCommand }).sendCommand =
+    (async (debuggee: { tabId: number }, method: string, params?: unknown) => {
+      calls.push({ method, params });
+      const h = handlers[method];
+      if (h) return h(params ?? {});
+      return original(debuggee, method, params as object);
+    }) as typeof chrome.debugger.sendCommand;
+  return {
+    calls,
+    restore: () => {
+      (chrome.debugger as { sendCommand: typeof chrome.debugger.sendCommand }).sendCommand =
+        original;
+    },
+  };
 }
 
 export function fireDebuggerEvent(tabId: number, method: string, params: unknown): void {
@@ -92,7 +142,13 @@ export function installChrome(): void {
             if (i >= 0) onRemoved.splice(i, 1);
           },
         },
-        onUpdated: { addListener: (fn: Fn) => onUpdated.push(fn), removeListener: () => undefined },
+        onUpdated: {
+          addListener: (fn: Fn) => onUpdated.push(fn),
+          removeListener: (fn: Fn) => {
+            const i = onUpdated.indexOf(fn);
+            if (i >= 0) onUpdated.splice(i, 1);
+          },
+        },
       },
       windows: {
         getLastFocused: async () => {

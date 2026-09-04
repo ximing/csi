@@ -1,6 +1,7 @@
 # Node
 node_modules/
 extension/dist/
+extension/coverage/
 
 # Go
 daemon/csi

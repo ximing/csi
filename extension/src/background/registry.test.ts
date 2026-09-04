@@ -9,10 +9,10 @@ import {
 } from './test-chrome';
 import { ToolError } from './tool-error';
 import { WsClient } from './ws-client';
-import * as tabQueue from './tab-queue';
 
 installChrome();
 
+const tabQueue = await import('./tab-queue');
 const { registerAllTools, dispatchTool, resolveTabTarget } = await import('./registry');
 registerAllTools();
 

@@ -21,10 +21,21 @@ export async function resolveRefNode(
   tabId: number,
 ): Promise<ResolvedRefNode> {
   const entry = consumeRef(tabId, toolName, selector);
-  const { object } = await sendCommand<{ object?: { objectId?: string } }>(tabId, 'DOM.resolveNode', {
+  // 真实 Chrome 对死 backendNodeId（跨文档导航后的旧节点）resolveNode 是
+  // reject（"No node with given backend id"），不是返回空 object——只有这种
+  // 「节点不在文档」的 rejection 才归为空 objectId（语义由调用方定）。
+  // 其余 rejection（debugger 被断开、renderer 崩溃）必须上抛：吞掉会让
+  // click/fill 误报 stale_ref 引导重拍（治标不治本），wait gone:true 假命中
+  // （元素其实还在页面上）。tab 本身已死的 rejection 也不能吞：探测一下，
+  // tab 没了就把 raw 错上抛，交给出口归 stale_target。
+  const resolved = await sendCommand<{ object?: { objectId?: string } }>(tabId, 'DOM.resolveNode', {
     backendNodeId: entry.backendDOMNodeId,
+  }).catch(async (err): Promise<{ object?: { objectId?: string } }> => {
+    await chrome.tabs.get(tabId); // tab 已死则这里抛 raw 错，交给出口归 stale_target
+    if (err instanceof Error && /no node with given/i.test(err.message)) return {};
+    throw err;
   });
-  return { objectId: object?.objectId, entry };
+  return { objectId: resolved.object?.objectId, entry };
 }
 
 export async function resolveObjectId(

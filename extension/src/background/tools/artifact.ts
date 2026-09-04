@@ -1,15 +1,15 @@
 /**
- * 结果预算与 artifact 信封的公共 helper（协议 §3.5 / §4.4）。
+ * 结果预算与 artifact 信封的公共 helper（协议 §3.5 / §4.5）。
  * snapshot(full) / network(detail) / evaluate / cdp 复用：
  * 超预算时不内联完整内容，改产出 {artifact, preview, sourceChars}，
  * 由 daemon 落盘并改写为客户端信封。
  *
  * preview 是「明示的预览文本」：内容是完整结果的前缀裁剪，
- * 尾部带显式截断标记，绝不伪装成合法 JSON（协议 §4.4）。
+ * 尾部带显式截断标记，绝不伪装成合法 JSON（协议 §4.5）。
  */
 import type { ArtifactEnvelope } from '../../shared/messages';
 
-/** 内联结果预算硬上限（协议 §4.3/§4.4）。 */
+/** 内联结果预算硬上限（协议 §4.3/§4.5）。 */
 export const INLINE_MAX_CHARS = 80_000;
 /** 结果预算参数（evaluate/cdp 的 max_chars，network preview）的默认值/预览长度。 */
 export const DEFAULT_PREVIEW_CHARS = 12_000;
@@ -45,7 +45,7 @@ export function makeArtifact(opts: ArtifactOptions): ArtifactEnvelope {
 }
 
 /**
- * 解析 evaluate/cdp 的 max_chars（协议 §4.4：默认 12000，最大 80000）。
+ * 解析 evaluate/cdp 的 max_chars（协议 §4.5：默认 12000，最大 80000）。
  * 协议未给下限，只校验「正整数 ≤ 80000」。
  */
 export function parseResultMaxChars(tool: string, raw: unknown): number {

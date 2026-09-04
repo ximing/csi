@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { dropTabQueue, enqueueTab, tabQueueSize } from './tab-queue';
+import { addTab, fireRemoved, installChrome, resetChromeState } from './test-chrome';
+
+installChrome();
+
+const { dropTabQueue, enqueueTab, tabQueueSize } = await import('./tab-queue');
 
 describe('enqueueTab', () => {
   beforeEach(() => {
+    resetChromeState();
     dropTabQueue(10);
     dropTabQueue(20);
   });
@@ -75,5 +80,14 @@ describe('enqueueTab', () => {
     release();
     await run;
     expect(settled).toBe(true);
+  });
+
+  it('tab 关闭事件兜底清队列：close 瞬时失败后 tab 再死不泄漏尾巴', async () => {
+    addTab({ id: 10 });
+    const run = enqueueTab(10, async () => 'ok');
+    await run;
+    expect(tabQueueSize()).toBe(1);
+    fireRemoved(10);
+    expect(tabQueueSize()).toBe(0);
   });
 });

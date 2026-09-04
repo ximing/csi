@@ -1,5 +1,5 @@
 /**
- * key_type (protocol §4.9): Input.insertText — types raw text into the
+ * key_type (protocol §4): Input.insertText — types raw text into the
  * focused element.
  */
 import type { ToolArgs } from '../../shared/messages';

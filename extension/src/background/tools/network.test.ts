@@ -1,5 +1,5 @@
 /**
- * network 的结果预算测试（协议 §4.4）：
+ * network 的结果预算测试（协议 §4.5）：
  * 每 tab 2000 条 ring buffer + droppedCount、list 的 limit/cursor 分页、
  * detail 的 body_mode=preview|file|full。
  */
@@ -55,7 +55,7 @@ beforeEach(async () => {
   await exec({ cmd: 'start' });
 });
 
-describe('ring buffer（协议 §4.4）', () => {
+describe('ring buffer（协议 §4.5）', () => {
   it('2000 条上限后丢最旧并累计 droppedCount', async () => {
     fireRequests(10, 1, 2001);
     const first = await list({ limit: 500 });
@@ -78,7 +78,7 @@ describe('ring buffer（协议 §4.4）', () => {
   });
 });
 
-describe('list 分页（协议 §4.4）', () => {
+describe('list 分页（协议 §4.5）', () => {
   beforeEach(() => fireRequests(10, 1, 7));
 
   it('limit/cursor 翻页无重复无遗漏', async () => {
@@ -121,7 +121,7 @@ describe('list 分页（协议 §4.4）', () => {
   });
 });
 
-describe('detail body_mode（协议 §4.4）', () => {
+describe('detail body_mode（协议 §4.5）', () => {
   beforeEach(() => {
     fireRequests(10, 1, 1);
     fireDebuggerEvent(10, 'Network.responseReceived', {

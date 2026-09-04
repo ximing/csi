@@ -115,6 +115,7 @@ export class SnapshotTool implements Tool {
       const described = await sendCommand<{
         node?: { backendNodeId?: number; nodeName?: string; frameId?: string };
       }>(tabId, 'DOM.describeNode', { objectId });
+      // 注：CDP 返回的真实字段名是 backendNodeId（下面 else 分支读取的就是它）。
       const node = described.node;
       const nodeName = (node?.nodeName ?? '').toUpperCase();
       if (nodeName === 'IFRAME' || nodeName === 'FRAME') {
@@ -148,7 +149,8 @@ export class SnapshotTool implements Tool {
         axParams,
       ));
     } catch (err) {
-      if (targetFrame?.isolated) throw crossOriginError(targetFrame.url);
+      // 隔离帧到不了这里：frame= 入口经 resolveFrame 已先行抛错（frames.ts），
+      // selector→iframe 入口在 isFrameEntry 之前已对 isolated 抛错。
       if (targetFrame) throw new Error(FRAME_GONE_ERROR);
       throw err;
     }

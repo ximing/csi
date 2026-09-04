@@ -123,6 +123,10 @@ export function deleteTargetState(tabId: number): void {
   stores.delete(tabId);
 }
 
+// 兜底自清：close 工具的瞬时失败路径会刻意保留 refs（tab 还在），tab 随后
+// 被关掉时由这里回收，避免死 tab 的 @e 表泄漏到 SW 重启。
+chrome.tabs.onRemoved.addListener((tabId) => deleteTargetState(tabId));
+
 /**
  * 子帧跨文档导航后只作废该帧的 ref（协议 §4.1：主文档 commit 才提升 epoch）。
  * 顶层 snapshot 里 iframe 内部节点的 ref 不带 frameId，靠 DOM.resolveNode

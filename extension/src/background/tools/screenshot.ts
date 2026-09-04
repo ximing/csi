@@ -1,5 +1,5 @@
 /**
- * screenshot (protocol §4.12): Page.captureScreenshot, optionally clipped to
+ * screenshot (protocol §4): Page.captureScreenshot, optionally clipped to
  * an element's border box or captured beyond the viewport (fullPage). The
  * base64 payload goes back to the daemon, which writes it to disk (protocol §5).
  */

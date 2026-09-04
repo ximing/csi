@@ -1,5 +1,5 @@
 /**
- * click (protocol §4.4): DOM-level el.click() on a CSS selector or @eN ref.
+ * click (protocol §4): DOM-level el.click() on a CSS selector or @eN ref.
  */
 import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';

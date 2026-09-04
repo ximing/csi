@@ -1,5 +1,5 @@
 /**
- * cdp (protocol §4.2 / §4.4): raw CDP passthrough — the escape hatch.
+ * cdp (protocol §4.2 / §4.5): raw CDP passthrough — the escape hatch.
  * 规范化结果序列化后超 max_chars（默认 12000，最大 80000）时转 artifact（§3.5）。
  */
 import type { ToolArgs } from '../../shared/messages';
@@ -25,7 +25,7 @@ export class CdpTool implements Tool {
     const maxChars = parseResultMaxChars(this.name, args.max_chars);
     const serialized = JSON.stringify(data);
     if (serialized.length <= maxChars) return data;
-    // 协议 §4.4：超限转 artifact，不从 JSON 中间裁切后伪装成合法对象。
+    // 协议 §4.5：超限转 artifact，不从 JSON 中间裁切后伪装成合法对象。
     return makeArtifact({
       data: serialized,
       mimeType: 'application/json',

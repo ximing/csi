@@ -1,5 +1,5 @@
 /**
- * close_tab (protocol §4.19): close the session's current *owned* tab.
+ * close_tab (protocol §4): close the session's current *owned* tab.
  * closed:false carries a machine-readable code (§3.4) — not_owned /
  * already_closed / close_failed; the daemon reconciles on code only.
  *
@@ -10,8 +10,7 @@ import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';
 import { ungroupClosedTabs } from '../tab-group';
 import { isOwnedTab, sessionTabIds } from '../session-tabs';
-import { dropTabQueue } from '../tab-queue';
-import { deleteTargetState } from '../refs';
+import { cleanupTabState, cleanupTabStateIfGone } from './close-cleanup';
 
 export class CloseTabTool implements Tool {
   readonly name = 'close_tab';
@@ -33,25 +32,16 @@ export class CloseTabTool implements Tool {
     // Best-effort：内部已吞错，永不 reject，也绝不掩盖 remove 的真实结果。
     await ungroupClosedTabs([tabId], sessionTabIds(args));
 
-    // tab 确认不在了才清 per-tab 状态；close_failed 时 tab 仍在，refs/queue 保留。
-    const cleanup = (): void => {
-      dropTabQueue(tabId);
-      deleteTargetState(tabId);
-    };
-
+    // tab 确认不在了才清 per-tab 状态；close_failed 时 tab 仍在，refs/queue 保留
+    // （不变量见 close-cleanup.ts，与 close_session 共用）。
     try {
       await chrome.tabs.remove(tabId);
-      cleanup();
+      cleanupTabState(tabId);
       return { success: true, closed: true };
     } catch (err) {
       // remove 拒绝分两种：tab 已不在（already_closed，daemon 对账移除）
       // 与瞬时失败 tab 仍在（close_failed，daemon 不得 forget）。
-      const gone = await chrome.tabs.get(tabId).then(
-        () => false,
-        () => true,
-      );
-      if (gone) {
-        cleanup();
+      if (await cleanupTabStateIfGone(tabId)) {
         return { success: true, closed: false, code: 'already_closed', reason: 'tab already closed' };
       }
       const message = err instanceof Error ? err.message : String(err);

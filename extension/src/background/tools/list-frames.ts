@@ -1,5 +1,5 @@
 /**
- * list_frames (protocol §4.21): 当前 tab 的全部帧（含顶层，parentId ""）。
+ * list_frames (protocol §4): 当前 tab 的全部帧（含顶层，parentId ""）。
  */
 import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';

@@ -1,5 +1,5 @@
 /**
- * close_session (protocol §4.20): close every *owned* tab. Never closes a
+ * close_session (protocol §4): close every *owned* tab. Never closes a
  * borrowed user tab, even if it is the current target.
  *
  * tabs.remove 不走 per-tab 队列：它不是页面态操作，per-tab 队列只为串行化
@@ -12,8 +12,7 @@ import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';
 import { ungroupClosedTabs } from '../tab-group';
 import { sessionTabIds } from '../session-tabs';
-import { dropTabQueue } from '../tab-queue';
-import { deleteTargetState } from '../refs';
+import { cleanupTabState, cleanupTabStateIfGone } from './close-cleanup';
 
 export class CloseSessionTool implements Tool {
   readonly name = 'close_session';
@@ -28,12 +27,14 @@ export class CloseSessionTool implements Tool {
       tabIds.map(async (id) => {
         try {
           await chrome.tabs.remove(id);
+          cleanupTabState(id);
           return 1;
         } catch {
+          // 与 close_tab 同语义（§3.4）：remove 失败先探测。tab 仍在是瞬时失败，
+          // 不得清 refs/queue——活 tab 的队列尾被删会让在飞任务与新任务并发跑
+          // 同一 tab；tab 已不在才按已关闭清理（不变量见 close-cleanup.ts）。
+          await cleanupTabStateIfGone(id);
           return 0;
-        } finally {
-          dropTabQueue(id);
-          deleteTargetState(id);
         }
       }),
     );

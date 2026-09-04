@@ -1,5 +1,5 @@
 /**
- * evaluate (protocol §4 / §4.4): Runtime.evaluate with awaitPromise:true.
+ * evaluate (protocol §4 / §4.5): Runtime.evaluate with awaitPromise:true.
  * 序列化结果超 max_chars（默认 12000，最大 80000）时转 artifact（§3.5）。
  */
 import type { ToolArgs } from '../../shared/messages';
@@ -40,7 +40,7 @@ export class EvaluateTool implements Tool {
     const maxChars = parseResultMaxChars(this.name, args.max_chars);
     const serialized = JSON.stringify(data);
     if (serialized.length <= maxChars) return data;
-    // 协议 §4.4：超限转 artifact，preview 是截断标记明示的预览文本，不伪装成合法 JSON。
+    // 协议 §4.5：超限转 artifact，preview 是截断标记明示的预览文本，不伪装成合法 JSON。
     return makeArtifact({
       data: serialized,
       mimeType: 'application/json',

@@ -1,5 +1,5 @@
 /**
- * mouse_click (protocol §4.8): trusted-path clicking via
+ * mouse_click (protocol §4): trusted-path clicking via
  * Input.dispatchMouseEvent at the element's box-model center — passes
  * isTrusted checks that DOM-level click() cannot.
  *

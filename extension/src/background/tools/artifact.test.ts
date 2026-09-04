@@ -1,5 +1,5 @@
 /**
- * artifact 信封与预算测试（协议 §3.5 / §4.3 / §4.4）：
+ * artifact 信封与预算测试（协议 §3.5 / §4.3 / §4.5）：
  * snapshot full >80000、evaluate/cdp 超 max_chars 时转 artifact；
  * preview 是明示的预览文本，不伪装成合法 JSON。
  */
@@ -53,7 +53,7 @@ describe('makeArtifact（协议 §3.5）', () => {
   });
 });
 
-describe('evaluate max_chars（协议 §4.4）', () => {
+describe('evaluate max_chars（协议 §4.5）', () => {
   it('未超限正常返回 {type, value}', async () => {
     const restore = stubCdp((method) =>
       method === 'Runtime.evaluate' ? { result: { type: 'string', value: 'hi' } } : undefined,
@@ -109,7 +109,7 @@ describe('evaluate max_chars（协议 §4.4）', () => {
   });
 });
 
-describe('cdp max_chars（协议 §4.2 / §4.4）', () => {
+describe('cdp max_chars（协议 §4.2 / §4.5）', () => {
   it('数组结果包装 {value}，未超限内联', async () => {
     const restore = stubCdp((method) => (method === 'Runtime.getProperties' ? [1, 2, 3] : undefined));
     try {

@@ -1,5 +1,5 @@
 /**
- * list_tabs (protocol §4.18): list owned tabs (`_tabIds` only). Borrowed
+ * list_tabs (protocol §4): list owned tabs (`_tabIds` only). Borrowed
  * current target is a separate `currentTarget` field.
  */
 import type { ToolArgs } from '../../shared/messages';

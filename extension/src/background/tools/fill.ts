@@ -1,5 +1,5 @@
 /**
- * fill (protocol §4.5): set the value of an input/textarea via the native
+ * fill (protocol §4): set the value of an input/textarea via the native
  * setter + input/change events (mode:"value"); for contenteditable use a
  * selection + execCommand('insertText'), falling back to textContent +
  * InputEvent (mode:"contenteditable").
