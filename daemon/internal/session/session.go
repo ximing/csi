@@ -156,6 +156,19 @@ func (m *Manager) Update(name, tool string, data any) {
 			forgetTabLocked(s, s.CurrentTabID)
 		}
 	case "close_session":
+		// remaining 在：把 owned 集替换为仍活着的 tab（部分 close_failed）。
+		// 缺 remaining 且 success：旧扩展 / 全部已关 → 整表清空（协议 §3.4）。
+		if remaining, ok := toIntSlice(d["remaining"]); ok {
+			s.TabIDs = remaining
+			if !containsInt(s.TabIDs, s.CurrentTabID) {
+				s.CurrentTabID = 0
+				s.Borrowed = false
+				if n := len(s.TabIDs); n > 0 {
+					s.CurrentTabID = s.TabIDs[n-1]
+				}
+			}
+			return
+		}
 		if success {
 			s.TabIDs = nil
 			s.CurrentTabID = 0
@@ -261,6 +274,24 @@ func toInt(v any) (int, bool) {
 		return n, true
 	}
 	return 0, false
+}
+
+func toIntSlice(v any) ([]int, bool) {
+	switch s := v.(type) {
+	case []int:
+		return append([]int(nil), s...), true
+	case []any:
+		out := make([]int, 0, len(s))
+		for _, x := range s {
+			n, ok := toInt(x)
+			if !ok || n <= 0 {
+				continue
+			}
+			out = append(out, n)
+		}
+		return out, true
+	}
+	return nil, false
 }
 
 func containsInt(s []int, v int) bool {

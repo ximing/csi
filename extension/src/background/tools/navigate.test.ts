@@ -141,6 +141,56 @@ describe('navigate 加载完成的判定', () => {
 });
 
 describe('navigate URL 规范化与 redirect（不假超时）', () => {
+  it('裸域尾斜杠双向：tab 已是 https://host/ 时请求 https://host 走 reload', async () => {
+    addTab({ id: 10, url: 'https://a.example/' });
+    const pending = new NavigateTool().execute(
+      { url: 'https://a.example', _tabId: 10, _tabIds: [10] },
+      ctx,
+    );
+    await vi.waitFor(() => {
+      expect(debuggerCalls.some((c) => c.method === 'Page.reload')).toBe(true);
+    });
+    fireUpdated(10, { status: 'loading' });
+    fireUpdated(10, { status: 'complete' });
+    await expect(pending).resolves.toMatchObject({ success: true });
+    expect(debuggerCalls.some((c) => c.method === 'Page.navigate')).toBe(false);
+  });
+
+  it('路径尾斜杠不是裸域：tab /foo/ 请求 /foo 走 navigate 而非 reload', async () => {
+    addTab({ id: 10, url: 'https://a.example/foo/' });
+    const pending = new NavigateTool().execute(
+      { url: 'https://a.example/foo', _tabId: 10, _tabIds: [10] },
+      ctx,
+    );
+    await vi.waitFor(() => {
+      expect(debuggerCalls.some((c) => c.method === 'Page.navigate')).toBe(true);
+    });
+    fireUpdated(10, { status: 'loading' }, { id: 10, url: 'https://a.example/foo', status: 'loading' });
+    fireUpdated(10, { status: 'complete' }, { id: 10, url: 'https://a.example/foo', status: 'complete' });
+    await expect(pending).resolves.toMatchObject({ success: true });
+    expect(debuggerCalls.some((c) => c.method === 'Page.reload')).toBe(false);
+  });
+
+  it('路径尾斜杠反向：tab /foo 请求 /foo/，complete 无 loading 也落地（不假超时）', async () => {
+    // Chrome 把 /foo 规范化成 /foo/：若 samePageUrl 单向（actual===requested+'/'），
+    // waitForLoad 把落地 url 当成「没离开 prevUrl」，错过 loading 就烧满 30s。
+    addTab({ id: 10, url: 'https://a.example/foo' });
+    const pending = new NavigateTool().execute(
+      { url: 'https://a.example/foo/', _tabId: 10, _tabIds: [10] },
+      ctx,
+    );
+    await vi.waitFor(() => {
+      expect(debuggerCalls.some((c) => c.method === 'Page.navigate')).toBe(true);
+    });
+    addTab({ id: 10, url: 'https://a.example/foo/', status: 'complete' });
+    fireUpdated(10, { status: 'complete' }, { id: 10, url: 'https://a.example/foo/', status: 'complete' });
+    const res = await Promise.race([
+      pending,
+      new Promise((r) => setTimeout(() => r('LOAD_TIMEOUT'), 1000)),
+    ]);
+    expect(res).toMatchObject({ success: true, url: 'https://a.example/foo/' });
+  });
+
   it('同文档锚点导航：Chrome 规范化裸域补斜杠，url-only 事件即算落地', async () => {
     addTab({ id: 10, url: 'https://a.example/' });
     const pending = new NavigateTool().execute(

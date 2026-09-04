@@ -101,14 +101,15 @@ export class WaitTool implements Tool {
       if (kind === 'text') return await checkText(currentId, value, frameId);
       return await checkSelector(currentId, value, frameId);
     } catch (err) {
-      // ToolError（轮询中途导航导致的 stale_ref 等）是确定性失败，原样上抛，
-      // 不能吞成超时；其余错误按导航途中的瞬时不可用处理，本轮无法判定。
-      if (err instanceof ToolError) throw err;
-      // tab 在轮询中途被关：后续 CDP/tabs 调用抛无 code 裸错，必须立刻归类
-      // stale_target（协议 §3.3/§3.4），不能当瞬时未命中烧满整个 timeout、
-      // 占着该 tab 的 per-tab 队列槽。
+      // tab 已死一律 stale_target（即使 err 已是 unknown_ref 等 ToolError）：
+      // onRemoved 会先清 ref 表，下一轮 consumeRef 抛 unknown_ref，若对
+      // ToolError 直接放行，daemon 收不到 ForgetTab。
       const stale = await asStaleTarget(currentId, session, err);
       if (stale) throw stale;
+      // 活 tab 上的 ToolError（轮询中途导航导致的 stale_ref 等）是确定性失败，
+      // 原样上抛，不能吞成超时。
+      if (err instanceof ToolError) throw err;
+      // 其余错误按导航途中的瞬时不可用处理，本轮无法判定。
       return undefined;
     }
   }
@@ -197,8 +198,11 @@ async function checkSelector(tabId: number, selector: string, frameId?: string):
   let boxModel: { model?: { border?: number[]; content?: number[] } };
   try {
     boxModel = await sendCommand(tabId, 'DOM.getBoxModel', { objectId });
-  } catch {
-    return false;
+  } catch (err) {
+    // 节点无布局 / 已从文档移除 → 未命中（gone:true 下即成功）。
+    // debugger 断开、tab 死亡等必须上抛：吞掉会让 gone:true 假命中。
+    if (isAbsentBoxError(err)) return false;
+    throw err;
   }
   if (!hasPositiveBox(boxModel.model?.border) && !hasPositiveBox(boxModel.model?.content)) {
     return false;
@@ -210,6 +214,11 @@ async function checkSelector(tabId: number, selector: string, frameId?: string):
     returnByValue: true,
   });
   return hidden.result?.value !== true;
+}
+
+function isAbsentBoxError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /could not compute box model|no node with given/i.test(msg);
 }
 
 function hasPositiveBox(quad?: number[]): boolean {

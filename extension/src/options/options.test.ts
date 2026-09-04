@@ -564,6 +564,61 @@ describe('重启流程', () => {
     expect(button$('btn-restart').disabled).toBe(false);
   });
 
+  it('CONNECT 以 {error} 体成功 resolve（非 throw）→ 当重连失败，不得提示已重启成功', async () => {
+    // background CONNECT 失败走 sendResponse({error})，Promise resolve 不 reject。
+    installRoutes({
+      postConfig: jsonResponse({ success: true, data: { restart_required: true } }),
+      healthz: (url) => (url.includes(':20000') ? jsonResponse({}) : jsonResponse({}, 503)),
+    });
+    await importOptions();
+    input$('cfg-port').value = '20000';
+    $('btn-save-config').click();
+    await flush();
+    const chromeObj = (globalThis as { chrome: Record<string, unknown> }).chrome;
+    Object.assign(chromeObj.runtime as Record<string, unknown>, {
+      sendMessage: async (message: unknown): Promise<{ error: string }> => {
+        sentMessages.push(message);
+        return { error: 'connect failed' };
+      },
+    });
+    $('btn-restart').click();
+    await flush();
+    expect($('config-result').className).toBe('result fail');
+    expect($('config-result').textContent).toBe(
+      'daemon 已重启到端口 20000，但扩展重连失败——请再次点击重启重试',
+    );
+    expect(button$('btn-restart').disabled).toBe(false);
+    expect($('btn-restart').hidden).toBe(false);
+  });
+
+  it('CONNECT 失败后 3s 状态轮询离线：重启按钮保持可点（pendingRestartPort 不被冲掉）', async () => {
+    installRoutes({
+      postConfig: jsonResponse({ success: true, data: { restart_required: true } }),
+      healthz: (url) => (url.includes(':20000') ? jsonResponse({}) : jsonResponse({}, 503)),
+    });
+    await importOptions();
+    input$('cfg-port').value = '20000';
+    $('btn-save-config').click();
+    await flush();
+    const chromeObj = (globalThis as { chrome: Record<string, unknown> }).chrome;
+    Object.assign(chromeObj.runtime as Record<string, unknown>, {
+      sendMessage: async (message: unknown): Promise<undefined> => {
+        sentMessages.push(message);
+        throw new Error('Extension context invalidated');
+      },
+    });
+    $('btn-restart').click();
+    await flush();
+    expect($('btn-restart').hidden).toBe(false);
+    expect(button$('btn-restart').disabled).toBe(false);
+    // 旧 daemon 已死：轮询 /status 失败会 lastStatus=null，不得把重启按钮一并禁用。
+    installRoutes({ status: jsonResponse({}, 503) });
+    await vi.advanceTimersByTimeAsync(3000);
+    await flush();
+    expect(button$('btn-restart').disabled).toBe(false);
+    expect($('btn-restart').hidden).toBe(false);
+  });
+
   it('新端口就绪但扩展 CONNECT 失败：提示重连失败、按钮恢复、pendingRestartPort 保留可重试', async () => {
     installRoutes({
       postConfig: jsonResponse({ success: true, data: { restart_required: true } }),

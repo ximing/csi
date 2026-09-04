@@ -194,10 +194,10 @@ export class SnapshotTool implements Tool {
 
     if (mode === 'full') {
       let tree = this.buildTree(tabId, nodes, subtreeRoot, targetFrame?.frameId);
-      // match 只作用于顶层 snapshot（含 selector 限定的顶层子树）；
-      // 进框 snapshot 本期不实现 match 过滤，忽略该参数返回安全超集（协议 §6）。
+      // match 在当前拍到的树上过滤（顶层 / selector 子树 / 进帧都一样，协议 §4.1/§4.3）。
+      // §6「旧扩展忽略 match 返回安全超集」是版本兼容，不是现实现跳过过滤的许可。
       let matches: number | undefined;
-      if (match && !targetFrame) {
+      if (match) {
         const filtered = filterFullTree(tree, match);
         tree = filtered.out;
         matches = filtered.matches;
@@ -254,7 +254,7 @@ export class SnapshotTool implements Tool {
       tabId,
     );
     let matches: number | undefined;
-    if (match && !targetFrame) {
+    if (match) {
       const filtered = filterByMatch(roots, match);
       roots = filtered.out;
       matches = filtered.matches;

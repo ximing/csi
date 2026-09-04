@@ -165,10 +165,11 @@ function formatNode(
   }
 
   const result: CompactNode = { role };
-  if (name) result.name = clipName(name);
+  // name/value 保留完整可访问名称供 match 过滤（协议 §4.3）；YAML 展示层在 formatLine 再裁。
+  if (name) result.name = name;
 
   const value = axString(node.value?.value);
-  if (value) result.value = clipName(value);
+  if (value) result.value = value;
 
   const level = numericProp(node, 'level');
   if (level != null) result.level = level;
@@ -301,7 +302,7 @@ function fold(text: string): string {
 }
 
 export function matchesSpec(node: { role: string; name?: string }, spec: MatchSpec): boolean {
-  if (spec.role && node.role !== fold(spec.role)) return false;
+  if (spec.role && normalizeRole(node.role) !== normalizeRole(spec.role)) return false;
   const name = node.name;
   if (!name) return false;
   return spec.exact ? fold(name) === fold(spec.name) : fold(name).includes(fold(spec.name));
@@ -345,7 +346,7 @@ export function filterByMatch(
 
 function formatLine(node: CompactNode, depth: number): string {
   const parts: string[] = [`${'  '.repeat(depth)}- ${node.role}`];
-  if (node.name) parts.push(JSON.stringify(node.name));
+  if (node.name) parts.push(JSON.stringify(clipName(node.name)));
   if (node.level != null) parts.push(`[level=${node.level}]`);
   if (node.checked === true) parts.push('[checked]');
   else if (node.checked === false) parts.push('[unchecked]');
@@ -357,7 +358,7 @@ function formatLine(node: CompactNode, depth: number): string {
   if (node.src) parts.push(`[src=${node.src}]`);
   if (node.ref) parts.push(`[ref=${node.ref}]`);
   let line = parts.join(' ');
-  if (node.value) line += `: ${JSON.stringify(node.value)}`;
+  if (node.value) line += `: ${JSON.stringify(clipName(node.value))}`;
   return line;
 }
 

@@ -18,14 +18,15 @@ export function staleTargetError(tabId: number, session: string): ToolError {
 
 /**
  * err 若是 tab 死亡导致 → 返回对应的 stale_target ToolError；否则返回 null
- * （已是 ToolError 的确定性业务错误原样放行；tab 仍在的瞬时错误走原有路径）。
+ * （tab 仍在时由调用方处理 ToolError / 瞬时错误）。探测 tabs.get 优先于
+ * err 的类型：tab 已死时即使 err 已是 unknown_ref 等 ToolError，也归一为
+ * stale_target，否则 daemon 收不到 ForgetTab。
  */
 export async function asStaleTarget(
   tabId: number,
   session: string,
-  err: unknown,
+  _err: unknown,
 ): Promise<ToolError | null> {
-  if (err instanceof ToolError) return null;
   try {
     await chrome.tabs.get(tabId);
     return null;

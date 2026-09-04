@@ -103,6 +103,10 @@ function updateSettingsAvailability(): void {
   form.querySelectorAll('input, button').forEach((el) => {
     // env 端口锁不被 3s 轮询冲掉，循环后单独处理
     if (el.id === 'cfg-port' && portEnvLocked) return;
+    // 重启后 CONNECT 失败：旧 daemon 已死，轮询会 lastStatus=null；
+    // 不改 pending 重启按钮的 disabled（click handler 已恢复可点），
+    // 否则提示「再点重启重试」时按钮已被 3s 轮询禁掉。
+    if (el.id === 'btn-restart' && pendingRestartPort !== null) return;
     (el as HTMLInputElement | HTMLButtonElement).disabled = disabled;
   });
   // env 锁以标志位为准；离线时 cfgPort 仍然禁用
@@ -241,7 +245,14 @@ restartButton.addEventListener('click', async () => {
     // 可能已失效：裸 await 的 rejection 会让按钮停在 disabled、UI 停在
     // 「重启中…」、pendingRestartPort 不清，失败在所有界面不可见。
     try {
-      await chrome.runtime.sendMessage({ type: 'CONNECT', url: `ws://127.0.0.1:${newPort}/ws` });
+      const resp = await chrome.runtime.sendMessage({
+        type: 'CONNECT',
+        url: `ws://127.0.0.1:${newPort}/ws`,
+      });
+      // background CONNECT 失败是 sendResponse({error})，Promise resolve 不 throw。
+      if (resp && typeof resp === 'object' && 'error' in resp && (resp as { error?: unknown }).error) {
+        throw new Error(String((resp as { error: unknown }).error));
+      }
       pendingRestartPort = null;
       restartButton.hidden = true;
       showConfigResult('restartOk', true, String(newPort));

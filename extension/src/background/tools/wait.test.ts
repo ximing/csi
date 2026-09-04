@@ -121,6 +121,26 @@ describe('wait 轮询期间 tab 死亡（协议 §3.3/§3.4）', () => {
     });
     expect(Date.now() - started).toBeLessThan(2000);
   });
+
+  it('@e 轮询中途 tab 被关（onRemoved 清 ref 表）→ stale_target，不是 unknown_ref', async () => {
+    // consumeRef 在 execute 开头已成功；onRemoved 清掉 ref 后下一轮
+    // resolveRefNode 抛 unknown_ref（ToolError）。若 asStaleTarget 对
+    // ToolError 直接放行，daemon 收不到 ForgetTab。
+    refs.assignRef(10, 111, 'button', 'A');
+    restoreCdp = stubCdp({
+      'DOM.resolveNode': () => ({}), // 节点解析为空 → 未命中，继续轮询
+    });
+    const pending = new WaitTool().execute(
+      { selector: '@e1', timeout_ms: 5000, interval_ms: 50, _session: 's' },
+      ctx,
+    );
+    await new Promise((r) => setTimeout(r, 80));
+    fireRemoved(10);
+    await expect(pending).rejects.toMatchObject({
+      code: 'stale_target',
+      details: { tabId: 10, session: 's' },
+    });
+  });
 });
 
 describe('wait 条件选择与参数校验（协议 §4）', () => {
@@ -303,7 +323,9 @@ describe('wait text 条件（协议 §4）', () => {
       ctx,
     )) as { success: boolean; waitedMs: number };
     expect(res.success).toBe(true);
-    expect(res.waitedMs).toBeGreaterThanOrEqual(50);
+    // 断言轮询了第二轮，而不是墙钟 ≥ interval：setTimeout(50) 可能早 1ms 触发。
+    expect(calls).toBe(2);
+    expect(res.waitedMs).toBeGreaterThanOrEqual(0);
   });
 
   it('超时后取 last url 时 tab 已被关 → last url 空串', async () => {
@@ -391,17 +413,29 @@ describe('wait CSS selector 条件（协议 §4）', () => {
     expect(seenContextId).toBe(9);
   });
 
-  it('DOM.getBoxModel 抛错 → 未命中（gone:true 成功）', async () => {
+  it('DOM.getBoxModel 节点无布局 → 未命中（gone:true 成功）', async () => {
     restoreCdp = stubCdp({
       'Runtime.evaluate': () => ({ result: { objectId: 'o1' } }),
       'DOM.getBoxModel': () => {
-        throw new Error('node is gone');
+        throw new Error('Could not compute box model.');
       },
     });
     const res = (await new WaitTool().execute({ selector: '#btn', gone: true }, ctx)) as {
       success: boolean;
     };
     expect(res.success).toBe(true);
+  });
+
+  it('gone:true 但 getBoxModel 是 debugger 断开 → 不假命中成功', async () => {
+    restoreCdp = stubCdp({
+      'Runtime.evaluate': () => ({ result: { objectId: 'o1' } }),
+      'DOM.getBoxModel': () => {
+        throw new Error('Debugger is not attached');
+      },
+    });
+    await expect(
+      new WaitTool().execute({ selector: '#btn', gone: true, timeout_ms: 300, interval_ms: 50 }, ctx),
+    ).rejects.toThrow(/timed out after 300ms/);
   });
 
   it('box 全零（不可见）→ 未命中（gone:true 成功）', async () => {

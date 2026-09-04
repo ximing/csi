@@ -72,6 +72,19 @@ describe('resolveRefNode', () => {
     expect(node.objectId).toBeUndefined();
   });
 
+  it('resolveNode 拒绝「Node with given id does not belong to the document」→ objectId 为空', async () => {
+    // Chromium 另一路死节点文案，不含 "no node with given"；过窄的正则会把它
+    // 当 debugger 错上抛，click/fill 拿不到 stale_ref 引导重拍。
+    refs.assignRef(10, 222, 'link', 'Home');
+    stub({
+      'DOM.resolveNode': () => {
+        throw new Error('Node with given id does not belong to the document');
+      },
+    });
+    const node = await element.resolveRefNode('click', '@e1', 10);
+    expect(node.objectId).toBeUndefined();
+  });
+
   it('resolveNode 拒绝但 tab 本身已死 → 不吞，raw 错上抛给 registry 归 stale_target', async () => {
     refs.assignRef(10, 222, 'link', 'Home');
     // tab 已死但 onRemoved 尚未送达（refs 还没被 frames.ts 的监听清掉）的竞态窗口

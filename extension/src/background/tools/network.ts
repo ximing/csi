@@ -19,6 +19,8 @@ interface CapturedRequest {
   mimeType?: string;
   completed?: boolean;
   timestamp?: number;
+  /** 写入时分配的单调序号，list cursor 按这个定位，不受 ring 溢出影响。 */
+  seq: number;
 }
 
 /** 每 tab 捕获表上限（协议 §4.5）。 */
@@ -29,6 +31,7 @@ const MAX_LIST_LIMIT = 500;
 const capturingTabIds = new Set<number>();
 const requestsByTab = new Map<number, Map<string, CapturedRequest>>();
 const droppedByTab = new Map<number, number>();
+const seqByTab = new Map<number, number>();
 let eventListenerRegistered = false;
 
 function requestsFor(tabId: number): Map<string, CapturedRequest> {
@@ -45,27 +48,32 @@ export function resetNetworkState(): void {
   capturingTabIds.clear();
   requestsByTab.clear();
   droppedByTab.clear();
+  seqByTab.clear();
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   capturingTabIds.delete(tabId);
   requestsByTab.delete(tabId);
   droppedByTab.delete(tabId);
+  seqByTab.delete(tabId);
 });
 
 /** 写入一条新请求；表满时丢最旧并累计 droppedCount（协议 §4.5）。 */
-function recordRequest(tabId: number, entry: CapturedRequest): void {
+function recordRequest(tabId: number, entry: Omit<CapturedRequest, 'seq'>): void {
   const table = requestsFor(tabId);
-  if (table.has(entry.requestId)) {
-    table.set(entry.requestId, entry); // 同 requestId 重发（重定向等）：原位更新
+  const existing = table.get(entry.requestId);
+  if (existing) {
+    table.set(entry.requestId, { ...entry, seq: existing.seq }); // 同 requestId 重发：原位更新、序号不变
     return;
   }
+  const seq = seqByTab.get(tabId) ?? 0;
+  seqByTab.set(tabId, seq + 1);
   if (table.size >= CAPTURE_MAX) {
     const oldest = table.keys().next().value!;
     table.delete(oldest);
     droppedByTab.set(tabId, (droppedByTab.get(tabId) ?? 0) + 1);
   }
-  table.set(entry.requestId, entry);
+  table.set(entry.requestId, { ...entry, seq });
 }
 
 function registerEventListener(): void {
@@ -135,6 +143,7 @@ export class NetworkTool implements Tool {
   private async start(tabId: number): Promise<unknown> {
     requestsByTab.set(tabId, new Map());
     droppedByTab.set(tabId, 0);
+    seqByTab.set(tabId, 0);
     capturingTabIds.add(tabId);
     registerEventListener();
     await sendCommand(tabId, 'Network.enable');
@@ -156,9 +165,10 @@ export class NetworkTool implements Tool {
     const cursor = parseCursor(rawCursor);
     let requests = [...requestsFor(tabId).values()];
     if (filter) requests = requests.filter((r) => r.url.includes(filter));
-    // cursor 是过滤后序列表里的下标（字符串），驱动方一页页翻即可（协议 §4.5）。
-    const page = requests.slice(cursor, cursor + limit);
-    const next = cursor + limit < requests.length ? String(cursor + limit) : undefined;
+    // cursor 是捕获表单调序号（协议 §4.5）：ring 溢出后续页仍从该序号之后继续。
+    const from = requests.filter((r) => r.seq >= cursor);
+    const page = from.slice(0, limit);
+    const next = from.length > limit ? String(page[page.length - 1]!.seq + 1) : undefined;
     return {
       requests: page.map((r) => ({
         requestId: r.requestId,

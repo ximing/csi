@@ -144,7 +144,8 @@ export async function dispatchTool(name: string, args: ToolArgs): Promise<unknow
       } catch (err) {
         // tool.execute 执行期 tab 被关：CDP/tabs API 抛的是无 code 裸错，
         // daemon 只认 stale_target 才 ForgetTab（协议 §3.3/§3.4），这里统一归类。
-        // 已是 ToolError 的业务错误（stale_ref 等）由 asStaleTarget 原样放行。
+        // asStaleTarget 先探测 tabs.get：tab 已死即使 err 已是 unknown_ref
+        // 也归一为 stale_target；活 tab 上的 ToolError 原样上抛。
         const stale = await asStaleTarget(tabId, session, err);
         if (stale) throw stale;
         throw err;

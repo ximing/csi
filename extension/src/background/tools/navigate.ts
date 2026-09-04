@@ -13,9 +13,12 @@ import { asStaleTarget, staleTargetError } from '../stale-target';
 
 const LOAD_TIMEOUT_MS = 30_000;
 
-/** Chrome 会给裸域补尾斜杠；sameUrl / 探测命中共用同一判定。 */
+/** Chrome 会给裸域补尾斜杠（https://host ↔ https://host/）；路径尾斜杠不是这种规范化。 */
 function samePageUrl(actual: string, requested: string): boolean {
-  return actual === requested || actual === `${requested}/`;
+  if (actual === requested) return true;
+  const bareOrigin = (u: string) => /^https?:\/\/[^/?#]+\/?$/i.test(u);
+  if (!bareOrigin(actual) || !bareOrigin(requested)) return false;
+  return actual.replace(/\/$/, '') === requested.replace(/\/$/, '');
 }
 
 interface WaitForLoadOptions {
@@ -173,7 +176,10 @@ export class NavigateTool implements Tool {
       ) => {
         if (updatedTabId !== tabId) return;
         if (changeInfo.status === 'loading') armed = true;
-        if (urlChangedAway(changeInfo.url)) {
+        // changeInfo.url 可能缺省（只带 status:'complete'），落地判定也看 tab.url：
+        // /foo → /foo/ 这类规范化 complete 若不带 url 字段，单向 samePageUrl 会把
+        // 落地当成「没离开 prevUrl」，错过 loading 就烧满 30s。
+        if (urlChangedAway(changeInfo.url) || urlChangedAway(tab.url)) {
           armed = true;
           // 同文档导航（锚点/history API）没有 complete 事件，tab 保持 complete，
           // url 已偏离 prevUrl 即本次导航落地。

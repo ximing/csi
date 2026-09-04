@@ -119,6 +119,18 @@ describe('list 分页（协议 §4.5）', () => {
     expect(page.requests.map((r) => r.requestId)).toEqual(['img1']);
     expect(page.nextCursor).toBeUndefined();
   });
+
+  it('翻页期间 ring 溢出不得跳过未读行', async () => {
+    fireRequests(10, 1, 2000);
+    const p1 = await list({ limit: 50 });
+    expect(p1.requests[0]!.requestId).toBe('r1');
+    expect(p1.requests[49]!.requestId).toBe('r50');
+    expect(p1.nextCursor).toBe('50');
+    fireRequests(10, 2001, 2010); // 丢最旧 r1–r10
+    const p2 = await list({ limit: 50, cursor: p1.nextCursor });
+    expect(p2.requests[0]!.requestId).toBe('r51');
+    expect(p2.droppedCount).toBe(10);
+  });
 });
 
 describe('detail body_mode（协议 §4.5）', () => {

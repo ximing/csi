@@ -28,17 +28,22 @@ export class CloseSessionTool implements Tool {
         try {
           await chrome.tabs.remove(id);
           cleanupTabState(id);
-          return 1;
+          return { closed: 1 as const };
         } catch {
           // 与 close_tab 同语义（§3.4）：remove 失败先探测。tab 仍在是瞬时失败，
           // 不得清 refs/queue——活 tab 的队列尾被删会让在飞任务与新任务并发跑
           // 同一 tab；tab 已不在才按已关闭清理（不变量见 close-cleanup.ts）。
-          await cleanupTabStateIfGone(id);
-          return 0;
+          const gone = await cleanupTabStateIfGone(id);
+          return gone ? { closed: 0 as const } : { closed: 0 as const, remaining: id };
         }
       }),
     );
-    const closed = results.reduce<number>((a, b) => a + b, 0);
+    const closed = results.reduce<number>((a, r) => a + r.closed, 0);
+    const remaining = results.flatMap((r) => (r.remaining != null ? [r.remaining] : []));
+    // remaining 非空：daemon 把 owned 集替换为仍活着的 id，不得整表清空（协议 §3.4）。
+    if (remaining.length > 0) {
+      return { success: true, closed, remaining, code: 'close_failed' };
+    }
     return { success: true, closed };
   }
 }

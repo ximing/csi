@@ -227,7 +227,8 @@ describe('renderYaml sourceChars（协议 §4.3）', () => {
     expect(out.truncated).toBe(true);
     expect(out.yaml.startsWith('- text "xxxx')).toBe(true);
     expect(out.yaml).toContain('chars omitted');
-    expect(out.sourceChars).toBe(200 + '- text ""'.length + 1);
+    // name 在 YAML 展示层裁到 120（119 + 省略号），sourceChars 是裁剪后、max_chars 截断前的规模。
+    expect(out.sourceChars).toBe(120 + '- text ""'.length + 1);
   });
 });
 
@@ -496,12 +497,18 @@ describe('matchesSpec（协议 §4.3）', () => {
   });
 
   it('role 大小写不敏感、name case-fold 比较', () => {
-    // spec.role 做 case-fold；node.role 原样比较（compact 输出的 role 已是小写）
     expect(matchesSpec({ role: 'button', name: 'GO' }, { role: 'BUTTON', name: 'go', exact: true })).toBe(
       true,
     );
     expect(matchesSpec({ role: 'Button', name: 'go' }, { role: 'button', name: 'go', exact: true })).toBe(
-      false,
+      true,
+    );
+    // full 树保留 AX 原角色 StaticText；compact 归一成 text。两侧都要命中。
+    expect(matchesSpec({ role: 'StaticText', name: 'Hi' }, { role: 'text', name: 'Hi', exact: true })).toBe(
+      true,
+    );
+    expect(matchesSpec({ role: 'text', name: 'Hi' }, { role: 'StaticText', name: 'Hi', exact: true })).toBe(
+      true,
     );
   });
 

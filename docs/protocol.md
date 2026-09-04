@@ -234,7 +234,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - `navigate`：**只复用 owned 当前 tab**（`_tabId ∈ _tabIds` 且 tab 仍在且不是 `chrome://`/`edge://`）。当前目标为 borrowed、`newTab:true`、无 owned 可复用、或处于内部页时，一律 `tabs.create` 新 owned tab（`active:false`），**不得** `Page.navigate` / `reload` 用户 tab，不得把用户 tab 拉进 session 分组。随后当前目标切到这个新 owned tab。
 - `find_tab`：默认只在 `_tabIds` 内按 URL 域名匹配；`active:true` 时选用户正在前台浏览、且 URL 匹配的标签。命中非 owned → `borrowed:true`（不拉入分组，但是当前目标）；命中 owned → `borrowed:false`。
 - `close_tab`：当前目标 **不在** `_tabIds`（含 `_tabId === 0`）时返回 `{success:true, closed:false, code:"not_owned"}`，不关 tab、不改 owned 集。`_tabId ∈ _tabIds` 时关闭该 tab（即使 `_borrowed` 误为 true），成功返回 `{success:true, closed:true}`。`closed:false` 时必带机器可读 `code`：`not_owned`（borrowed 或无目标，不动作）、`already_closed`（tab 已不存在，daemon 将其移出 owned 集）、`close_failed`（关闭动作失败且 tab 仍在，daemon **不得**改动 owned 集）。`reason` 仅为人类可读说明；daemon 对账只看 `closed` 与 `code`，**不**做英文字符串匹配。
-- `close_session`：只关闭 `_tabIds`（owned）；即使当前目标是 borrowed，也只清 session 状态，不关用户 tab。空 `_tabIds` + 非零 `_tabId` 不得关掉那个 `_tabId`。
+- `close_session`：只关闭 `_tabIds`（owned）；即使当前目标是 borrowed，也只清 session 状态，不关用户 tab。空 `_tabIds` + 非零 `_tabId` 不得关掉那个 `_tabId`。返回 `{success, closed, remaining?, code?}`：`closed` 是本次 `tabs.remove` 成功的数量（已不存在的 tab 不计入）。若仍有 owned tab 活着（关闭动作失败），带 `remaining`（仍在的 tabId 列表）与 `code:"close_failed"`；daemon 把 owned 集**替换为** `remaining`，当前目标若不在其中则回退到 `remaining` 的最后一个或清空——**不得**把仍活着的 tab 移出 owned。若全部 owned 已不在：省略 `remaining`，daemon 在 `success` 时清空 owned 与 current（与旧扩展兼容）。
 - `list_tabs.tabs` 只列 owned。当前目标为 borrowed 时增加 `currentTarget:{tabId,borrowed:true,url,title}`，不得把 borrowed 混入 `tabs`。
 - 标签分组：`navigate` **新建 owned 标签**时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。不得对 borrowed tab 分组。
 
@@ -292,7 +292,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 | 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
 | 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}], currentTarget?}` | `tabs` 仅 owned；borrowed 当前目标走独立的 `currentTarget` |
 | 19 | `close_tab` | — | `{success, closed, code?, reason?}` | 关当前 **owned** 标签；`closed:false` 时 `code` ∈ `not_owned`/`already_closed`/`close_failed`（§3.4），daemon 仅对 `already_closed` 移出 owned 集 |
-| 20 | `close_session` | — | `{success, closed}` | 关 session 全部标签 |
+| 20 | `close_session` | — | `{success, closed, remaining?, code?}` | 关 session 全部 owned 标签；仍有活 tab 时 `remaining` + `code:"close_failed"`（§3.4） |
 | 21 | `list_frames` | — | `{success, frames:[{frameId,parentId,url,name,isolated}]}` | 含顶层帧（`parentId` 为 `""`）。`isolated:true` 的帧本期进不去；无 CDP frameId 的 isolated 帧用 `isolated:<url>` 占位。不含 targetId |
 
 ### 4.1 iframe 与 frame 参数（0.6.0 起）
@@ -301,7 +301,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - 匹配 0 个 → `iframe: no frame matching "<value>"`；≥2 个 → `iframe: multiple frames match "<value>": <url1>, <url2>, …`（最多 5 个）。
 - 命中帧 isolated → `iframe: cross-origin frame "<url>" is not supported yet. If it is a full page, navigate to its URL.` 禁止返回成功空树。
 - 同域帧已卸载 / context 失效 → `iframe: frame is gone; run snapshot again`。
-- 进框 snapshot 返回 `{url, title, mode, chars, source_chars, returned_chars, matches?, truncated, tree}`，`url`/`title` 用该帧的（title 没有就 `""`），`max_chars` 作用在该帧 YAML 上。只下一层。
+- 进框 snapshot 返回 `{url, title, mode, chars, source_chars, returned_chars, matches?, truncated, tree}`，`url`/`title` 用该帧的（title 没有就 `""`），`max_chars` 作用在该帧 YAML 上。`match` 在该帧树上过滤，与顶层相同（§4.3）。只下一层。
 - ref 表：按 tab 分区；`RefEntry` 加可选 `frameId`（空 = 顶层）与 `documentEpoch`。整页 snapshot 与非 iframe 的 selector 子树 → 只 reset **该 tab**（`@e1` 起）；进帧 snapshot → 不 reset，序号续编，父页旧 `@e` 保留。主文档 commit / reload / 关该 tab → 只影响该 tab。主文档 commit 提升该 tab 的 `documentEpoch`；消费 `@e` 时 epoch 不一致 → `stale_ref`。不同 tab 允许相同 `@e` 编号。任意其它 tab 关闭不得清空本 tab 的 ref。
 - `frame` 在八个工具上（snapshot/click/fill/evaluate/mouse_click/wait/hover/screenshot）：`@e` 忽略 `frame`（以 ref 表 frameId 为准）；CSS / evaluate 的 `code` 无 `frame` 在顶层、有 `frame` 在该帧（跨域走跨域错误）。
 - `screenshot`：`fullPage` 与 `selector` 仍互斥；`fullPage + frame` clip 到该 iframe 元素在父页视口里的可见盒（不是子文档完整滚动高度）。
@@ -410,7 +410,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 
 **network list**：
 
-- `limit`(int，可选，默认 50，最大 500)；`cursor`(string，可选)为续页游标；返回 `nextCursor`(string，耗尽时省略)。
+- `limit`(int，可选，默认 50，最大 500)；`cursor`(string，可选)为续页游标；返回 `nextCursor`(string，耗尽时省略)。游标是捕获表里的稳定序号，不是「当前过滤数组下标」：ring buffer 溢出丢最旧后，续页从该序号之后仍在的记录继续，不得跳过未读行。
 - 每个 tab 的捕获表为最多 2000 条的 ring buffer：溢出丢最旧记录，并在 list 结果中累计返回 `droppedCount`(int)。
 
 **network detail**：

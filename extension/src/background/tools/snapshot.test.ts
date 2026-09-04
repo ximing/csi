@@ -258,6 +258,18 @@ describe('match（协议 §4.3）', () => {
     // “Cancel”“Delete”×2 都含 “el”。
     expect(sub.matches).toBe(3);
   });
+
+  it('compact 超长 name 的 exact match 按完整可访问名称，不按 YAML 裁剪后的 119+省略号', async () => {
+    restore();
+    const longName = 'N'.repeat(200);
+    restore = stubNodes([
+      { nodeId: 'root', role: { value: 'RootWebArea' }, name: { value: 'P' }, childIds: ['b1'] },
+      { nodeId: 'b1', role: { value: 'button' }, name: { value: longName }, backendDOMNodeId: 1 },
+    ]);
+    const res = await snap({ match: { name: longName, exact: true } });
+    expect(res.matches).toBe(1);
+    expect(res.tree).toContain(`${'N'.repeat(119)}…`);
+  });
 });
 
 describe('max_chars 截断（协议 §4.3）', () => {
@@ -432,6 +444,31 @@ describe('full 模式（协议 §4.3 JSON 树）', () => {
     ]);
   });
 
+  it('full + match.role 大小写不敏感（AX 原角色 Button / StaticText）', async () => {
+    restore();
+    restore = stubCdp(
+      topHandlers([
+        { nodeId: 'root', role: { value: 'RootWebArea' }, name: { value: 'P' }, childIds: ['b1', 't1'] },
+        { nodeId: 'b1', role: { value: 'Button' }, name: { value: 'Go' }, backendDOMNodeId: 101 },
+        { nodeId: 't1', role: { value: 'StaticText' }, name: { value: 'Hi' } },
+      ]),
+    );
+    const byButton = (await new SnapshotTool().execute(
+      { mode: 'full', match: { role: 'button', name: 'Go' } },
+      ctx,
+    )) as unknown as FullResult;
+    expect(byButton.matches).toBe(1);
+    expect(byButton.tree).toEqual([{ role: 'Button', name: 'Go' }]);
+
+    refs.deleteTargetState(10);
+    const byText = (await new SnapshotTool().execute(
+      { mode: 'full', match: { role: 'text', name: 'Hi' } },
+      ctx,
+    )) as unknown as FullResult;
+    expect(byText.matches).toBe(1);
+    expect(byText.tree).toEqual([{ role: 'StaticText', name: 'Hi' }]);
+  });
+
   it('full + selector：命名根节点 → 单元素数组', async () => {
     restore();
     const nodes = [
@@ -600,10 +637,9 @@ describe('selector 指向 iframe / frame（协议 §4.1 进帧入口）', () => 
     expect(res.title).toBe('Embed Title');
     expect(res.tree).toBe('- button "In Frame" [ref=@e1]\n');
 
-    // 进帧 snapshot 不做 match 过滤（协议 §6：忽略该参数返回安全超集），
-    // 且 refs 不 reset（同帧两次 snapshot 追加编号）。
+    // 进帧 snapshot 同样做 match 过滤（协议 §4.1/§4.3）；refs 不 reset（追加编号）。
     const res2 = await snap({ selector: '#f', match: { name: 'In Frame' } });
-    expect(res2.matches).toBeUndefined();
+    expect(res2.matches).toBe(1);
     expect(res2.tree).toBe('- button "In Frame" [ref=@e2]\n');
   });
 

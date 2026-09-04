@@ -15,6 +15,13 @@ export interface ResolvedRefNode {
  * consumeRef（unknown_ref/stale_ref 照旧抛 ToolError）+ DOM.resolveNode。
  * 节点已不在文档中（同文档移除、帧已卸载）时不抛，objectId 为空，语义由调用方定。
  */
+/** Blink InspectorDOMAgent::resolveNode 的死节点文案。 */
+export function isDeadNodeError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  // "No node with given id found" | "Node with given id does not belong to the document"
+  return /node with given/i.test(msg);
+}
+
 export async function resolveRefNode(
   toolName: string,
   selector: string,
@@ -32,7 +39,7 @@ export async function resolveRefNode(
     backendNodeId: entry.backendDOMNodeId,
   }).catch(async (err): Promise<{ object?: { objectId?: string } }> => {
     await chrome.tabs.get(tabId); // tab 已死则这里抛 raw 错，交给出口归 stale_target
-    if (err instanceof Error && /no node with given/i.test(err.message)) return {};
+    if (isDeadNodeError(err)) return {};
     throw err;
   });
   return { objectId: resolved.object?.objectId, entry };

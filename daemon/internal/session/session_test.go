@@ -133,6 +133,40 @@ func TestCloseTabAlreadyClosedForgets(t *testing.T) {
 }
 
 // close_failed：关闭动作失败、tab 仍开着，绝不能把它移出 owned 集（协议 §3.4）。
+func TestCloseSessionRemainingKeepsLiveTabs(t *testing.T) {
+	t.Parallel()
+	m := NewManager()
+	m.Update("s", "navigate", map[string]any{"success": true, "tabId": float64(10)})
+	m.Update("s", "navigate", map[string]any{"success": true, "tabId": float64(11)})
+	m.Update("s", "close_session", map[string]any{
+		"success":   true,
+		"closed":    float64(0),
+		"remaining": []any{float64(10), float64(11)},
+		"code":      "close_failed",
+	})
+	snap := m.Snapshot("s")
+	if !reflect.DeepEqual(snap.TabIDs, []int{10, 11}) || snap.CurrentTabID != 11 {
+		t.Fatalf("close_session remaining must keep live tabs, snap = %+v", snap)
+	}
+}
+
+func TestCloseSessionRemainingPartialKeepsLeftover(t *testing.T) {
+	t.Parallel()
+	m := NewManager()
+	m.Update("s", "navigate", map[string]any{"success": true, "tabId": float64(10)})
+	m.Update("s", "navigate", map[string]any{"success": true, "tabId": float64(11)})
+	m.Update("s", "close_session", map[string]any{
+		"success":   true,
+		"closed":    float64(1),
+		"remaining": []any{float64(11)},
+		"code":      "close_failed",
+	})
+	snap := m.Snapshot("s")
+	if !reflect.DeepEqual(snap.TabIDs, []int{11}) || snap.CurrentTabID != 11 {
+		t.Fatalf("partial close_session must keep leftover, snap = %+v", snap)
+	}
+}
+
 func TestCloseTabCloseFailedDoesNotForget(t *testing.T) {
 	t.Parallel()
 	m := NewManager()

@@ -42,7 +42,7 @@ No args → `{success, tabs:[{tabId, url, title, active, groupTitle}], currentTa
 ## Closing — always user-initiated
 
 - `close_tab` → closes the current **owned** tab. On a borrowed target it returns `{closed:false, reason}` and closes nothing.
-- `close_session` → closes the session's **owned** tabs (the whole group) in one call; borrowed user tabs survive.
+- `close_session` → closes the session's **owned** tabs (the whole group) in one call; borrowed user tabs survive. If some owned tabs fail to close they stay in the session (`remaining` + `code:"close_failed"`).
 
 Call either only when the user explicitly asks ("close those", "clear the tabs").
 

@@ -19,6 +19,8 @@ const ctx = { tabId: 0, documentEpoch: 0 };
 interface CloseSessionResult {
   success: boolean;
   closed: number;
+  remaining?: number[];
+  code?: string;
 }
 
 describe('close_session', () => {
@@ -65,7 +67,12 @@ describe('close_session', () => {
         { _tabId: 10, _tabIds: [10], _borrowed: false, _session: 's' },
         ctx,
       )) as CloseSessionResult;
-      expect(result).toEqual({ success: true, closed: 0 });
+      expect(result).toEqual({
+        success: true,
+        closed: 0,
+        remaining: [10],
+        code: 'close_failed',
+      });
     } finally {
       (chrome.tabs as { remove: unknown }).remove = originalRemove;
     }
