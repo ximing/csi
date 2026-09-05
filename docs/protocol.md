@@ -100,6 +100,8 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 `pid` 供 `csi stop` / `csi start` 做身份校验（防 PID 复用误杀）。
 `extension_tools`：扩展握手上报了 `tools` 则为数组，未上报则为 `null`。
 
+当且仅当 daemon 进程环境变量 `CSI_BREW_SERVICE=1` 时，响应多一个字段 `"supervisor": "brew-services"`；否则**省略**该字段（不要发空字符串）。旧客户端忽略未知键。`csi stop` / `csi restart` 看到此字段必须拒绝并提示 `brew services stop|restart csi`；`--force` 同样拒绝。
+
 ### 2.3 `GET /healthz`
 
 返回 `200 OK`，body `ok`。仅用于存活探测。
@@ -138,7 +140,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 
 ### 2.6 `POST /restart`
 
-daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true }` 并优雅退出。新进程从 config.json 读取配置监听（同端口靠 bind 退避重试接管，200ms × 最多 10s）。调用方轮询 `/healthz` 确认新进程就绪。
+daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true }` 并优雅退出。新进程从 config.json 读取配置监听（同端口靠 bind 退避重试接管，200ms × 最多 10s）。调用方轮询 `/healthz` 确认新进程就绪。`supervisor` 为 `brew-services` 时只优雅退出、**不**拉起替代 `serve` 进程，由 Homebrew KeepAlive 拉起新进程读新 config；其它通道保持今天的 spawn + 退出。
 
 ## 3. WebSocket 协议（`/ws`）
 
@@ -206,11 +208,16 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 失败 payload 允许可选 `code` / `details`（与 HTTP 信封一致）。无 `code` 时只发 `{error}`。
 
 - 工具默认超时 **120s**（可用 `POST /config` 修改 `tool_timeout_seconds`，5–600；navigate 内部页面加载超时 30s 由扩展自行处理）。
+- `csi mcp` 转发 `POST /command` 时，其 HTTP 客户端超时为当前生效的 `tool_timeout_seconds` + 10s（读 `GET /config`），不是写死 130s。`/config` 不可达时回退 130s。
 - 扩展收到未知 `type` 时忽略并打日志。
 
 ### 3.4 daemon 注入的 session 内部字段
 
 daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, borrowed: bool, groupTitle: string}`。
+
+**持久化**：daemon 把 `{session → {tabIds, currentTabId, borrowed, groupTitle}}` 写到运行目录 `sessions.json`（与 `config.json` 同级，即 `~/.csi/sessions.json`）。进程启动时加载；文件缺失或损坏则空表启动。加载后的 session 视为刚访问（不立刻 TTL）。
+
+**回收**：24h IdleTTL 与 256 LRU **不得**淘汰仍有 owned tab（`tabIds` 非空）的 session。空 owned 集且未持锁的才可淘汰。LRU 找不到空 session 受害者时跳过淘汰（允许暂时超过 256）。淘汰空 session 仍无副作用。
 
 同一 session 的 `POST /command` 按接收顺序 FIFO 执行完整生命周期（注入 → 调用扩展 → 按返回更新 session）。不同 session 可以并行。
 
@@ -289,7 +296,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 | 14 | `cdp` | `method`*, `params`, `max_chars`(默认 12000，最大 80000) | 规范化后的 CDP 结果（见 §4.2）；序列化结果超 `max_chars` 转 artifact（§3.5/§5） | 命令 params 裸透传 escape hatch；返回不是字面「原始 CDP」。超限语义见 §4.5 |
 | 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
-| 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
+| 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`selector` 为 CSS 或 `@e`（与表头一致）；`@e` 走 ref 表（可在 iframe）；CSS 仍只打顶层文档（本工具无 `frame` 参数）。`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
 | 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}], currentTarget?}` | `tabs` 仅 owned；borrowed 当前目标走独立的 `currentTarget` |
 | 19 | `close_tab` | — | `{success, closed, code?, reason?}` | 关当前 **owned** 标签；`closed:false` 时 `code` ∈ `not_owned`/`already_closed`/`close_failed`（§3.4），daemon 仅对 `already_closed` 移出 owned 集 |
 | 20 | `close_session` | — | `{success, closed, remaining?, code?}` | 关 session 全部 owned 标签；仍有活 tab 时 `remaining` + `code:"close_failed"`（§3.4） |
