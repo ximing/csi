@@ -52,7 +52,7 @@ func New(cfg *daemon.ResolvedConfig, dir string, logger *log.Logger) *Server {
 	hub := ws.New(version.Version, logger)
 	hub.SetDaemonTools(tools.Names())
 	hub.SetToolTimeout(time.Duration(cfg.Values.ToolTimeoutSeconds) * time.Second)
-	sessions := session.NewManager()
+	sessions := session.NewManagerPersist(dir) // 落盘 sessions.json（协议 §3.4）
 	be := backend.NewExtensionBackend(hub)
 	ex := tools.NewExecutor(be, sessions)
 	ex.Inventory = hub

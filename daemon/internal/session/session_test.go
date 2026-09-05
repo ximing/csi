@@ -259,6 +259,82 @@ func TestSessionEvictLRU(t *testing.T) {
 	}
 }
 
+func TestSessionTTLSkipsOwned(t *testing.T) {
+	m := NewManager()
+	now := time.Now()
+	m.Now = func() time.Time { return now }
+	m.Update("owned", "navigate", map[string]any{"success": true, "tabId": float64(10)})
+	now = now.Add(25 * time.Hour)
+	m.Inject("trigger", map[string]any{})
+	found := false
+	for _, n := range m.Names() {
+		if n == "owned" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("有 owned tab 的 session 不得被 IdleTTL 回收（协议 §3.4）")
+	}
+	snap := m.Snapshot("owned")
+	if !reflect.DeepEqual(snap.TabIDs, []int{10}) || snap.CurrentTabID != 10 {
+		t.Fatalf("owned 被 TTL 后状态损坏 snap = %+v", snap)
+	}
+}
+
+func TestSessionLRUSkipsOwned(t *testing.T) {
+	m := NewManager()
+	m.Update("owned", "navigate", map[string]any{"success": true, "tabId": float64(10)})
+	for i := 0; i < MaxSessions-1; i++ {
+		m.Inject(fmt.Sprintf("e%03d", i), map[string]any{})
+	}
+	// owned 是最久未访问，但有 owned tab，不得被选为受害者。
+	m.Inject("overflow", map[string]any{})
+	names := m.Names()
+	foundOwned, foundE000 := false, false
+	for _, n := range names {
+		if n == "owned" {
+			foundOwned = true
+		}
+		if n == "e000" {
+			foundE000 = true
+		}
+	}
+	if !foundOwned {
+		t.Fatal("有 owned tab 的 session 不得被 LRU 淘汰（协议 §3.4）")
+	}
+	if foundE000 {
+		t.Fatal("空 session e000 应被淘汰")
+	}
+	if len(names) > MaxSessions {
+		t.Fatalf("有空受害者时 session 数 %d 超上限", len(names))
+	}
+}
+
+func TestSessionLRUNoEmptyVictimIsNoop(t *testing.T) {
+	m := NewManager()
+	for i := 0; i < MaxSessions; i++ {
+		m.Update(fmt.Sprintf("o%03d", i), "navigate", map[string]any{"success": true, "tabId": float64(i + 1)})
+	}
+	m.Inject("overflow", map[string]any{})
+	names := m.Names()
+	if len(names) != MaxSessions+1 {
+		t.Fatalf("无空受害者时应允许超过 %d, got %d（协议 §3.4）", MaxSessions, len(names))
+	}
+	for i := 0; i < MaxSessions; i++ {
+		want := fmt.Sprintf("o%03d", i)
+		found := false
+		for _, n := range names {
+			if n == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("owned session %s 被误杀", want)
+		}
+	}
+}
+
 func TestSessionEvictSkipsBusy(t *testing.T) {
 	m := NewManager()
 	now := time.Now()
