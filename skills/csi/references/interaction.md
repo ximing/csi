@@ -35,7 +35,7 @@ Interactive elements come with `[ref=@eN]`. Use refs directly with `click` / `fi
 {"action":"send_keys","args":{"keys":"Tab","repeat":3}}
 ```
 
-- `upload` args: `selector`*, `files`* (string[]) → `{success, selector, fileCount, files}`. Attaches the given local paths to a file input (`DOM.setFileInputFiles`). Paths used as-is — project files in scope, not sandboxed to `~/Downloads`.
+- `upload` args: `selector`* (CSS or `@e`), `files`* (string[]) → `{success, selector, fileCount, files}`. Attaches the given local paths to a file input (`DOM.setFileInputFiles`). `@e` can target a file input in an iframe; CSS still hits the top document only (no `frame` arg). Paths used as-is — project files in scope, not sandboxed to `~/Downloads`.
 
 ## wait
 
