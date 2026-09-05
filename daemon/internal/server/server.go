@@ -36,8 +36,12 @@ type Server struct {
 	// OnConfigApplied POST /config 保存成功后回调（如更新日志保留天数）；可为 nil。
 	OnConfigApplied func(daemon.Config)
 
-	// Restarter POST /restart 触发：拉起替代进程并安排本进程退出；nil 表示不支持。
+	// Restarter POST /restart 触发：非 brew 拉起替代进程并安排本进程退出；
+	// brew 通道只安排退出（协议 §2.6）。nil 表示不支持。
 	Restarter func() error
+
+	// Supervisor 非空时 /status 输出该值（协议 §2.2：brew 通道为 brew-services）。
+	Supervisor string
 
 	cfgMu sync.RWMutex
 	cfg   *daemon.ResolvedConfig
@@ -143,6 +147,7 @@ type statusResponse struct {
 	Port               int       `json:"port"`
 	UpdateAvailable    *bool     `json:"update_available,omitempty"`
 	LatestVersion      string    `json:"latest_version,omitempty"`
+	Supervisor         string    `json:"supervisor,omitempty"` // 协议 §2.2：空则省略
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +166,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		UptimeSeconds:      int64(time.Since(s.started).Seconds()),
 		Sessions:           s.Sessions.Names(),
 		Port:               s.Port,
+		Supervisor:         s.Supervisor,
 	}
 	if s.UpdateChecker != nil {
 		if cache := s.UpdateChecker.ReadCache(); cache != nil {
@@ -270,7 +276,7 @@ func (s *Server) handlePostConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, commandResponse{Success: true, Data: map[string]any{"restart_required": restartRequired}})
 }
 
-// handleRestart 触发自重启：Restarter 拉起替代进程并安排本进程退出。
+// handleRestart 触发自重启：Restarter 安排本进程退出（非 brew 会先 spawn）。
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	if s.Restarter == nil {
 		writeJSON(w, commandResponse{Success: false, Error: "restart not supported"})
