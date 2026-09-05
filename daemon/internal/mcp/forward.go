@@ -35,12 +35,58 @@ type commandResponse struct {
 	Details map[string]any  `json:"details"`
 }
 
-func (f *forwarder) httpClient() *http.Client {
+// defaultHTTPTimeout GET /config 不可达或超时值非法/0 时的回退（协议 §3.3：默认 120s + 10s）。
+const defaultHTTPTimeout = 130 * time.Second
+
+// configFetchTimeout GET /config 自身的短超时；失败即回退 defaultHTTPTimeout。
+const configFetchTimeout = 2 * time.Second
+
+// httpTimeout MCP 转发 POST /command 的 HTTP 客户端超时（协议 §3.3）。
+// 为当前 tool_timeout_seconds + 10s；非法/0 回退 130s。
+func httpTimeout(toolTimeoutSec int) time.Duration {
+	if toolTimeoutSec <= 0 {
+		return defaultHTTPTimeout
+	}
+	return time.Duration(toolTimeoutSec+10) * time.Second
+}
+
+func (f *forwarder) httpClient(ctx context.Context) *http.Client {
 	if f.client != nil {
 		return f.client
 	}
-	// 协议 §3.3：工具默认超时 120s，HTTP 侧留余量。
-	return &http.Client{Timeout: 130 * time.Second}
+	// 每次调用读 GET /config，用户改超时后下次即生效（协议 §3.3）。
+	return &http.Client{Timeout: httpTimeout(f.fetchToolTimeoutSec(ctx))}
+}
+
+// fetchToolTimeoutSec 读 GET /config 的 tool_timeout_seconds.value；失败返回 0。
+func (f *forwarder) fetchToolTimeoutSec(ctx context.Context) int {
+	cfgCtx, cancel := context.WithTimeout(ctx, configFetchTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cfgCtx, http.MethodGet, f.baseURL+"/config", nil)
+	if err != nil {
+		return 0
+	}
+	resp, err := (&http.Client{Timeout: configFetchTimeout}).Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return 0
+	}
+	var view struct {
+		ToolTimeoutSeconds struct {
+			Value int `json:"value"`
+		} `json:"tool_timeout_seconds"`
+	}
+	if json.Unmarshal(data, &view) != nil {
+		return 0
+	}
+	return view.ToolTimeoutSeconds.Value
 }
 
 // handler 生成某个工具的 MCP ToolHandler。
@@ -103,7 +149,7 @@ func (f *forwarder) call(ctx context.Context, action string, args map[string]any
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := f.httpClient().Do(req)
+	resp, err := f.httpClient(ctx).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("csi daemon unreachable at %s (%v) — is it running? try `csi start`", f.baseURL, err)
 	}
