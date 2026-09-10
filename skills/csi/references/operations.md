@@ -4,7 +4,7 @@ Read this only when a tool call can't reach the daemon, or the user explicitly a
 
 ## The daemon
 
-The `csi` binary lives at `~/.csi/bin/csi` (Windows: `%USERPROFILE%\.csi\bin\csi.exe`) and serves a local HTTP + WebSocket daemon on `127.0.0.1:10088`. The port can be overridden with the `CSI_PORT` environment variable (the extension's popup / options page must then point at the same port). Persistent settings live in `~/.csi/config.json` and in the extension **Settings** page (click the icon → Settings): port, log retention, tool timeout, reconnect interval. Changing the port requires a daemon restart (`csi restart` or the options-page button).
+The `csi` binary lives at `~/.csi/bin/csi` (Windows: `%USERPROFILE%\.csi\bin\csi.exe`) and serves a local HTTP + WebSocket daemon on `127.0.0.1:10088`. The port can be overridden with the `CSI_PORT` environment variable (the extension's popup / options page must then point at the same port). Persistent settings live in `~/.csi/config.json` and in the extension **Settings** page (click the icon → Settings): port, log retention, tool timeout, reconnect interval, API key. The daemon also ships a built-in admin page at `http://127.0.0.1:10088/admin` (visit it in Chrome) where the user can configure the port, the bind address (LAN exposure), auth on/off and the API key, and restart the daemon. Changing the port or bind address requires a daemon restart (`csi restart` or the admin/options page button).
 
 Directory layout under `~/.csi/`:
 
@@ -12,7 +12,7 @@ Directory layout under `~/.csi/`:
 ~/.csi/
 ├── bin/
 │   └── csi                      # daemon binary
-├── config.json                  # port / log retention / tool timeout
+├── config.json                  # port / bind_host / log retention / tool timeout / auth (mode 0600)
 ├── daemon.pid                   # PID of the running daemon
 └── logs/
     ├── daemon-2026-03-06.log    # one log file per day (local date)
@@ -21,7 +21,7 @@ Directory layout under `~/.csi/`:
 
 Logs roll by day and are pruned automatically (default 3-day retention, 1–30 via Settings) — that's where to look when identifying anomalies from earlier runs.
 
-The daemon binds `127.0.0.1` only — it is never reachable from other machines. There is no authentication in v1; loopback binding is the isolation boundary (this machine vs the network). `screenshot` / `save_as_pdf` write the caller-supplied `path` as-is; prefer an absolute path. `upload` attaches caller-supplied `files` paths as-is (not limited to ~/Downloads).
+By default the daemon binds `127.0.0.1` only and needs no auth: loopback binding is the isolation boundary (this machine vs the network). Optional extras (both default OFF, configured in the admin page or config.json): the bind address can be opened to the LAN (`bind_host`), and API-key auth can be enabled (`auth_enabled` + `api_key` — HTTP calls then need `Authorization: Bearer <key>`, see `http-transport.md`). Opening the bind address **without** enabling auth exposes the user's Chrome to the whole LAN — never suggest doing that. `screenshot` / `save_as_pdf` write the caller-supplied `path` as-is; prefer an absolute path. `upload` attaches caller-supplied `files` paths as-is (not limited to ~/Downloads).
 
 ## Recovery — what to do when a tool call fails
 

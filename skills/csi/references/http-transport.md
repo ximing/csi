@@ -20,7 +20,7 @@ Content-Type: application/json
 
 ## Response envelope
 
-Success and failure both come back as HTTP 200 with a JSON body — **always check `success`, never the HTTP status**:
+Success and failure both come back as HTTP 200 with a JSON body — **always check `success`, never the HTTP status**. The **single exception is HTTP 401**: the daemon's optional API-key auth is on and the request didn't carry a valid key (see "Authentication" below).
 
 ```json
 { "success": true, "data": {...} }
@@ -51,9 +51,25 @@ Uncoded errors: `extension not connected` (see `operations.md`), `unknown tool: 
 - Daemon tool timeout: 120 s default (5–600 s configurable). Any `wait.timeout_ms` must stay below it.
 - `navigate` additionally has a 30 s page-load timeout inside the extension.
 
+## Authentication (optional — only on HTTP 401)
+
+By default the daemon needs no auth headers. If a call returns **HTTP 401** (the only non-200 you can get from `/command`), auth is enabled:
+
+1. Read the key: `cat ~/.csi/config.json` → `api_key` field.
+2. Retry the same request with header `Authorization: Bearer <api_key>`.
+
+```bash
+curl -s -X POST http://127.0.0.1:10088/command \
+  -H "Authorization: Bearer $(jq -r '.api_key' ~/.csi/config.json)" \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"list_tabs","session":"my-task"}'
+```
+
+(No `jq`? Read the file with your own file-read tool and inline the key. On Windows the file is `%USERPROFILE%\.csi\config.json`.) Every daemon HTTP endpoint except `GET /healthz` and `GET /admin` uses the same header.
+
 ## curl — macOS / Linux
 
-Inline JSON is fine:
+Inline JSON is fine (add the `Authorization` header too when auth is on, see above):
 
 ```bash
 curl -s -X POST http://127.0.0.1:10088/command \

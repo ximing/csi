@@ -199,6 +199,9 @@ const OPTIONS_HTML = `
     <option value="60" id="reconcile-60"></option>
     <option value="0" id="reconcile-off"></option>
   </select>
+  <label id="api-key-label" for="api-key"></label>
+  <input id="api-key" type="password">
+  <p id="api-key-note" class="field-note"></p>
   <p id="ext-result" class="result"></p>
   <footer id="version-footer"></footer>
 `;

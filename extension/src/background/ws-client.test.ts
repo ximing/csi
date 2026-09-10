@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { utf8ByteLengthExceeds, WsClient } from './ws-client';
+import { utf8ByteLengthExceeds, withKeyParam, WsClient } from './ws-client';
 
 type Listener = (event?: unknown) => void;
 
@@ -266,5 +266,18 @@ describe('utf8ByteLengthExceeds', () => {
     // 4 个 CJK 字符：4 码元、12 字节。limit=10 → 超；limit=12 → 不超
     expect(utf8ByteLengthExceeds('中'.repeat(4), 10)).toBe(true);
     expect(utf8ByteLengthExceeds('中'.repeat(4), 12)).toBe(false);
+  });
+});
+
+describe('withKeyParam', () => {
+  it('空 key 原样返回（daemon 未开鉴权）', () => {
+    expect(withKeyParam('ws://127.0.0.1:10088/ws', '')).toBe('ws://127.0.0.1:10088/ws');
+  });
+
+  it('附 ?api_key= 并 URL 编码（协议 §3.1）', () => {
+    expect(withKeyParam('ws://127.0.0.1:10088/ws', 'csi-key-0123456789'))
+      .toBe('ws://127.0.0.1:10088/ws?api_key=csi-key-0123456789');
+    expect(withKeyParam('ws://host:1/ws?a=1', 'k+/='))
+      .toBe('ws://host:1/ws?a=1&api_key=k%2B%2F%3D');
   });
 });

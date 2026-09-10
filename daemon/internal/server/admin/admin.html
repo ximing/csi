@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSI daemon 管理页</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --border: #e2e5ea; --text: #1f2328;
+    --muted: #6b7280; --accent: #2563eb; --danger: #dc2626; --warn: #d97706;
+    --ok: #16a34a; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+         font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin-bottom: 20px; font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+          padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 12px; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; font-family: var(--mono); }
+  .row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .row:last-child { margin-bottom: 0; }
+  label { min-width: 150px; color: var(--muted); font-size: 13px; }
+  input[type=text], input[type=number], input[type=password] {
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit;
+    font-family: var(--mono); width: 220px; background: #fff; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+  .hint { font-size: 12px; color: var(--muted); flex-basis: 100%; margin: -6px 0 0 160px; }
+  button { padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: #fff;
+           font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:hover { filter: brightness(0.97); }
+  .banner { border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 13px;
+            display: none; }
+  .banner.red { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; display: block; }
+  .banner.yellow { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; display: block; }
+  #msg { margin-top: 12px; font-size: 13px; min-height: 20px; }
+  #msg.ok { color: var(--ok); } #msg.err { color: var(--danger); }
+  .urlbox { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--border);
+            border-radius: 6px; padding: 8px 10px; word-break: break-all; flex: 1; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
+         background: var(--muted); vertical-align: middle; }
+  .dot.on { background: var(--ok); } .dot.off { background: var(--danger); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>CSI daemon</h1>
+  <div class="sub">内置管理页（协议 §2.8）· <span id="base"></span></div>
+
+  <div id="banner-net" class="banner red"></div>
+  <div id="banner-auth" class="banner yellow"></div>
+
+  <div class="card">
+    <h2>状态</h2>
+    <dl class="kv">
+      <dt>daemon</dt><dd><span id="st-run" class="dot off"></span><span id="st-version">…</span></dd>
+      <dt>运行时长</dt><dd id="st-uptime">…</dd>
+      <dt>扩展连接</dt><dd><span id="st-ext-dot" class="dot off"></span><span id="st-ext">…</span></dd>
+      <dt>会话</dt><dd id="st-sessions">…</dd>
+      <dt>监听</dt><dd id="st-listen">…</dd>
+      <dt>更新</dt><dd id="st-update">…</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>配置</h2>
+    <div class="row"><label for="f-port">端口 (port)</label>
+      <input type="number" id="f-port" min="1" max="65535"> <span id="src-port" class="hint" style="margin:0"></span></div>
+    <div class="row"><label for="f-bind">监听地址 (bind_host)</label>
+      <input type="text" id="f-bind" list="bind-list" placeholder="127.0.0.1">
+      <datalist id="bind-list"><option value="127.0.0.1">仅本机（默认）</option><option value="0.0.0.0">全部网卡（局域网可访问）</option></datalist>
+      <div class="hint">IP 字面量。127.0.0.1 = 仅本机；0.0.0.0 = 全部网卡（局域网可访问）；具体网卡 IP 只监听该地址（本机扩展/CLI 将连不上）。改动需重启。</div></div>
+    <div class="row"><label for="f-logdays">日志保留天数</label>
+      <input type="number" id="f-logdays" min="1" max="30"></div>
+    <div class="row"><label for="f-timeout">工具超时（秒）</label>
+      <input type="number" id="f-timeout" min="5" max="600"></div>
+    <div class="row"><label for="f-auth">鉴权 (auth_enabled)</label>
+      <input type="checkbox" id="f-auth" style="width:16px;height:16px">
+      <div class="hint">开启后 HTTP 请求需带 <code>Authorization: Bearer &lt;key&gt;</code>，扩展 WS 连接需带 <code>?api_key=</code>。默认关闭。</div></div>
+    <div class="row"><label for="f-key">API key</label>
+      <input type="password" id="f-key" placeholder="留空 = 不修改" autocomplete="off">
+      <button type="button" id="btn-gen">生成随机 key</button>
+      <div class="hint">16–128 个可打印 ASCII 字符。已配置：<span id="key-set">…</span>。页面不回传 key 明文；修改需知道当前 key。</div></div>
+    <div class="row">
+      <button type="button" class="primary" id="btn-save">保存</button>
+      <button type="button" id="btn-restart" style="display:none">重启 daemon</button>
+      <span id="restart-hint" style="color:var(--warn);font-size:13px;display:none">端口/监听地址已落盘，重启后生效</span>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <div class="card" id="card-ws" style="display:none">
+    <h2>扩展连接地址</h2>
+    <div class="row"><div class="urlbox" id="ws-url"></div><button type="button" id="btn-copy">复制</button></div>
+    <div class="hint" style="margin:0">鉴权已开启：把上面的地址填进扩展 options 页的 server URL（key 会自动随地址带上），或分别填 URL 与 API Key。</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const KEY_STORE = 'csi_admin_key';
+const msg = (text, ok) => { $('msg').textContent = text; $('msg').className = ok ? 'ok' : 'err'; };
+
+// ---------- 带鉴权的 fetch 封装（协议 §2.7） ----------
+// 401 → 弹输入框存 localStorage → 自动重试一次；仍 401 → 报错。
+async function api(path, opts = {}) {
+  const doCall = () => {
+    const h = { ...(opts.headers || {}) };
+    const k = localStorage.getItem(KEY_STORE);
+    if (k) h['Authorization'] = 'Bearer ' + k;
+    return fetch(path, { ...opts, headers: h });
+  };
+  let res = await doCall();
+  if (res.status === 401) {
+    const k = prompt('daemon 已开启鉴权，请输入 API key：');
+    if (k === null) throw new Error('未输入 API key');
+    localStorage.setItem(KEY_STORE, k);
+    res = await doCall();
+    if (res.status === 401) throw new Error('API key 不正确（HTTP 401）');
+  }
+  return res;
+}
+
+// ---------- 状态轮询 ----------
+function fmtUptime(s) {
+  if (s < 60) return s + ' 秒';
+  if (s < 3600) return Math.floor(s / 60) + ' 分 ' + (s % 60) + ' 秒';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h + ' 时 ' + m + ' 分';
+}
+
+async function refreshStatus() {
+  try {
+    const res = await api('/status');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json(); // /status 返回扁平对象（协议 §2.2），无 data 信封
+    $('st-run').className = 'dot on';
+    $('st-version').textContent = 'v' + d.version + '（运行中）';
+    $('st-uptime').textContent = fmtUptime(d.uptime_seconds);
+    $('st-ext-dot').className = 'dot ' + (d.extension_connected ? 'on' : 'off');
+    $('st-ext').textContent = d.extension_connected
+      ? '已连接（v' + (d.extension_version || '?') + '）'
+      : '未连接';
+    $('st-sessions').textContent = (d.sessions && d.sessions.length) ? d.sessions.join(', ') : '（无）';
+    $('st-listen').textContent = d.bind_host + ':' + d.port;
+    $('st-update').textContent = d.update_available === true
+      ? '有新版本 v' + (d.latest_version || '?') : '最新';
+  } catch (e) {
+    $('st-run').className = 'dot off';
+    $('st-version').textContent = '不可达：' + e.message;
+  }
+}
+
+// ---------- 配置加载 / 保存 ----------
+async function loadConfig() {
+  try {
+    const res = await api('/config');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    $('f-port').value = d.port.value;
+    $('src-port').textContent = '来源：' + d.port.source + (d.port.source === 'env' ? '（被 CSI_PORT 锁定，不可在此修改）' : '');
+    $('f-bind').value = d.bind_host.value;
+    $('f-logdays').value = d.log_retention_days.value;
+    $('f-timeout').value = d.tool_timeout_seconds.value;
+    $('f-auth').checked = d.auth_enabled.value;
+    $('key-set').textContent = d.api_key.set ? '是' : '否';
+    updateBanners();
+  } catch (e) {
+    msg('读取配置失败：' + e.message, false);
+  }
+}
+
+function isLoopback(host) { return host === '127.0.0.1' || host === '::1' || host === '[::1]'; }
+
+function updateBanners() {
+  const net = $('banner-net'), authB = $('banner-auth');
+  const host = $('f-bind').value.trim(), authOn = $('f-auth').checked;
+  if (host && !isLoopback(host) && !authOn) {
+    net.className = 'banner red';
+    net.textContent = '⚠ 局域网暴露且未开鉴权：同一网络内任何设备都能无认证地驱动你的 Chrome（含登录态）、执行任意代码、写任意文件。强烈建议开启鉴权或改回 127.0.0.1。';
+  } else { net.className = 'banner'; }
+  if (host && !isLoopback(host) && authOn) {
+    authB.className = 'banner yellow';
+    authB.textContent = '局域网暴露 + 鉴权已开启：信任域为持有 key 的主体。仍建议仅在可信网络中开启。';
+  } else { authB.className = 'banner'; }
+  const hasKey = !!localStorage.getItem(KEY_STORE);
+  $('card-ws').style.display = authOn && hasKey ? '' : 'none';
+  if (authOn && hasKey) {
+    $('ws-url').textContent = 'ws://' + location.hostname + ':' + ($('f-port').value || 10088)
+      + '/ws?api_key=' + encodeURIComponent(localStorage.getItem(KEY_STORE));
+  }
+}
+
+$('f-bind').addEventListener('input', updateBanners);
+$('f-port').addEventListener('input', updateBanners);
+$('f-auth').addEventListener('change', updateBanners);
+
+$('btn-gen').addEventListener('click', () => {
+  const b = new Uint8Array(24);
+  crypto.getRandomValues(b);
+  const s = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  $('f-key').value = s;
+  $('f-key').type = 'text'; // 生成后可见，方便复制到扩展
+});
+
+$('btn-save').addEventListener('click', async () => {
+  const patch = {};
+  const port = parseInt($('f-port').value, 10);
+  const days = parseInt($('f-logdays').value, 10);
+  const to = parseInt($('f-timeout').value, 10);
+  if (port) patch.port = port;
+  if ($('f-bind').value.trim()) patch.bind_host = $('f-bind').value.trim();
+  if (days) patch.log_retention_days = days;
+  if (to) patch.tool_timeout_seconds = to;
+  patch.auth_enabled = $('f-auth').checked;
+  const key = $('f-key').value;
+  if (key) patch.api_key = key;
+  if (patch.auth_enabled && !key && $('key-set').textContent !== '是') {
+    msg('开启鉴权需要设置 API key：生成或输入一个再保存', false);
+    return;
+  }
+  try {
+    const res = await api('/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    const d = await res.json();
+    if (!d.success) { msg('保存失败：' + d.error, false); return; }
+    $('f-key').value = '';
+    msg('已保存' + (d.data && d.data.restart_required ? '（端口/监听地址需重启生效）' : ''), true);
+    $('btn-restart').style.display = d.data && d.data.restart_required ? '' : 'none';
+    $('restart-hint').style.display = d.data && d.data.restart_required ? '' : 'none';
+    await loadConfig();
+  } catch (e) {
+    msg('保存失败：' + e.message, false);
+  }
+});
+
+$('btn-restart').addEventListener('click', async () => {
+  msg('正在重启…', true);
+  try {
+    const res = await api('/restart', { method: 'POST' });
+    const d = await res.json();
+    if (!d.success) { msg('重启失败：' + d.error, false); return; }
+    // 轮询 /healthz（豁免鉴权，协议 §2.7）确认新进程就绪
+    const deadline = Date.now() + 15000;
+    let up = false;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 400));
+      try {
+        const h = await fetch('/healthz');
+        if (h.ok) { up = true; break; }
+      } catch (e) { /* 尚未就绪 */ }
+    }
+    msg(up ? '重启完成' : 'healthz 15 秒内未就绪，请手动确认', up);
+    if (up) {
+      $('btn-restart').style.display = 'none';
+      $('restart-hint').style.display = 'none';
+      await refreshStatus();
+      await loadConfig();
+    }
+  } catch (e) {
+    msg('重启失败：' + e.message, false);
+  }
+});
+
+$('btn-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('ws-url').textContent); msg('已复制', true); }
+  catch (e) { msg('复制失败，请手动选择复制', false); }
+});
+
+// ---------- 启动 ----------
+$('base').textContent = location.host;
+refreshStatus();
+loadConfig();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>

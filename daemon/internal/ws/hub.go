@@ -5,6 +5,7 @@ package ws
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -74,6 +75,11 @@ type Hub struct {
 	MaxReadBytes     int64         // WS 单消息读上限（协议 §3.2），默认 160MiB
 	WriteTimeout     time.Duration // 单帧写 deadline；0 = 默认 15s。对端卡死时防止全局 writeMu 堵死所有 tool_call 与 ping
 	Logger           *log.Logger
+
+	// AuthFunc 鉴权开关与 key 的读取函数（协议 §2.7）：返回 (required, key)。
+	// nil = 不鉴权（测试默认路径）。每次连接建立时调用，key 轮换即时生效
+	// （在位连接不受影响，断开重连时才再校验）。
+	AuthFunc func() (required bool, key string)
 
 	mu            sync.Mutex
 	conn          *websocket.Conn
@@ -174,6 +180,22 @@ func originAllowed(origin string) bool {
 
 // HandleWS 处理 /ws 端点。首条消息必须是 hello，握手通过后才顶替旧连接。
 func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
+	// 鉴权校验（协议 §2.7）：upgrade 之前拒绝，避免半开连接。
+	// 浏览器 WebSocket 无法设自定义 header，key 走 ?api_key= query。
+	if h.AuthFunc != nil {
+		if required, key := h.AuthFunc(); required {
+			qk := r.URL.Query().Get("api_key")
+			if subtle.ConstantTimeCompare([]byte(qk), []byte(key)) != 1 {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"success": false, "error": "unauthorized", "code": "unauthorized",
+				})
+				return
+			}
+		}
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.Logger.Printf("ws upgrade failed: %v", err)

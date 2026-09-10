@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -45,9 +46,18 @@ func cmdServe() error {
 	logger := log.New(io.MultiWriter(os.Stdout, daily), "", log.LstdFlags)
 	port := cfg.Values.Port
 
-	ln, err := listenWithRetry(fmt.Sprintf("127.0.0.1:%d", port), 10*time.Second, logger) // 协议 §7：仅监听回环
+	// 监听地址可配置（协议 §1）：默认 127.0.0.1，bind_host 可放开到局域网（协议 §7）。
+	addr := net.JoinHostPort(cfg.Values.BindHost, strconv.Itoa(port))
+	ln, err := listenWithRetry(addr, 10*time.Second, logger)
 	if err != nil {
-		return fmt.Errorf("listen 127.0.0.1:%d: %w", port, err)
+		return fmt.Errorf("listen %s: %w", addr, err)
+	}
+	if ip := net.ParseIP(cfg.Values.BindHost); ip != nil && !ip.IsLoopback() {
+		if cfg.AuthRequired() {
+			logger.Printf("WARNING: listening on %s — daemon is reachable from the network; API key auth is ON (trust domain: key holders, see docs/protocol.md §7)", addr)
+		} else {
+			logger.Printf("WARNING: listening on %s — daemon is reachable from the network WITHOUT authentication; anyone on this network can drive your Chrome. Enable auth in http://%s/admin or see docs/protocol.md §7", addr, addr)
+		}
 	}
 
 	if err := daemon.WritePID(dir, os.Getpid()); err != nil {
@@ -79,8 +89,8 @@ func cmdServe() error {
 		return nil
 	}
 
-	logger.Printf("csi %s serving on 127.0.0.1:%d (pid %d, id %s)",
-		version.Version, port, os.Getpid(), id)
+	logger.Printf("csi %s serving on %s (pid %d, id %s)",
+		version.Version, addr, os.Getpid(), id)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -314,10 +324,27 @@ type statusReply struct {
 	PID int `json:"pid"`
 }
 
+// newDaemonGet 构造对 daemon 的 GET 请求；config.json 配了 api_key 时
+// 自动附带鉴权头（协议 §2.7）——CLI 与 daemon 同机读同一配置，用户无感。
+func newDaemonGet(url string) (*http.Request, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if key := daemon.EffectiveAPIKey(); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	return req, nil
+}
+
 // fetchStatus GET /status（2s 超时）；不可达或非 200 返回错误。
 func fetchStatus(port int) (*statusReply, error) {
+	req, err := newDaemonGet(fmt.Sprintf("http://127.0.0.1:%d/status", port))
+	if err != nil {
+		return nil, err
+	}
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/status", port))
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -378,8 +405,12 @@ func decideStart(pid int, st *statusReply, alive bool) startDecision {
 func cmdStatus() error {
 	port := daemon.Port()
 	url := fmt.Sprintf("http://127.0.0.1:%d/status", port)
+	req, err := newDaemonGet(url)
+	if err != nil {
+		return err
+	}
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(url)
+	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("csi not running")
 		return nil

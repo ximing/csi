@@ -24,6 +24,8 @@ function applyStaticTexts(): void {
   document.getElementById('reconcile-30')!.textContent = i18n('reconcile30');
   document.getElementById('reconcile-60')!.textContent = i18n('reconcile60');
   document.getElementById('reconcile-off')!.textContent = i18n('reconcileOff');
+  document.getElementById('api-key-label')!.textContent = i18n('apiKeyLabel');
+  document.getElementById('api-key-note')!.textContent = i18n('apiKeyNote');
   document.getElementById('version-footer')!.textContent = i18n('versionFooter', chrome.runtime.getManifest().version);
 }
 
@@ -56,6 +58,18 @@ async function currentDaemonBase(): Promise<string> {
   return daemonHttpBase((stored[STORAGE_KEYS.URL] as string) || '');
 }
 
+/**
+ * 对 daemon 的 fetch 统一封装：配置了 api_key 时附 Authorization（协议 §2.7）。
+ * 401 交由调用方处理（提示先填 API Key）。
+ */
+async function daemonFetch(path: string, init?: RequestInit): Promise<Response> {
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.API_KEY);
+  const key = (stored[STORAGE_KEYS.API_KEY] as string | undefined) ?? '';
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
+  if (key) headers.Authorization = `Bearer ${key}`;
+  return fetch(`${await currentDaemonBase()}${path}`, { ...init, headers });
+}
+
 function formatUptime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -71,7 +85,8 @@ async function refreshStatus(): Promise<void> {
   const online = document.getElementById('status-online')!;
   const offline = document.getElementById('status-offline')!;
   try {
-    const resp = await fetch(`${await currentDaemonBase()}/status`, { signal: AbortSignal.timeout(2000) });
+    const resp = await daemonFetch('/status', { signal: AbortSignal.timeout(2000) });
+    if (resp.status === 401) throw new Error('auth');
     if (!resp.ok) throw new Error(`status ${resp.status}`);
     const st = (await resp.json()) as DaemonStatus;
     lastStatus = st;
@@ -86,11 +101,12 @@ async function refreshStatus(): Promise<void> {
       ? i18n('statusYes', st.extension_version || '?')
       : i18n('statusNo');
     document.getElementById('status-sessions')!.textContent = st.sessions.length ? st.sessions.join(', ') : '—';
-  } catch {
+  } catch (err) {
     lastStatus = null;
     online.hidden = true;
     offline.hidden = false;
-    offline.textContent = i18n('statusOffline');
+    // 401：daemon 鉴权已开启但本扩展未配置 key（协议 §2.7）
+    offline.textContent = (err as Error).message === 'auth' ? i18n('statusAuthRequired') : i18n('statusOffline');
   }
   updateSettingsAvailability();
 }
@@ -145,8 +161,9 @@ function showConfigResult(key: string, ok: boolean, subs?: string | string[]): v
 
 async function loadConfig(): Promise<void> {
   try {
-    const resp = await fetch(`${await currentDaemonBase()}/config`, { signal: AbortSignal.timeout(2000) });
+    const resp = await daemonFetch('/config', { signal: AbortSignal.timeout(2000) });
     if (resp.status === 404) throw new Error('unsupported');
+    if (resp.status === 401) throw new Error('auth');
     if (!resp.ok) throw new Error(`status ${resp.status}`);
     const cfg = (await resp.json()) as ConfigResponse;
     cfgPort.value = String(cfg.port.value);
@@ -158,7 +175,13 @@ async function loadConfig(): Promise<void> {
       portNote.hidden = false;
       portNote.textContent = i18n('configPortEnvNote');
     }
-  } catch {
+  } catch (err) {
+    if ((err as Error).message === 'auth') {
+      // daemon 鉴权已开启但未配置 key：表单保留，提示先填 API Key（下方插件设置）
+      configUnsupported.hidden = false;
+      configUnsupported.textContent = i18n('configAuthRequired');
+      return;
+    }
     // 404（旧 daemon）或不可达：隐藏表单，提示不支持（不可达时状态区块已禁用控件）
     configUnsupported.hidden = false;
     configUnsupported.textContent = i18n('configUnsupported');
@@ -192,7 +215,7 @@ saveConfigButton.addEventListener('click', async () => {
       tool_timeout_seconds: Number(cfgToolTimeout.value),
     };
     if (!portEnvLocked) patch.port = Number(cfgPort.value);
-    const resp = await fetch(`${await currentDaemonBase()}/config`, {
+    const resp = await daemonFetch('/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
@@ -235,7 +258,7 @@ restartButton.addEventListener('click', async () => {
   restartButton.disabled = true;
   showConfigResult('restartInProgress', true);
   try {
-    await fetch(`${oldBase}/restart`, { method: 'POST', signal: AbortSignal.timeout(3000) });
+    await daemonFetch('/restart', { method: 'POST', signal: AbortSignal.timeout(3000) });
   } catch {
     // 旧进程可能已经退出，不影响后续轮询
   }
@@ -274,14 +297,23 @@ void loadConfig();
 // ---------- 插件设置区块 ----------
 
 const reconcileSelect = document.getElementById('reconcile-period') as HTMLSelectElement;
+const apiKeyInput = document.getElementById('api-key') as HTMLInputElement;
 const extResult = document.getElementById('ext-result')!;
 
 async function loadExtSettings(): Promise<void> {
-  const stored = await chrome.storage.local.get(STORAGE_KEYS.RECONCILE_PERIOD);
+  const stored = await chrome.storage.local.get([STORAGE_KEYS.RECONCILE_PERIOD, STORAGE_KEYS.API_KEY]);
   const seconds =
     (stored[STORAGE_KEYS.RECONCILE_PERIOD] as number | undefined) ?? DEFAULT_RECONCILE_PERIOD_SECONDS;
   reconcileSelect.value = String(seconds);
+  apiKeyInput.value = (stored[STORAGE_KEYS.API_KEY] as string | undefined) ?? '';
 }
+
+// API Key 保存后 background 的 ws-client 会自动断开重连（storage onChanged）。
+apiKeyInput.addEventListener('change', async () => {
+  await chrome.storage.local.set({ [STORAGE_KEYS.API_KEY]: apiKeyInput.value.trim() });
+  extResult.className = 'result ok';
+  extResult.textContent = i18n('apiKeySaved');
+});
 
 reconcileSelect.addEventListener('change', async () => {
   await chrome.storage.local.set({ [STORAGE_KEYS.RECONCILE_PERIOD]: Number(reconcileSelect.value) });

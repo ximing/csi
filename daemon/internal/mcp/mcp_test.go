@@ -55,7 +55,7 @@ func connectClient(t *testing.T, srv *mcpsdk.Server) *mcpsdk.ClientSession {
 
 // TestToolRegistration 验证 initialize + tools/list 握手后返回 21 个工具，名称与协议 §4 一致。
 func TestToolRegistration(t *testing.T) {
-	srv := NewServer("http://127.0.0.1:1") // 不实际调用
+	srv := NewServer("http://127.0.0.1:1", "") // 不实际调用
 	cs := connectClient(t, srv)
 
 	res, err := cs.ListTools(context.Background(), nil)
@@ -164,7 +164,7 @@ func resultText(res *mcpsdk.CallToolResult) string {
 // TestForwardSuccess 验证 success:true → MCP 成功结果，且 action/args/session 正确转发。
 func TestForwardSuccess(t *testing.T) {
 	fake, got := fakeDaemon(t, `{"success":true,"data":{"success":true,"url":"https://example.com","tabId":123}}`)
-	srv := NewServer(fake.URL)
+	srv := NewServer(fake.URL, "")
 
 	res := callTool(t, srv, "navigate", map[string]any{
 		"url":     "https://example.com",
@@ -194,7 +194,7 @@ func TestForwardSuccess(t *testing.T) {
 // TestForwardDefaultSession 缺省 session 转发为 "default"。
 func TestForwardDefaultSession(t *testing.T) {
 	fake, got := fakeDaemon(t, `{"success":true,"data":{"success":true,"tabs":[]}}`)
-	srv := NewServer(fake.URL)
+	srv := NewServer(fake.URL, "")
 
 	res := callTool(t, srv, "list_tabs", nil)
 	if res.IsError {
@@ -208,7 +208,7 @@ func TestForwardDefaultSession(t *testing.T) {
 // TestForwardFailure 验证 success:false → MCP 错误结果。
 func TestForwardFailure(t *testing.T) {
 	fake, _ := fakeDaemon(t, `{"success":false,"error":"click: element not found: #x"}`)
-	srv := NewServer(fake.URL)
+	srv := NewServer(fake.URL, "")
 
 	res := callTool(t, srv, "click", map[string]any{"selector": "#x"})
 	if !res.IsError {
@@ -229,7 +229,7 @@ func TestForwardUnreachable(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	srv := NewServer("http://" + addr)
+	srv := NewServer("http://"+addr, "")
 	res := callTool(t, srv, "list_tabs", nil)
 	if !res.IsError {
 		t.Fatalf("want error result, got: %s", resultText(res))
@@ -243,7 +243,7 @@ func TestForwardUnreachable(t *testing.T) {
 // TestRequiredValidation 缺必填参数时不应发 HTTP 请求，直接返回错误结果。
 func TestRequiredValidation(t *testing.T) {
 	fake, _ := fakeDaemon(t, `{"success":true,"data":{}}`)
-	srv := NewServer(fake.URL)
+	srv := NewServer(fake.URL, "")
 
 	res := callTool(t, srv, "navigate", map[string]any{"newTab": true})
 	if !res.IsError {
@@ -257,7 +257,7 @@ func TestRequiredValidation(t *testing.T) {
 // TestScreenshotReadHint screenshot 结果附带 Read 工具提示与文件路径。
 func TestScreenshotReadHint(t *testing.T) {
 	fake, _ := fakeDaemon(t, `{"success":true,"data":{"format":"png","path":"/tmp/shot.png","sizeBytes":1024}}`)
-	srv := NewServer(fake.URL)
+	srv := NewServer(fake.URL, "")
 
 	res := callTool(t, srv, "screenshot", map[string]any{})
 	if res.IsError {
@@ -272,7 +272,7 @@ func TestScreenshotReadHint(t *testing.T) {
 // TestSaveAsPDFReadHint save_as_pdf 结果附带 Read 工具提示。
 func TestSaveAsPDFReadHint(t *testing.T) {
 	fake, _ := fakeDaemon(t, `{"success":true,"data":{"path":"/tmp/page.pdf","sizeBytes":2048,"pageTitle":"Demo"}}`)
-	srv := NewServer(fake.URL)
+	srv := NewServer(fake.URL, "")
 
 	res := callTool(t, srv, "save_as_pdf", map[string]any{})
 	if res.IsError {
@@ -287,7 +287,7 @@ func TestSaveAsPDFReadHint(t *testing.T) {
 // TestCompactOutput 成功 data 输出为紧凑 JSON（设计 D.5：无缩进、无多余换行）。
 func TestCompactOutput(t *testing.T) {
 	fake, _ := fakeDaemon(t, `{"success":true,"data":{"success":true,"url":"https://example.com","tabId":123}}`)
-	srv := NewServer(fake.URL)
+	srv := NewServer(fake.URL, "")
 
 	res := callTool(t, srv, "navigate", map[string]any{"url": "https://example.com"})
 	if res.IsError {
@@ -303,7 +303,7 @@ func TestCompactOutput(t *testing.T) {
 // TestArtifactReadHint artifact 客户端信封（truncated+preview+path）也附带一行 Read 提示。
 func TestArtifactReadHint(t *testing.T) {
 	fake, _ := fakeDaemon(t, `{"success":true,"data":{"truncated":true,"preview":"{...","path":"/tmp/csi-evaluate-result.json-1","sizeBytes":42,"mimeType":"application/json"}}`)
-	srv := NewServer(fake.URL)
+	srv := NewServer(fake.URL, "")
 
 	res := callTool(t, srv, "evaluate", map[string]any{"code": "1"})
 	if res.IsError {
@@ -316,5 +316,52 @@ func TestArtifactReadHint(t *testing.T) {
 	// 提示保持一行，不重复 path（设计 D.5）：path 只应出现在紧凑 data 里一次。
 	if strings.Count(text, "/tmp/csi-evaluate-result.json-1") != 1 {
 		t.Errorf("path should appear exactly once, got: %s", text)
+	}
+}
+
+// TestForwardAuthHeader 配了 api_key 时请求带 Authorization；未配时不带（协议 §2.7）。
+func TestForwardAuthHeader(t *testing.T) {
+	var gotAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"data":{"success":true}}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	// 未配 key：不带 Authorization。
+	s0 := NewServer(srv.URL, "")
+	if res := callTool(t, s0, "list_tabs", nil); res.IsError {
+		t.Fatalf("no-key call failed: %s", resultText(res))
+	}
+	if gotAuth[0] != "" {
+		t.Fatalf("no apiKey: Authorization = %q, want empty", gotAuth[0])
+	}
+	// 配了 key：带 Bearer。
+	s1 := NewServer(srv.URL, "csi-key-0123456789")
+	if res := callTool(t, s1, "list_tabs", nil); res.IsError {
+		t.Fatalf("key call failed: %s", resultText(res))
+	}
+	if gotAuth[1] != "Bearer csi-key-0123456789" {
+		t.Fatalf("Authorization = %q, want Bearer key", gotAuth[1])
+	}
+}
+
+// TestForwardUnauthorized daemon 返回 401 时错误指路 config.json（协议 §2.7）。
+func TestForwardUnauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"success":false,"error":"unauthorized","code":"unauthorized"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	s := NewServer(srv.URL, "wrong-key-0123456")
+	res := callTool(t, s, "list_tabs", nil)
+	if !res.IsError {
+		t.Fatal("401 should be an error result")
+	}
+	text := resultText(res)
+	if !strings.Contains(text, "API key") || !strings.Contains(text, "config.json") {
+		t.Fatalf("401 error should point to config.json api_key, got: %s", text)
 	}
 }

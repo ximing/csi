@@ -20,7 +20,8 @@ import (
 // MCP 客户端退出导致 stdin EOF 属于正常结束。
 func Run(ctx context.Context) error {
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", daemon.Port())
-	srv := NewServer(baseURL)
+	// 鉴权 key 从 config.json 自动读取（协议 §2.7）：MCP 与 daemon 同机同 UID。
+	srv := NewServer(baseURL, daemon.EffectiveAPIKey())
 	if err := srv.Run(ctx, &mcpsdk.StdioTransport{}); err != nil {
 		// SDK 对 stdin EOF 返回 "server is closing: EOF"（%v 拼接，无法 errors.Is 判定）。
 		if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) ||
@@ -33,12 +34,13 @@ func Run(ctx context.Context) error {
 }
 
 // NewServer 构建注册好 21 个工具的 MCP server，工具调用转发到 baseURL（daemon HTTP 地址）。
-func NewServer(baseURL string) *mcpsdk.Server {
+// apiKey 非空时请求自动附带鉴权头（协议 §2.7）。
+func NewServer(baseURL, apiKey string) *mcpsdk.Server {
 	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "csi",
 		Version: version.Version,
 	}, nil)
-	fwd := &forwarder{baseURL: baseURL}
+	fwd := &forwarder{baseURL: baseURL, apiKey: apiKey}
 	for _, def := range toolDefs {
 		def := def
 		srv.AddTool(&mcpsdk.Tool{

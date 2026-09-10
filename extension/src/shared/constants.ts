@@ -14,6 +14,8 @@ export const CONNECT_TIMEOUT_MS = 10_000;
 export const STORAGE_KEYS = {
   SHOULD_CONNECT: 'ws_should_connect',
   URL: 'local_url',
+  /** Daemon auth key (protocol §2.7); empty = daemon auth disabled. */
+  API_KEY: 'api_key',
   /** Reconcile period setting (seconds; 0 = auto-reconnect off). */
   RECONCILE_PERIOD: 'reconcile_period_seconds',
 } as const;

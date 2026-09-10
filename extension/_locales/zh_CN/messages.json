@@ -38,46 +38,185 @@
   "versionFooter": {
     "message": "扩展 $VER$",
     "placeholders": {
-      "ver": { "content": "$1" }
+      "ver": {
+        "content": "$1"
+      }
     }
   },
-  "versionMismatch": { "message": "与 daemon 版本不匹配，请更新 CSI" },
-  "settingsLink": { "message": "设置" },
-  "optionsTitle": { "message": "CSI 设置" },
-  "statusHeading": { "message": "守护进程状态" },
-  "daemonSettingsHeading": { "message": "守护进程设置" },
-  "extSettingsHeading": { "message": "插件设置" },
-  "statusStateLabel": { "message": "状态" },
-  "statusPidLabel": { "message": "PID" },
-  "statusVersionLabel": { "message": "daemon 版本" },
-  "statusUptimeLabel": { "message": "已运行" },
-  "statusPortLabel": { "message": "端口" },
-  "statusExtLabel": { "message": "扩展已连接" },
-  "statusSessionsLabel": { "message": "会话" },
-  "statusRunning": { "message": "运行中" },
-  "statusOffline": { "message": "daemon 未运行——请在终端执行 `csi start` 启动" },
-  "statusYes": { "message": "是（$VER$）", "placeholders": { "ver": { "content": "$1" } } },
-  "statusNo": { "message": "否" },
-  "configPortLabel": { "message": "daemon 端口" },
-  "configLogDaysLabel": { "message": "日志保留天数" },
-  "configToolTimeoutLabel": { "message": "工具超时（秒）" },
-  "configPortEnvNote": { "message": "被 CSI_PORT 环境变量覆盖，无法在此修改" },
-  "configUnsupported": { "message": "当前 daemon 版本不支持远程配置，请升级 daemon" },
-  "saveButton": { "message": "保存" },
-  "restartButton": { "message": "重启 daemon 使端口生效" },
-  "configSaved": { "message": "已保存" },
-  "configSaveFailed": { "message": "保存失败：$ERR$", "placeholders": { "err": { "content": "$1" } } },
-  "configInvalid": { "message": "非法取值：$ERR$", "placeholders": { "err": { "content": "$1" } } },
-  "restartInProgress": { "message": "重启中…" },
-  "restartOk": { "message": "daemon 已重启到端口 $PORT$，扩展已重连", "placeholders": { "port": { "content": "$1" } } },
-  "restartFailedOldAlive": { "message": "重启失败——daemon 仍在原端口运行，请查看 ~/.csi/logs" },
-  "restartFailedDown": { "message": "重启失败——daemon 已停止，请查看 ~/.csi/logs 并用 `csi start` 启动" },
-  "restartFailedExt": { "message": "daemon 已重启到端口 $PORT$，但扩展重连失败——请再次点击重启重试", "placeholders": { "port": { "content": "$1" } } },
-  "reconcileLabel": { "message": "自动重连间隔" },
-  "reconcile30": { "message": "每 30 秒（默认）" },
-  "reconcile60": { "message": "每 60 秒" },
-  "reconcileOff": { "message": "关闭" },
-  "extSaved": { "message": "已保存" },
-  "uptimeFormat": { "message": "$H$ 小时 $M$ 分 $S$ 秒", "placeholders": { "h": { "content": "$1" }, "m": { "content": "$2" }, "s": { "content": "$3" } } },
-  "uptimeFormatShort": { "message": "$M$ 分 $S$ 秒", "placeholders": { "m": { "content": "$1" }, "s": { "content": "$2" } } }
+  "versionMismatch": {
+    "message": "与 daemon 版本不匹配，请更新 CSI"
+  },
+  "settingsLink": {
+    "message": "设置"
+  },
+  "optionsTitle": {
+    "message": "CSI 设置"
+  },
+  "statusHeading": {
+    "message": "守护进程状态"
+  },
+  "daemonSettingsHeading": {
+    "message": "守护进程设置"
+  },
+  "extSettingsHeading": {
+    "message": "插件设置"
+  },
+  "statusStateLabel": {
+    "message": "状态"
+  },
+  "statusPidLabel": {
+    "message": "PID"
+  },
+  "statusVersionLabel": {
+    "message": "daemon 版本"
+  },
+  "statusUptimeLabel": {
+    "message": "已运行"
+  },
+  "statusPortLabel": {
+    "message": "端口"
+  },
+  "statusExtLabel": {
+    "message": "扩展已连接"
+  },
+  "statusSessionsLabel": {
+    "message": "会话"
+  },
+  "statusRunning": {
+    "message": "运行中"
+  },
+  "statusOffline": {
+    "message": "daemon 未运行——请在终端执行 `csi start` 启动"
+  },
+  "statusYes": {
+    "message": "是（$VER$）",
+    "placeholders": {
+      "ver": {
+        "content": "$1"
+      }
+    }
+  },
+  "statusNo": {
+    "message": "否"
+  },
+  "configPortLabel": {
+    "message": "daemon 端口"
+  },
+  "configLogDaysLabel": {
+    "message": "日志保留天数"
+  },
+  "configToolTimeoutLabel": {
+    "message": "工具超时（秒）"
+  },
+  "configPortEnvNote": {
+    "message": "被 CSI_PORT 环境变量覆盖，无法在此修改"
+  },
+  "configUnsupported": {
+    "message": "当前 daemon 版本不支持远程配置，请升级 daemon"
+  },
+  "saveButton": {
+    "message": "保存"
+  },
+  "restartButton": {
+    "message": "重启 daemon 使端口生效"
+  },
+  "configSaved": {
+    "message": "已保存"
+  },
+  "configSaveFailed": {
+    "message": "保存失败：$ERR$",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
+  "configInvalid": {
+    "message": "非法取值：$ERR$",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
+  "restartInProgress": {
+    "message": "重启中…"
+  },
+  "restartOk": {
+    "message": "daemon 已重启到端口 $PORT$，扩展已重连",
+    "placeholders": {
+      "port": {
+        "content": "$1"
+      }
+    }
+  },
+  "restartFailedOldAlive": {
+    "message": "重启失败——daemon 仍在原端口运行，请查看 ~/.csi/logs"
+  },
+  "restartFailedDown": {
+    "message": "重启失败——daemon 已停止，请查看 ~/.csi/logs 并用 `csi start` 启动"
+  },
+  "restartFailedExt": {
+    "message": "daemon 已重启到端口 $PORT$，但扩展重连失败——请再次点击重启重试",
+    "placeholders": {
+      "port": {
+        "content": "$1"
+      }
+    }
+  },
+  "reconcileLabel": {
+    "message": "自动重连间隔"
+  },
+  "reconcile30": {
+    "message": "每 30 秒（默认）"
+  },
+  "reconcile60": {
+    "message": "每 60 秒"
+  },
+  "reconcileOff": {
+    "message": "关闭"
+  },
+  "extSaved": {
+    "message": "已保存"
+  },
+  "uptimeFormat": {
+    "message": "$H$ 小时 $M$ 分 $S$ 秒",
+    "placeholders": {
+      "h": {
+        "content": "$1"
+      },
+      "m": {
+        "content": "$2"
+      },
+      "s": {
+        "content": "$3"
+      }
+    }
+  },
+  "uptimeFormatShort": {
+    "message": "$M$ 分 $S$ 秒",
+    "placeholders": {
+      "m": {
+        "content": "$1"
+      },
+      "s": {
+        "content": "$2"
+      }
+    }
+  },
+  "apiKeyLabel": {
+    "message": "daemon API key"
+  },
+  "apiKeyNote": {
+    "message": "仅 daemon 开启鉴权时需要（在 http://127.0.0.1:10088/admin 配置）。保存后后台会自动重连。"
+  },
+  "apiKeySaved": {
+    "message": "API key 已保存，正在重连"
+  },
+  "statusAuthRequired": {
+    "message": "daemon 已开启鉴权——请在下方（扩展设置）填写 API key"
+  },
+  "configAuthRequired": {
+    "message": "daemon 已开启鉴权——请在下方（扩展设置）填写 API key 后再管理配置"
+  }
 }

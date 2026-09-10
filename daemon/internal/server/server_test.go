@@ -494,6 +494,9 @@ func TestGetConfig(t *testing.T) {
 	if body["port"]["value"].(float64) != 10088 || body["port"]["source"] != "default" {
 		t.Fatalf("port entry = %+v", body["port"])
 	}
+	if body["bind_host"]["value"] != "127.0.0.1" || body["bind_host"]["source"] != "default" {
+		t.Fatalf("bind_host entry = %+v", body["bind_host"])
+	}
 }
 
 // POST /config：改超时即时生效（Hub.ToolTimeout 变化），改端口要求重启。
@@ -518,8 +521,12 @@ func TestPostConfig(t *testing.T) {
 	if bad["success"].(bool) {
 		t.Fatal("port=0 should be rejected")
 	}
+	badHost := post(`{"bind_host": "localhost"}`)
+	if badHost["success"].(bool) {
+		t.Fatal("bind_host=localhost should be rejected")
+	}
 
-	ok := post(`{"tool_timeout_seconds": 60, "log_retention_days": 7, "port": 10090}`)
+	ok := post(`{"tool_timeout_seconds": 60, "log_retention_days": 7, "port": 10090, "bind_host": "0.0.0.0"}`)
 	if !ok["success"].(bool) {
 		t.Fatalf("post failed: %v", ok)
 	}
@@ -531,13 +538,38 @@ func TestPostConfig(t *testing.T) {
 	}
 	// 落盘可回读
 	back, err := daemon.LoadConfig(dir)
-	if err != nil || back.Values.Port != 10090 || back.Values.LogRetentionDays != 7 {
+	if err != nil || back.Values.Port != 10090 || back.Values.BindHost != "0.0.0.0" || back.Values.LogRetentionDays != 7 {
 		t.Fatalf("reload = %+v, err %v", back, err)
 	}
-	// 不含端口的修改不要求重启
+	// 不含端口/监听地址的修改不要求重启
 	ok2 := post(`{"tool_timeout_seconds": 90}`)
 	if ok2["data"].(map[string]any)["restart_required"].(bool) != false {
 		t.Fatal("non-port change should not require restart")
+	}
+}
+
+// 仅改 bind_host（不动端口）也应要求重启。
+func TestPostConfigBindHostRestartRequired(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	req := httptest.NewRequest("POST", "/config", strings.NewReader(`{"bind_host": "0.0.0.0"}`))
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !body["success"].(bool) {
+		t.Fatalf("post failed: %v", body)
+	}
+	if body["data"].(map[string]any)["restart_required"].(bool) != true {
+		t.Fatal("bind_host change should require restart")
+	}
+	if srv.BindHost != "127.0.0.1" {
+		t.Fatalf("effective BindHost = %q, want unchanged until restart", srv.BindHost)
 	}
 }
 
@@ -626,6 +658,47 @@ func TestPostConfigPortLockedByEnv(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &body)
 	if body["success"].(bool) || !strings.Contains(body["error"].(string), "CSI_PORT") {
 		t.Fatalf("env-locked port should be rejected with CSI_PORT hint, got %v", body)
+	}
+}
+
+// bind_host 被 CSI_HOST 覆盖时拒绝修改；保存其它字段时 env 值不落盘。
+func TestPostConfigBindHostEnvLocked(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CSI_HOST", "0.0.0.0")
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	req := httptest.NewRequest("POST", "/config", strings.NewReader(`{"bind_host": "127.0.0.1"}`))
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var body map[string]any
+	json.Unmarshal(w.Body.Bytes(), &body)
+	if body["success"].(bool) || !strings.Contains(body["error"].(string), "CSI_HOST") {
+		t.Fatalf("env-locked bind_host should be rejected with CSI_HOST hint, got %v", body)
+	}
+
+	// 保存无关字段：落盘值不应把 env 覆盖固化
+	req2 := httptest.NewRequest("POST", "/config", strings.NewReader(`{"tool_timeout_seconds": 60}`))
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, req2)
+	var body2 map[string]any
+	json.Unmarshal(w2.Body.Bytes(), &body2)
+	if !body2["success"].(bool) {
+		t.Fatalf("post failed: %v", body2)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatalf("read config.json: %v", err)
+	}
+	var file daemon.Config
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatalf("parse config.json: %v", err)
+	}
+	if file.BindHost != daemon.DefaultBindHost {
+		t.Fatalf("disk bind_host = %q, want default %q (env override must not be persisted)", file.BindHost, daemon.DefaultBindHost)
+	}
+	if srv.BindHost != "0.0.0.0" {
+		t.Fatalf("effective bind_host = %q, want env override 0.0.0.0", srv.BindHost)
 	}
 }
 
@@ -825,5 +898,293 @@ func TestStatusUpdateFields(t *testing.T) {
 	ua, ok := withCache["update_available"].(bool)
 	if !ok || ua != update.NewerAvailable(version.Version, "9.9.9") {
 		t.Fatalf("update_available = %v, want %v", withCache["update_available"], update.NewerAvailable(version.Version, "9.9.9"))
+	}
+}
+
+// ---- 鉴权（协议 §2.7）与管理页（§2.8）----
+
+// 管理页：GET /admin 返回内嵌 HTML；GET / 301 跳转。
+func TestAdminPageAndRootRedirect(t *testing.T) {
+	t.Parallel()
+	_, ts := newTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("GET /admin = %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	if !strings.Contains(string(body), "CSI daemon") {
+		t.Fatal("GET /admin body should contain page marker")
+	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", cc)
+	}
+
+	noRedirect := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	root, err := noRedirect.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.Body.Close()
+	if root.StatusCode != http.StatusMovedPermanently || root.Header.Get("Location") != "/admin" {
+		t.Fatalf("GET / = %d %q, want 301 /admin", root.StatusCode, root.Header.Get("Location"))
+	}
+}
+
+// 开启鉴权后的 401/放行矩阵；/healthz 与 /admin 豁免。
+func TestAuth401Matrix(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// 未开鉴权时设置 key + 开启（此时 POST /config 无需鉴权，是引导路径）。
+	enable := func(auth string) map[string]any {
+		req := httptest.NewRequest("POST", "/config", strings.NewReader(auth))
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return body
+	}
+	if r := enable(`{"auth_enabled": true, "api_key": "csi-key-0123456789"}`); !r["success"].(bool) {
+		t.Fatalf("enable failed: %v", r)
+	}
+
+	do := func(path, method, authHeader string) *http.Response {
+		req, _ := http.NewRequest(method, ts.URL+path, nil)
+		if authHeader != "" {
+			req.Header.Set("Authorization", authHeader)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	const good = "Bearer csi-key-0123456789"
+	const bad = "Bearer wrong-key-123456"
+
+	cases := []struct {
+		path, method, auth string
+		want               int
+	}{
+		{"/status", "GET", "", 401},
+		{"/status", "GET", bad, 401},
+		{"/status", "GET", good, 200},
+		{"/config", "GET", "", 401},
+		{"/config", "GET", good, 200},
+		{"/command", "POST", "", 401},
+		{"/command", "POST", good, 200},
+		{"/restart", "POST", "", 401},
+		{"/restart", "POST", bad, 401},
+		{"/healthz", "GET", "", 200},  // 豁免（协议 §2.7）
+		{"/admin", "GET", "", 200},    // 豁免：静态壳
+		{"/admin", "GET", bad, 200},   // 静态壳无需 key
+	}
+	for _, c := range cases {
+		if got := do(c.path, c.method, c.auth).StatusCode; got != c.want {
+			t.Errorf("%s %s auth=%q = %d, want %d", c.method, c.path, c.auth, got, c.want)
+		}
+	}
+	// 401 响应带 WWW-Authenticate 与统一 JSON 信封（协议 §2.7）。
+	req, _ := http.NewRequest("GET", ts.URL+"/status", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var body map[string]any
+	_ = json.Unmarshal(raw, &body)
+	if resp.Header.Get("WWW-Authenticate") != "Bearer" {
+		t.Fatalf("WWW-Authenticate = %q", resp.Header.Get("WWW-Authenticate"))
+	}
+	if body["error"] != "unauthorized" || body["code"] != "unauthorized" {
+		t.Fatalf("401 body = %s", raw)
+	}
+}
+
+// GET /config 永不回传 key 明文；set 表示是否已配置。
+func TestGetConfigAPIKeyNotLeaked(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	post := func(payload, auth string) map[string]any {
+		req := httptest.NewRequest("POST", "/config", strings.NewReader(payload))
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return body
+	}
+	if r := post(`{"auth_enabled": true, "api_key": "csi-key-0123456789"}`, ""); !r["success"].(bool) {
+		t.Fatalf("enable failed: %v", r)
+	}
+
+	req := httptest.NewRequest("GET", "/config", nil)
+	req.Header.Set("Authorization", "Bearer csi-key-0123456789")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var body map[string]map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	keyEntry := body["api_key"]
+	if keyEntry["value"] != "" {
+		t.Fatalf("api_key value = %v, want empty (never leak)", keyEntry["value"])
+	}
+	if keyEntry["set"] != true {
+		t.Fatalf("api_key set = %v, want true", keyEntry["set"])
+	}
+	if keyEntry["source"] != "config" {
+		t.Fatalf("api_key source = %v", keyEntry["source"])
+	}
+	if body["auth_enabled"]["value"] != true {
+		t.Fatalf("auth_enabled = %v", body["auth_enabled"])
+	}
+}
+
+// POST /config 鉴权字段组合校验与 key 轮换。
+func TestPostConfigAuthValidation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	post := func(payload, auth string) map[string]any {
+		req := httptest.NewRequest("POST", "/config", strings.NewReader(payload))
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return body
+	}
+
+	// 开启鉴权但无 key：拒绝。
+	if r := post(`{"auth_enabled": true}`, ""); r["success"].(bool) {
+		t.Fatal("auth_enabled without api_key should be rejected")
+	}
+	// 非法 key（太短）：拒绝。
+	if r := post(`{"auth_enabled": true, "api_key": "short"}`, ""); r["success"].(bool) {
+		t.Fatal("short api_key should be rejected")
+	}
+	// 开启。
+	const oldKey = "csi-key-0123456789"
+	if r := post(`{"auth_enabled": true, "api_key": "`+oldKey+`"}`, ""); !r["success"].(bool) {
+		t.Fatalf("enable failed: %v", r)
+	}
+	// 鉴权已开启：开启状态下清空 key：拒绝（须先关鉴权）。
+	if r := post(`{"api_key": ""}`, "Bearer "+oldKey); r["success"].(bool) {
+		t.Fatal("clearing api_key while auth_enabled should be rejected")
+	}
+	// 无 key 的请求本身被 401 拦下（换 key 需知旧 key）。
+	if r := post(`{"api_key": "csi-new-key-01234567"}`, ""); r["success"] == true {
+		t.Fatal("changing api_key without current key must not succeed")
+	}
+	// 带旧 key 换新 key：成功，新 key 立即生效。
+	const newKey = "csi-new-key-01234567"
+	if r := post(`{"api_key": "`+newKey+`"}`, "Bearer "+oldKey); !r["success"].(bool) {
+		t.Fatalf("rotate failed: %v", r)
+	}
+	// 旧 key 已失效，新 key 可用。
+	req := httptest.NewRequest("GET", "/config", nil)
+	req.Header.Set("Authorization", "Bearer "+newKey)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("new key should work immediately, got %d", w.Code)
+	}
+	// 关闭鉴权：即时恢复无 header 访问。
+	if r := post(`{"auth_enabled": false}`, "Bearer "+newKey); !r["success"].(bool) {
+		t.Fatalf("disable failed: %v", r)
+	}
+	req2 := httptest.NewRequest("GET", "/status", nil)
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("after disabling auth, no-header access should work, got %d", w2.Code)
+	}
+}
+
+// WS 鉴权（协议 §2.7/§3.1）：开启后无/错 ?api_key= 在 upgrade 前被 401 拒绝；
+// 带 key 正常握手。在位连接不受 key 轮换影响由 hub 语义保证（连接时才校验）。
+func TestWSAuth(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	srv.Hub.PingInterval = time.Hour
+
+	post := func(payload string) map[string]any {
+		req := httptest.NewRequest("POST", "/config", strings.NewReader(payload))
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return body
+	}
+	if r := post(`{"auth_enabled": true, "api_key": "csi-key-0123456789"}`); !r["success"].(bool) {
+		t.Fatalf("enable failed: %v", r)
+	}
+
+	wsBase := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	// 无 key：upgrade 前被拒（dial 返回 401，不是 WS 握手失败协议错）。
+	_, resp, err := websocket.DefaultDialer.Dial(wsBase, nil)
+	if err == nil {
+		t.Fatal("dial without key should fail")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("dial without key: status = %v, want 401", resp)
+	}
+	if resp != nil && resp.Header.Get("WWW-Authenticate") != "Bearer" {
+		t.Fatalf("WWW-Authenticate = %q", resp.Header.Get("WWW-Authenticate"))
+	}
+	// 错 key：同样 401。
+	_, resp, err = websocket.DefaultDialer.Dial(wsBase+"?api_key=wrong-key-123456", nil)
+	if err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("dial with wrong key should get 401, err=%v resp=%v", err, resp)
+	}
+	// 对 key：握手成功（hello → hello_ack）。
+	conn, _, err := websocket.DefaultDialer.Dial(wsBase+"?api_key=csi-key-0123456789", nil)
+	if err != nil {
+		t.Fatalf("dial with key: %v", err)
+	}
+	defer conn.Close()
+	hello, _ := json.Marshal(map[string]any{"extensionVersion": "0.1.0"})
+	if err := conn.WriteJSON(ws.Message{Type: ws.MsgHello, Payload: hello}); err != nil {
+		t.Fatalf("hello: %v", err)
+	}
+	var ack ws.Message
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := conn.ReadJSON(&ack); err != nil || ack.Type != ws.MsgHelloAck {
+		t.Fatalf("hello_ack: err=%v type=%q", err, ack.Type)
 	}
 }

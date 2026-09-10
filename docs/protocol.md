@@ -12,8 +12,9 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 
 - daemon 是 **HTTP server** 兼 **WebSocket server**；扩展作为 WS **客户端**主动连 daemon。
 - 默认端口 `10088`；优先级：环境变量 `CSI_PORT` > `~/.csi/config.json` > 默认值。扩展默认连接 `ws://127.0.0.1:10088/ws`，popup/options 页中可改。
-- daemon 持久化配置存于 `~/.csi/config.json`：`{"port":10088,"log_retention_days":3,"tool_timeout_seconds":120}`（日志保留天数与工具超时不接受 env 覆盖）。
-- daemon 只绑定 `127.0.0.1`。
+- daemon 持久化配置存于 `~/.csi/config.json`：`{"port":10088,"bind_host":"127.0.0.1","log_retention_days":3,"tool_timeout_seconds":120,"auth_enabled":false,"api_key":""}`（日志保留天数、工具超时与鉴权项不接受 env 覆盖）。`api_key` 含敏感凭据，config.json 权限为 `0600`。
+- daemon 默认绑定 `127.0.0.1`；监听地址可配置：优先级 `CSI_HOST` 环境变量 > `config.json` 的 `bind_host` > 默认 `127.0.0.1`。`bind_host` 只接受 IP 字面量（IPv4/IPv6）：`0.0.0.0` 监听全部网卡（含回环，本机扩展/CLI 不受影响）、具体网卡 IP（如 `192.168.1.10`）只监听该地址（**不再监听回环**，本机扩展/CLI 将连不上）、`::` 等价于 IPv6 全网卡。局域网暴露的信任域影响见 §7。
+- daemon 内置管理页：`GET /admin`（自包含单文件 HTML，无外部依赖），`GET /` 301 跳转到 `/admin`。鉴权默认关闭；开启后的鉴权规则见 §2.7。
 
 ## 2. HTTP API
 
@@ -51,6 +52,8 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 ```json
 { "success": false, "error": "navigate: url is required" }
 ```
+
+**唯一例外是鉴权**：鉴权开启且请求未通过时返回 HTTP 401（body 仍为 JSON 信封），见 §2.7。
 
 可选字段 `code` / `details`（旧客户端忽略未知字段，继续读 `error`）：
 
@@ -93,11 +96,13 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
   "extension_tools": ["navigate", "..."],
   "uptime_seconds": 3600,
   "sessions": ["my-task"],
-  "port": 10088
+  "port": 10088,
+  "bind_host": "127.0.0.1"
 }
 ```
 
 `pid` 供 `csi stop` / `csi start` 做身份校验（防 PID 复用误杀）。
+`bind_host` 是当前生效的监听地址（非回环时局域网可访问，见 §7）。
 `extension_tools`：扩展握手上报了 `tools` 则为数组，未上报则为 `null`。
 
 ### 2.3 `GET /healthz`
@@ -111,22 +116,29 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 ```json
 {
   "port": { "value": 10088, "source": "default" },
+  "bind_host": { "value": "127.0.0.1", "source": "config" },
   "log_retention_days": { "value": 3, "source": "config" },
-  "tool_timeout_seconds": { "value": 120, "source": "default" }
+  "tool_timeout_seconds": { "value": 120, "source": "default" },
+  "auth_enabled": { "value": false, "source": "default" },
+  "api_key": { "value": "", "set": true, "source": "config" }
 }
 ```
+
+`api_key` 的 `value` **恒为空串**（永不回传明文，防肩窥/泄露）；`set` 布尔字段表示是否已配置 key。
 
 ### 2.5 `POST /config`
 
 请求体为要修改的字段子集（均可选）：
 
 ```json
-{ "port": 10090, "log_retention_days": 7, "tool_timeout_seconds": 60 }
+{ "port": 10090, "bind_host": "0.0.0.0", "log_retention_days": 7, "tool_timeout_seconds": 60, "auth_enabled": true, "api_key": "<key>" }
 ```
 
-- 校验：端口 1–65535；保留天数 1–30；超时 5–600。非法返回 `{ "success": false, "error": "..." }`。
-- 端口被 `CSI_PORT` 覆盖时拒绝修改端口字段。
-- `log_retention_days` / `tool_timeout_seconds` 保存后即时生效；`port` 仅落盘，响应 `data.restart_required: true`，需 `POST /restart` 生效。
+- 校验：端口 1–65535；`bind_host` 必须是 IP 字面量（IPv4/IPv6，空串非法）；保留天数 1–30；超时 5–600；`api_key` 长度 16–128、全部为可打印 ASCII（0x21–0x7E，不含空白）。非法返回 `{ "success": false, "error": "..." }`。
+- 端口被 `CSI_PORT`、监听地址被 `CSI_HOST` 覆盖时拒绝修改对应字段。
+- `auth_enabled` / `api_key` 组合校验：`auth_enabled:true` 时 `api_key` 必须非空（含「开启鉴权的同时把 key 置空」），拒绝保存。
+- 鉴权开启时，修改 `api_key` 的请求本身必须携带**当前** key（换 key 需知道旧 key）；`POST /config` 的鉴权见 §2.7。
+- `log_retention_days` / `tool_timeout_seconds` / `auth_enabled` / `api_key` 保存后即时生效（daemon 每请求读内存配置，无 restart_required）；`port` 与 `bind_host` 仅落盘，响应 `data.restart_required: true`，需 `POST /restart` 生效。
 
 成功响应：
 
@@ -134,17 +146,34 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 { "success": true, "data": { "restart_required": true } }
 ```
 
-**pending-restart 窗口**：端口已落盘但 daemon 尚未重启期间，CLI 按 config 读到的是新端口，而 daemon 仍监听旧端口——`csi status` 会误报未运行，`csi stop` 会因身份校验拒绝（提示用 `--force`）。用 options 页的重启按钮或 `csi restart`（身份不确认时自动转 force）可正常完成重启。
+**pending-restart 窗口**：端口或监听地址已落盘但 daemon 尚未重启期间，CLI 按 config 读到的是新端口，而 daemon 仍监听旧地址——`csi status` 会误报未运行，`csi stop` 会因身份校验拒绝（提示用 `--force`）。用 options 页的重启按钮或 `csi restart`（身份不确认时自动转 force）可正常完成重启。
 
 ### 2.6 `POST /restart`
 
 daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true }` 并优雅退出。新进程从 config.json 读取配置监听（同端口靠 bind 退避重试接管，200ms × 最多 10s）。调用方轮询 `/healthz` 确认新进程就绪。
 
+### 2.7 鉴权（API key，默认关闭）
+
+- **生效判定**：`auth_enabled == true && api_key != ""`（且 key 合法）。`auth_enabled:true` 但 `api_key` 为空/非法（如手改 config.json）时**视为未开启**——fail-open，防止把 daemon 锁死；用户直接编辑 `~/.csi/config.json` 即可恢复。
+- **默认关闭**：不携带任何鉴权头 = 现状，完全向后兼容。
+- 开启后，以下端点**豁免**（无需鉴权）：
+  - `GET /healthz`：存活探测，body 恒为 `ok`，不泄露信息；CLI 启动探测与 options 页轮询依赖它。
+  - `GET /admin`：静态页面壳（无数据），是输入 key 的引导入口；页面内的数据操作仍走带 key 的 API。
+- 其余全部端点（`POST /command`、`GET /status`、`GET /config`、`POST /config`、`POST /restart`、`/ws`）要求鉴权：
+  - **HTTP**：`Authorization: Bearer <api_key>`。不通过返回 **HTTP 401**（对 §2.1「状态码只用于传输层」的唯一例外）+ `WWW-Authenticate: Bearer`，body 为 `{ "success": false, "error": "unauthorized", "code": "unauthorized" }`。
+  - **WS**：`/ws?api_key=<key>`（浏览器 `new WebSocket` 无法设自定义 header）。daemon 在 upgrade **之前**校验，不通过同样 HTTP 401；已建立的 WS 连接不受后续 key 轮换影响（断开重连时才再校验）。
+- key 比对使用常数时间比较。
+- 本机 CLI（`csi status` / `csi restart` 等）与 `csi mcp` 自动从 `~/.csi/config.json` 读取 `api_key` 附带请求头，同机用户无感。
+
+### 2.8 `GET /admin`
+
+返回 daemon 内嵌的单文件管理页（内联 CSS/JS，无外部请求、无框架）。`Content-Type: text/html; charset=utf-8`、`Cache-Control: no-store`。页面功能：状态展示、端口 / `bind_host` / 日志 / 超时 / 鉴权开关与 key 的配置表单、重启按钮、局域网暴露警告。页面本身始终可获取（见 §2.7 豁免说明）；页面内 JS 调用 API 时带 key（存 localStorage），收到 401 后引导输入 key。
+
 ## 3. WebSocket 协议（`/ws`）
 
 ### 3.1 连接与重连
 
-- 扩展连接 `ws://127.0.0.1:<port>/ws`。
+- 扩展连接 `ws://127.0.0.1:<port>/ws`；daemon 鉴权开启时连接 `ws://127.0.0.1:<port>/ws?api_key=<key>`（key 从扩展 options 页配置，存 `chrome.storage.local`），缺失/错误在 upgrade 前被 401 拒绝（§2.7），不影响在位连接。
 - 扩展在 `chrome.storage.local` 持久化连接意愿（`ws_should_connect`、`local_url`），service worker 被挂起后通过 `chrome.alarms`（周期 0.5 分钟（可在 options 页改为 30s/60s/关闭），名 `csi-reconcile`）做 reconcile：意愿为连接且当前未连接则重连。
 - daemon 侧同一时间**只接受一个扩展连接**：新连接须在 5 秒内发送 `hello` 完成握手，握手通过后才踢掉旧连接；首条消息非 `hello` 或超时直接关闭，不影响在位连接。
 - `/ws` 升级校验 Origin：空 Origin（非浏览器客户端：测试、curl、未来 direct_cdp）和 `chrome-extension://*` 放行；其它 Origin 拒绝升级（HTTP 403）。扩展 id 不固定（manifest 无 `key`，未打包每机不同），只认 scheme。popup/options 不直连 `/ws`（经 service worker）。这不是鉴权，挡的是浏览器网页，不是本机任意进程。
@@ -446,15 +475,17 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - 0.6.0 起同域 iframe 可进入；`isolated:true`（跨域 OOPIF、不透明源、sandbox 无 allow-same-origin 等）只列不进。
 - 从本版本起，stale `_tabId` 由静默回退改为 `stale_target` 错误；`_tabId===0` 的单标签工具改为 `no_session_target`。旧 HTTP 客户端仍能读 `error` 字符串，但不再得到「碰巧打到用户当前页」的成功。`find_tab(active:true)` 的借用 tab 成为 session 当前目标（不进入 owned 列表）。
 - snapshot 的 `match`、network 的 `limit`/`cursor`/`body_mode`、evaluate/cdp 的 `max_chars` 是**输出加工参数**：它们只决定结果的裁剪、分页或落盘方式，不改变操作目标与语义。旧扩展忽略这些参数后返回的是**安全超集**（未裁剪的更大结果，仍然是合法数据），而不是错误目标或错误数据。因此这些参数**不做 daemon 版本闸**——与 `frame` 的参数闸（§3.3）不同：`frame` 必须闸是因为旧扩展会把进帧意图静默打到顶层帧、操作错误对象；结果预算参数被忽略最坏只是结果偏大。客户端对偏大结果自行分块或改用显式 `body_mode:file` 等规避。
+- `auth_enabled` / `api_key`（§2.7）与 `GET /admin`（§2.8）：旧客户端忽略未知 config 字段；鉴权默认关闭时行为与旧版完全一致。
 
 ## 7. 安全约束（威胁模型）
 
 隔离边界：
 
-- daemon 仅监听 `127.0.0.1`。
-- 无认证（v1 从简）。回环隔离的是「本机 vs 网络」，不是进程沙箱，也不是「本用户 vs 本机其他用户」。
-- 能对 `127.0.0.1:<port>` 发 HTTP（`POST /command`）的主体，视为与 daemon 同一信任域。
-- `/ws` 对浏览器握手校验 Origin（§3.1）：空 Origin 与 `chrome-extension://*` 可连，网页 Origin 不能升级。这不是鉴权——本机非浏览器进程仍可连 `/ws`。网页即便连上也不能驱动真扩展：`tool_call` 只从 daemon 发往当前槽位（§3.3）；hello 后踢旧连接意味着网页占的是槽位本身（DoS / 伪造 `tool_result`），不是给真扩展下发 CDP。
+- daemon 默认仅监听 `127.0.0.1`（见 §1 的 `bind_host` 配置）。把 `bind_host` 设为 `0.0.0.0` / 网卡 IP 后，**信任域从「本机」扩大到「整个可达网络」**：同一局域网内任何设备都能驱动本机 Chrome（含已登录会话）、执行 `evaluate`/`cdp` 任意代码、按 `path` 写任意文件（§5）。**非回环绑定 + 未开鉴权是最危险的组合**（等于裸奔到局域网），只应在可信网络中开启，且理解这是明确的风险自担操作；daemon 启动时对非回环绑定打 WARNING 日志（文案按鉴权开关区分）。非回环 + 鉴权开启（§2.7）时，信任域缩小为「持有 key 的主体」。
+- 鉴权可选（§2.7），默认关闭。回环隔离的是「本机 vs 网络」，不是进程沙箱，也不是「本用户 vs 本机其他用户」——鉴权挡的是网络上的主体，不挡本机同 UID 进程（CLI/MCP 直接读 config.json 拿 key）。
+- 能对 daemon 监听地址（默认 `127.0.0.1`）发 HTTP（`POST /command`）且（鉴权开启时）持有 key 的主体，视为与 daemon 同一信任域。
+- WS 鉴权走 `?api_key=` query（浏览器 WebSocket 无法设自定义 header）：key 可能出现在浏览器历史 / 中间层日志中。daemon 自身不记录请求 URL/参数。这是可接受的固有代价，换取鉴权对扩展可用。
+- `/ws` 对浏览器握手校验 Origin（§3.1）：空 Origin 与 `chrome-extension://*` 可连，网页 Origin 不能升级。这不是鉴权——本机非浏览器进程仍可连 `/ws`（鉴权开启时还需持有 key）。网页即便连上也不能驱动真扩展：`tool_call` 只从 daemon 发往当前槽位（§3.3）；hello 后踢旧连接意味着网页占的是槽位本身（DoS / 伪造 `tool_result`），不是给真扩展下发 CDP。
 
 信任域内的能力均为设计，不是漏洞：
 
@@ -463,4 +494,4 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - `screenshot` / `save_as_pdf` 按 `args.path` 原样落盘（§5）：任何能 POST `/command` 的本地进程，都能让 daemon 以其自身权限写文件系统上的任意路径。daemon 与典型调用方同 UID；调用方自己也能写这些文件。这不是 confused deputy，也不超出「loopback 是隔离边界」的假设。v1 **不会**把 `path` 锁进 `$TMPDIR` 或某个 screenshots 基目录——那会破坏「存到项目目录」的产品需求。
 - `upload` 的 `files` 按调用方字面交给 Chrome `DOM.setFileInputFiles`（§4）：当前页的 file input 会按 HTML 文件控件语义拿到这些本地文件。这是产品能力（把用户指定的本地文件——包括项目文件——塞进网页上传框），不是路径遍历，也不是网页自己发起的读盘。调用方是能 POST `/command` 的本地主体；随机网页不能打 `/command`。daemon 与典型调用方同 UID，调用方自己也能读这些文件。v1 **不会**把 `files` 锁进 `~/Downloads`——那会破坏「上传项目文件」的产品需求。`cdp` 是裸透传，能发同一条 CDP 命令。
 
-明确不在 v1 范围内：非回环监听、加鉴权、对 `path` / `upload.files` 做沙箱。
+明确不在 v1 范围内：对 `path` / `upload.files` 做沙箱。非回环监听已通过 `bind_host` 支持、鉴权已通过 `auth_enabled`/`api_key` 支持（均默认关闭），见上文与 §2.7。

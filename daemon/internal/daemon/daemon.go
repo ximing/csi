@@ -29,6 +29,19 @@ func Port() int {
 	return DefaultPort
 }
 
+// EffectiveAPIKey 返回 config.json 中的 api_key（协议 §2.7）；
+// 未配置 / 读取失败返回空串。CLI 与 MCP 用它自动附带鉴权头——
+// 与 daemon 同机同 UID 读同一 config.json，用户无感。
+// 鉴权未开启时 daemon 忽略鉴权头，所以无条件返回即可。
+func EffectiveAPIKey() string {
+	if dir, err := RunDir(); err == nil {
+		if rc, err := LoadConfig(dir); err == nil {
+			return rc.Values.APIKey
+		}
+	}
+	return ""
+}
+
 // RunDir 返回运行目录 ~/.csi；CSI_HOME 环境变量可覆盖（测试用）。
 func RunDir() (string, error) {
 	if v := os.Getenv("CSI_HOME"); v != "" {

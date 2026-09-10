@@ -16,6 +16,7 @@ import (
 // forwarder 薄代理：把 MCP 工具调用转发为 daemon 的 POST /command（协议 §2.1）。
 type forwarder struct {
 	baseURL string
+	apiKey  string // daemon 鉴权 key（协议 §2.7）；空 = 不带鉴权头
 	client  *http.Client
 }
 
@@ -102,6 +103,9 @@ func (f *forwarder) call(ctx context.Context, action string, args map[string]any
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if f.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+f.apiKey)
+	}
 
 	resp, err := f.httpClient().Do(req)
 	if err != nil {
@@ -113,7 +117,10 @@ func (f *forwarder) call(ctx context.Context, action string, args map[string]any
 	if err != nil {
 		return nil, fmt.Errorf("read daemon response: %w", err)
 	}
-	// HTTP 状态码仅用于传输层错误（协议 §2.1）。
+	// HTTP 状态码仅用于传输层错误（协议 §2.1）——401 例外（协议 §2.7）。
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("daemon requires an API key (auth_enabled) — check api_key in ~/.csi/config.json")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("daemon returned HTTP %d: %s", resp.StatusCode, truncate(string(data), 500))
 	}

@@ -1,6 +1,6 @@
 # Workflow — verifying a case live in the browser
 
-Verification means: execute the case's steps against the real product through the daemon, and iterate until every 【预期】 holds. Everything from the `csi` skill applies (call format, sessions, snapshot first, Windows file-body POST for non-ASCII). This file covers what e2e verification adds on top.
+Verification means: execute the case's steps against the real product through the daemon, and iterate until every 【预期】 holds. Everything from the `csi` skill applies (call format, sessions, snapshot first, Windows file-body POST for non-ASCII, HTTP 401 → auth on, read `api_key` from `~/.csi/config.json` and add `Authorization: Bearer <key>`). This file covers what e2e verification adds on top. Suite scripts (`lib/bridge.mjs`) pick the key up from `config.json` automatically.
 
 ## Setup
 

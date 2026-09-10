@@ -63,6 +63,15 @@ function sameHost(a: string, b: string): boolean {
   }
 }
 
+/**
+ * 鉴权开启时给 WS URL 附 ?api_key=（协议 §2.7/§3.1）：浏览器 WebSocket
+ * 无法设自定义 header，key 只能走 query。key 为空原样返回（daemon 未开鉴权）。
+ */
+export function withKeyParam(base: string, key: string): string {
+  if (!key) return base;
+  return base + (base.includes('?') ? '&' : '?') + 'api_key=' + encodeURIComponent(key);
+}
+
 export class WsClient {
   private socket: WebSocket | null = null;
   private state: ConnectionState = 'disconnected';
@@ -75,6 +84,8 @@ export class WsClient {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private retryAttempt = 0;
   private readonly retryDelaysMs: number[];
+  /** storage 里的 daemon 鉴权 key（协议 §2.7）；每次 reconcile 刷新。 */
+  private storedApiKey = '';
   /** 最近一次 hello_ack 上报的 daemon 版本；未握手过时为空串。 */
   private daemonVersion = '';
 
@@ -112,6 +123,12 @@ export class WsClient {
       if (area === 'local' && changes[STORAGE_KEYS.RECONCILE_PERIOD]) {
         void this.applyReconcilePeriod();
       }
+      // api_key 变更：在位连接不受影响（协议 §2.7），但下次连接要用新 key——
+      // 主动断开重连，让新 key 尽快生效。
+      if (area === 'local' && changes[STORAGE_KEYS.API_KEY] && this.state !== 'disconnected') {
+        this.teardown();
+        void this.reconcile();
+      }
     });
     await this.reconcile();
   }
@@ -145,6 +162,9 @@ export class WsClient {
       if (this.state !== 'disconnected') this.teardown();
       return;
     }
+    // 每轮 reconcile 刷新鉴权 key（协议 §2.7）：key 改动对重连即时生效。
+    const stored = await chrome.storage.local.get(STORAGE_KEYS.API_KEY);
+    this.storedApiKey = (stored[STORAGE_KEYS.API_KEY] as string | undefined) ?? '';
     const url = desired.url || DEFAULT_WS_URL;
     if (this.state !== 'disconnected' && this.currentUrl !== url) this.teardown();
     if (this.state === 'connected' || this.state === 'connecting') return;
@@ -159,7 +179,8 @@ export class WsClient {
     return new Promise((resolve) => {
       let probe: WebSocket;
       try {
-        probe = new WebSocket(url);
+        // 鉴权开启时附 ?api_key=（协议 §3.1）。
+        probe = new WebSocket(withKeyParam(url, this.storedApiKey));
       } catch (err) {
         resolve({ ok: false, reason: (err as Error)?.message || 'invalid url' });
         return;
@@ -183,9 +204,10 @@ export class WsClient {
   }
 
   private openSocket(url: string): void {
-    this.currentUrl = url;
+    this.currentUrl = url; // 存 base URL：reconcile 的比较与展示不受 key 变化干扰
     this.setConnectionState('connecting');
-    const socket = new WebSocket(url);
+    // 鉴权开启时附 ?api_key=（协议 §3.1）；key 在 reconcile 时从 storage 刷新。
+    const socket = new WebSocket(withKeyParam(url, this.storedApiKey));
     this.socket = socket;
 
     this.connectingTimer = setTimeout(() => {

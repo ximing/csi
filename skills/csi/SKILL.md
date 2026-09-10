@@ -8,7 +8,7 @@ metadata:
 
 # CSI
 
-Drive the user's real Chrome (with their login sessions) via a local daemon: `POST http://127.0.0.1:10088/command` with a JSON body `{"action","args","session"}`. Call format, response envelope, Windows file-body rule: `references/http-transport.md`.
+Drive the user's real Chrome (with their login sessions) via a local daemon: `POST http://127.0.0.1:10088/command` with a JSON body `{"action","args","session"}`. Call format, response envelope, Windows file-body rule: `references/http-transport.md`. If a call ever returns **HTTP 401**, daemon auth is enabled — read `api_key` from `~/.csi/config.json` and retry with an `Authorization: Bearer <key>` header (details in `references/http-transport.md`).
 
 ## Tools (21) — what each does; args live in the linked reference
 
