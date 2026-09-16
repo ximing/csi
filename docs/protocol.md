@@ -316,7 +316,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 | 12 | `key_type` | `text`* | `{success, length}` | `Input.insertText` |
 | 13 | `send_keys` | `keys`* , `repeat`(1-100) | `{success, dispatched, os}` | 支持 `Enter`/`Escape`/`Tab`/`F1-F12`/单字母数字、修饰键 `Alt/Ctrl/Cmd/Meta/Shift/Mod`（Mod 自动解析）、空格分隔多段。带平台主修饰键（macOS=Cmd，Windows/Linux=Ctrl；`Mod` 自动解析）的键段会随 keyDown 附带 CDP editing `commands`（如 `Mod+A`→`selectAll`，映射表见 §4.4），否则真实页面里全选/复制等编辑快捷键不生效 |
 | 14 | `cdp` | `method`*, `params`, `max_chars`(默认 12000，最大 80000) | 规范化后的 CDP 结果（见 §4.2）；序列化结果超 `max_chars` 转 artifact（§3.5/§5） | 命令 params 裸透传 escape hatch；返回不是字面「原始 CDP」。超限语义见 §4.5 |
-| 15 | `screenshot` | `format`(png/jpeg), `quality`, `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | base64 由 daemon 落盘，见 §5；`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
+| 15 | `screenshot` | `format`(webp/jpeg/png，默认 webp), `quality`(0-100，webp/jpeg 默认 80), `selector`, `fullPage`, `path`, `frame` | `{format, path, sizeBytes, mimeType}` | Chrome 在捕获时编码（CDP `Page.captureScreenshot`），daemon 只落盘不转码，见 §5。`format` 缺省且 `path` 带已知图片扩展名时按扩展名推断。`fullPage` 与 `selector` 不能同时出现。`@e` 自带 frameId，`frame` 只对 CSS/evaluate 生效 |
 | 16 | `save_as_pdf` | `paper_format`(letter/a4/legal/a3/tabloid), `landscape`, `scale`(0.1-2), `print_background`, `file_name`, `path` | `{path, sizeBytes, mimeType, pageTitle}` | daemon 落盘，100MB 上限 |
 | 17 | `upload` | `selector`*, `files`* (string[]) | `{success, selector, fileCount, files}` | `DOM.setFileInputFiles`；`files` 按调用方字面传给 Chrome，不限制基目录，见 §7 |
 | 18 | `list_tabs` | — | `{success, tabs:[{tabId,url,title,active,groupTitle}], currentTarget?}` | `tabs` 仅 owned；borrowed 当前目标走独立的 `currentTarget` |
@@ -455,9 +455,23 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - 序列化后未超限则正常返回；超限默认转 artifact（preview + path），不向模型内联完整结果。
 - **不允许**从 JSON 中间裁切后伪装成合法对象——要么完整内联，要么走 artifact。
 
+### 4.6 `screenshot` 编码（默认 webp）
+
+截图在扩展里经 CDP `Page.captureScreenshot` **一次编码**，daemon 只 base64 解码落盘（§5），不做二次转码。这样 WS 载荷和交给 Agent 的文件同时变小。
+
+| `format` | 默认 | `quality` | `mimeType` |
+|---|---|---|---|
+| `webp`（缺省） | 是 | 0–100，缺省 80 | `image/webp` |
+| `jpeg` | 否 | 0–100，缺省 80 | `image/jpeg` |
+| `png` | 否 | 忽略 | `image/png` |
+
+- 非法 `format` → `screenshot: format must be png, jpeg, or webp`。
+- `format` 缺省且 `path` 以 `.png` / `.jpg` / `.jpeg` / `.webp` 结尾（大小写不敏感）时按扩展名推断（`.jpg`/`.jpeg` → `jpeg`）。显式 `format` 优先于扩展名；`path` 仍按字面落盘（§5），不会改写扩展名。未知扩展名或不带 `path` → 默认 `webp`。
+- 需要无损归档时显式 `format:"png"`（或 `path` 以 `.png` 结尾且不传 `format`）。
+
 ## 5. 大结果后处理（daemon 侧）
 
-- `screenshot`：扩展返回 `{format, dataLength, data(base64)}`。daemon base64 解码后写入 `args.path`（父目录自动创建、覆盖写）；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>-<rand>.<ext>`。最终响应 `{format, path, sizeBytes, mimeType}`。
+- `screenshot`：扩展返回 `{format, dataLength, data(base64)}`（`format` 为捕获所用编码，默认 `webp`，见 §4）。daemon base64 解码后**原样**写入 `args.path`（父目录自动创建、覆盖写），不做二次转码；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>-<rand>.<ext>`（`<ext>` 为 `webp` / `jpeg` / `png`）。最终响应 `{format, path, sizeBytes, mimeType}`，`mimeType` 为 `image/webp` / `image/jpeg` / `image/png`。
 - `save_as_pdf`：扩展返回 `{data(base64), dataLength, pageTitle, requestedFileName}`。落盘规则同上；默认文件名取页面标题（清洗非法字符）+ `.pdf`。解码后 >100MB 拒绝并返回错误。
 - artifact（snapshot full >80000、network detail `body_mode:file`、evaluate/cdp 超 `max_chars`；内部信封见 §3.5）：扩展返回 `{artifact:{encoding:"utf8", mimeType, suggestedName, data}, preview, sourceChars}`。daemon 将 `artifact.data` 落盘（父目录自动创建、覆盖写）：工具带 `path` 参数且调用方显式提供时沿用本节 `path` 语义，否则写入 `$TMPDIR/csi-<suggestedName>-<ts>-<rand>`。客户端最终收到 `{truncated:true, preview, path, sizeBytes, mimeType}` ——`truncated:true` 表示**内联被省略、完整内容在 path**，不是数据缺失。HTTP/MCP 客户端永不收到原始 `artifact.data`。落盘写盘失败按 `result_too_large` 返回（§2.1）。
 - `path` 按调用方字面写入：不校验 `..`、不要求绝对路径、不限制基目录。相对路径相对 **daemon 进程的 cwd**（与调用方 cwd 无关；登录自启时 cwd 通常是 `/` 或 `$HOME`，不是项目目录）。调用方应传绝对路径。未提供 `path` 才落到 `$TMPDIR`。这是产品能力（要把截图/PDF 存到项目目录），不是路径遍历漏洞，威胁模型见 §7。
@@ -476,6 +490,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - 从本版本起，stale `_tabId` 由静默回退改为 `stale_target` 错误；`_tabId===0` 的单标签工具改为 `no_session_target`。旧 HTTP 客户端仍能读 `error` 字符串，但不再得到「碰巧打到用户当前页」的成功。`find_tab(active:true)` 的借用 tab 成为 session 当前目标（不进入 owned 列表）。
 - snapshot 的 `match`、network 的 `limit`/`cursor`/`body_mode`、evaluate/cdp 的 `max_chars` 是**输出加工参数**：它们只决定结果的裁剪、分页或落盘方式，不改变操作目标与语义。旧扩展忽略这些参数后返回的是**安全超集**（未裁剪的更大结果，仍然是合法数据），而不是错误目标或错误数据。因此这些参数**不做 daemon 版本闸**——与 `frame` 的参数闸（§3.3）不同：`frame` 必须闸是因为旧扩展会把进帧意图静默打到顶层帧、操作错误对象；结果预算参数被忽略最坏只是结果偏大。客户端对偏大结果自行分块或改用显式 `body_mode:file` 等规避。
 - `auth_enabled` / `api_key`（§2.7）与 `GET /admin`（§2.8）：旧客户端忽略未知 config 字段；鉴权默认关闭时行为与旧版完全一致。
+- 本版本起 `screenshot` 默认 `format=webp`（`quality` 80）。显式 `png`/`jpeg` 行为不变。`format` 缺省且 `path` 带已知图片扩展名时按扩展名推断，避免 `path: foo.png` 写入 webp 字节。旧扩展仍默认 png；新客户端不传 `format` 时由新扩展产出 webp。`webp` 作为 format 取值不做版本闸：旧扩展把未知 `format` 原样交给 CDP，Chrome 的 `Page.captureScreenshot` 早已支持 webp。
 
 ## 7. 安全约束（威胁模型）
 

@@ -3,7 +3,7 @@ name: csi
 description: |
   CSI lets AI control the user's real Chrome browser — navigate, click, type, read, screenshot, save as PDF, and interact with any website using the user's actual login sessions. Use whenever the user wants to operate, read, or scrape a live website, automate browser tasks, or do anything that needs a real browser with real login state — including when they mention "browser", "webpage", "open URL", or a screenshot of a live site. Do NOT use when the user is only discussing browser internals, frontend code, URL formats, or screenshot concepts without opening a page; when they ask for headless, an isolated profile, or plain HTTP fetching (CSI is not the default there); or when "browser"/"webpage" merely appears in a code review.
 metadata:
-  version: "0.7.3"
+  version: "0.7.4"
 ---
 
 # CSI
@@ -29,7 +29,7 @@ Drive the user's real Chrome (with their login sessions) via a local daemon: `PO
 | `key_type` | type text into the focused element | `references/interaction.md` |
 | `send_keys` | special keys & shortcuts (`Enter`, `Tab`, `Mod+a`…), repeatable | `references/interaction.md` |
 | `wait` | wait for text / selector / url to appear or vanish — never sleep, never bash-poll | `references/interaction.md` |
-| `screenshot` | PNG/JPEG of viewport, element, or full page → file | `references/large-results.md` |
+| `screenshot` | capture viewport / element / full page → file; **omit `format`** (WebP) | `references/large-results.md` |
 | `save_as_pdf` | print the page to a PDF file | `references/large-results.md` |
 | `evaluate` | run arbitrary JS in the page (escape hatch — deliberate use only) | `references/large-results.md` |
 | `cdp` | raw Chrome DevTools Protocol passthrough (escape hatch — deliberate use only) | `references/large-results.md` |
@@ -44,6 +44,8 @@ Drive the user's real Chrome (with their login sessions) via a local daemon: `PO
 4. After anything that changes the page, `wait` for text / selector / url — never sleep, never bash-poll.
 
 Prefer `@e` refs over hand-written CSS — every `selector` arg takes `"@e3"` (from the latest snapshot) or CSS, and refs survive class-hash churn: `{"action":"click","args":{"selector":"@e3"},"session":"my-task"}`. Refs are per-tab and die on navigation — a failed `stale_ref` / `stale_target` means re-`snapshot` first, never blind-replay.
+
+**Screenshots are WebP.** Call `screenshot` with no `format` (quality 80, much smaller than PNG, still readable). Do **not** pass `format:"png"` or a `path` ending in `.png` — both capture a large PNG. If you pass `path`, end it `.webp`. Use PNG only when the user asked to keep a lossless file. Details: `references/large-results.md`.
 
 ## Sessions
 

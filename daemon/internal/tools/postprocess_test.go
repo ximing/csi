@@ -15,6 +15,52 @@ import (
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
+func TestScreenshotWebpMimeAndExt(t *testing.T) {
+	t.Parallel()
+	res, err := PostProcess("screenshot", map[string]any{}, map[string]any{
+		"format": "webp",
+		"data":   b64("webp-bytes"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := res.(map[string]any)
+	path := d["path"].(string)
+	if !strings.HasSuffix(path, ".webp") {
+		t.Fatalf("path = %q, want .webp", path)
+	}
+	if d["mimeType"] != "image/webp" || d["format"] != "webp" {
+		t.Fatalf("resp = %v", d)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "webp-bytes" {
+		t.Fatalf("content = %q", got)
+	}
+	os.Remove(path)
+}
+
+func TestScreenshotDefaultFormatIsWebp(t *testing.T) {
+	t.Parallel()
+	res, err := PostProcess("screenshot", map[string]any{}, map[string]any{
+		"data": b64("raw"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := res.(map[string]any)
+	if d["format"] != "webp" || d["mimeType"] != "image/webp" {
+		t.Fatalf("resp = %v", d)
+	}
+	path := d["path"].(string)
+	if !strings.HasSuffix(path, ".webp") {
+		t.Fatalf("path = %q", path)
+	}
+	os.Remove(path)
+}
+
 func TestScreenshotDefaultTempPath(t *testing.T) {
 	t.Parallel()
 	res, err := PostProcess("screenshot", map[string]any{}, map[string]any{

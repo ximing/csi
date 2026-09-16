@@ -63,11 +63,11 @@ function captureParams(): any {
 }
 
 describe('screenshot 参数与默认值', () => {
-  it('无参：png、无 quality/clip/captureBeyondViewport', async () => {
+  it('无参：webp quality 80、无 clip/captureBeyondViewport', async () => {
     dispatch = (m) => (m === 'Page.captureScreenshot' ? { data: 'abc123' } : {});
     const res = (await new ScreenshotTool().execute({}, ctx)) as Record<string, unknown>;
-    expect(res).toMatchObject({ format: 'png', dataLength: 6, data: 'abc123' });
-    expect(captureParams()).toEqual({ format: 'png' });
+    expect(res).toMatchObject({ format: 'webp', dataLength: 6, data: 'abc123' });
+    expect(captureParams()).toEqual({ format: 'webp', quality: 80 });
   });
 
   it('jpeg 默认 quality 80', async () => {
@@ -82,10 +82,60 @@ describe('screenshot 参数与默认值', () => {
     expect(captureParams()).toEqual({ format: 'jpeg', quality: 50 });
   });
 
-  it('非 jpeg 时 quality 被忽略', async () => {
+  it('webp 显式 quality 生效', async () => {
+    dispatch = (m) => (m === 'Page.captureScreenshot' ? { data: 'x' } : {});
+    await new ScreenshotTool().execute({ format: 'webp', quality: 50 }, ctx);
+    expect(captureParams()).toEqual({ format: 'webp', quality: 50 });
+  });
+
+  it('png 时 quality 被忽略', async () => {
     dispatch = (m) => (m === 'Page.captureScreenshot' ? { data: 'x' } : {});
     await new ScreenshotTool().execute({ format: 'png', quality: 50 }, ctx);
     expect(captureParams()).toEqual({ format: 'png' });
+  });
+
+  it('非法 format 报错', async () => {
+    await expect(new ScreenshotTool().execute({ format: 'gif' }, ctx)).rejects.toThrow(
+      /format must be png, jpeg, or webp/,
+    );
+  });
+
+  it('path .png 且无 format → png', async () => {
+    dispatch = (m) => (m === 'Page.captureScreenshot' ? { data: 'x' } : {});
+    const res = (await new ScreenshotTool().execute(
+      { path: '/tmp/shot.png' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res).toMatchObject({ format: 'png' });
+    expect(captureParams()).toEqual({ format: 'png' });
+  });
+
+  it('path .JPG 且无 format → jpeg quality 80', async () => {
+    dispatch = (m) => (m === 'Page.captureScreenshot' ? { data: 'x' } : {});
+    await new ScreenshotTool().execute({ path: 'C:\\temp\\A.JPG' }, ctx);
+    expect(captureParams()).toEqual({ format: 'jpeg', quality: 80 });
+  });
+
+  it('path .webp 且无 format → webp quality 80', async () => {
+    dispatch = (m) => (m === 'Page.captureScreenshot' ? { data: 'x' } : {});
+    await new ScreenshotTool().execute({ path: '/tmp/shot.webp' }, ctx);
+    expect(captureParams()).toEqual({ format: 'webp', quality: 80 });
+  });
+
+  it('显式 format 优先于 path 扩展名', async () => {
+    dispatch = (m) => (m === 'Page.captureScreenshot' ? { data: 'x' } : {});
+    const res = (await new ScreenshotTool().execute(
+      { path: '/tmp/shot.png', format: 'webp' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res).toMatchObject({ format: 'webp' });
+    expect(captureParams()).toEqual({ format: 'webp', quality: 80 });
+  });
+
+  it('未知 path 扩展名走默认 webp', async () => {
+    dispatch = (m) => (m === 'Page.captureScreenshot' ? { data: 'x' } : {});
+    await new ScreenshotTool().execute({ path: '/tmp/shot.bin' }, ctx);
+    expect(captureParams()).toEqual({ format: 'webp', quality: 80 });
   });
 
   it('fullPage 与 selector 互斥', async () => {
@@ -121,10 +171,11 @@ describe('screenshot selector 裁剪', () => {
     refs.assignRef(10, 111, 'button', 'A');
     dispatch = selectorDispatch(GOOD_BORDER);
     const res = (await new ScreenshotTool().execute({ selector: '@e1' }, ctx)) as Record<string, unknown>;
-    expect(res).toMatchObject({ format: 'png', data: 'clipdata', dataLength: 8 });
+    expect(res).toMatchObject({ format: 'webp', data: 'clipdata', dataLength: 8 });
     expect(calls.some((c) => c.method === 'Runtime.callFunctionOn')).toBe(true);
     expect(captureParams()).toEqual({
-      format: 'png',
+      format: 'webp',
+      quality: 80,
       clip: { x: 10, y: 20, width: 100, height: 50, scale: 1 },
     });
   });
@@ -211,7 +262,11 @@ describe('screenshot fullPage（无 selector）', () => {
     dispatch = (m) => (m === 'Page.captureScreenshot' ? { data: 'full' } : {});
     const res = (await new ScreenshotTool().execute({ fullPage: true }, ctx)) as Record<string, unknown>;
     expect(res).toMatchObject({ data: 'full' });
-    expect(captureParams()).toEqual({ format: 'png', captureBeyondViewport: true });
+    expect(captureParams()).toEqual({
+      format: 'webp',
+      quality: 80,
+      captureBeyondViewport: true,
+    });
   });
 
   it('失败：重写为带建议的错误', async () => {
@@ -254,7 +309,8 @@ describe('screenshot fullPage + frame（clip 到 iframe 可见盒，协议 §4.1
     const owner = calls.find((c) => c.method === 'DOM.getFrameOwner');
     expect(owner?.params).toEqual({ frameId: 'f1' });
     expect(captureParams()).toEqual({
-      format: 'png',
+      format: 'webp',
+      quality: 80,
       clip: { x: 10, y: 20, width: 100, height: 50, scale: 1 },
     });
   });

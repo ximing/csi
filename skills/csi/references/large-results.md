@@ -40,11 +40,25 @@ Args: `cmd`* = `start` | `stop` | `list` | `detail`; `filter`; `requestId`.
 
 ## screenshot
 
-Args: `format` (`png`|`jpeg`), `quality` (0–100), `selector` (@e/CSS), `fullPage`, `path`, `frame` → `{format, path, sizeBytes, mimeType}`.
+Args: `format` (`webp` default | `jpeg` | `png`), `quality` (0–100, webp/jpeg default 80), `selector` (@e/CSS), `fullPage`, `path`, `frame` → `{format, path, sizeBytes, mimeType}`.
+
+Prefer WebP so the file you Read stays small. Default call (no `format`, no `path`) is already WebP quality 80:
+
+```json
+{"action":"screenshot","args":{},"session":"my-task"}
+```
+
+If you pass `path`, end it `.webp` — a `.png` path is captured as PNG even when `format` is omitted:
+
+```json
+{"action":"screenshot","args":{"path":"/abs/shot.webp"},"session":"my-task"}
+```
 
 - The daemon writes the image to disk and returns the **path** — never base64. Open `path` with your Read tool to see it.
+- Do **not** pass `format:"png"` unless the user asked to keep a lossless archival file. `quality` is ignored for PNG.
+- If you omit `format` but pass `path` ending in `.png` / `.jpg` / `.jpeg` / `.webp`, the format is inferred from that extension (this is why `.png` paths are large).
 - `fullPage` and `selector` are mutually exclusive. `fullPage + frame` clips to the iframe element's visible box in the parent viewport, not the child document's full scroll height.
-- Default: PNG of the visible viewport, temp-path picked by the daemon.
+- Without `path`, the daemon picks a temp file (`csi-screenshot-<ts>-<rand>.webp`).
 
 ## save_as_pdf
 

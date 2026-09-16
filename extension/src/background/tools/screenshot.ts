@@ -1,7 +1,9 @@
 /**
- * screenshot (protocol §4): Page.captureScreenshot, optionally clipped to
- * an element's border box or captured beyond the viewport (fullPage). The
- * base64 payload goes back to the daemon, which writes it to disk (protocol §5).
+ * screenshot (protocol §4 / §4.6): Page.captureScreenshot, optionally clipped
+ * to an element's border box or captured beyond the viewport (fullPage).
+ * Default encoding is webp (quality 80) so the WS payload and the file the
+ * agent reads stay small; png/jpeg remain explicit. The base64 payload goes
+ * back to the daemon, which writes it to disk without re-encoding (protocol §5).
  */
 import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';
@@ -13,18 +15,62 @@ import { resolveFrame, FRAME_GONE_ERROR } from '../frames';
 const NO_BOX_ERROR =
   'screenshot: element has no layout box (display:none / detached / zero-size).';
 
+const SCREENSHOT_FORMATS = new Set(['png', 'jpeg', 'webp']);
+
 interface CaptureParams {
   format: string;
   quality?: number;
   clip?: { x: number; y: number; width: number; height: number; scale: number };
 }
 
+/** 协议 §4.6：显式 format 优先；否则按 path 扩展名推断；再否则 webp。 */
+function resolveScreenshotFormat(args: ToolArgs): string {
+  const explicit = args.format;
+  if (typeof explicit === 'string' && explicit !== '') {
+    if (!SCREENSHOT_FORMATS.has(explicit)) {
+      throw new Error('screenshot: format must be png, jpeg, or webp');
+    }
+    return explicit;
+  }
+  const path = typeof args.path === 'string' ? args.path : '';
+  return formatFromPath(path) ?? 'webp';
+}
+
+function formatFromPath(path: string): string | undefined {
+  const m = path.toLowerCase().match(/\.([a-z0-9]+)$/);
+  if (!m) return undefined;
+  switch (m[1]) {
+    case 'png':
+      return 'png';
+    case 'jpg':
+    case 'jpeg':
+      return 'jpeg';
+    case 'webp':
+      return 'webp';
+    default:
+      return undefined;
+  }
+}
+
+/** webp/jpeg 默认 quality 80；png 忽略。 */
+function resolveQuality(format: string, raw: unknown): number | undefined {
+  if (format !== 'jpeg' && format !== 'webp') return undefined;
+  if (raw === undefined || raw === null) return 80;
+  return raw as number;
+}
+
+function captureBase(format: string, quality: number | undefined): CaptureParams {
+  const params: CaptureParams = { format };
+  if (quality !== undefined) params.quality = quality;
+  return params;
+}
+
 export class ScreenshotTool implements Tool {
   readonly name = 'screenshot';
 
   async execute(args: ToolArgs, target: TargetContext): Promise<unknown> {
-    const format = (args.format as string | undefined) || 'png';
-    const quality = format === 'jpeg' ? ((args.quality as number | undefined) || 80) : undefined;
+    const format = resolveScreenshotFormat(args);
+    const quality = resolveQuality(format, args.quality);
     const selector = typeof args.selector === 'string' ? args.selector : '';
     const fullPage = args.fullPage === true;
     if (fullPage && selector) {
@@ -40,8 +86,7 @@ export class ScreenshotTool implements Tool {
 
     let shot: { data: string };
     if (selector) {
-      const params: CaptureParams = { format };
-      if (quality !== undefined) params.quality = quality;
+      const params = captureBase(format, quality);
 
       const objectId = await resolveObjectId(this.name, selector, target.tabId, frameId);
       await scrollIntoView(target.tabId, objectId);
@@ -80,8 +125,7 @@ export class ScreenshotTool implements Tool {
       );
       if (!object?.objectId) throw new Error(FRAME_GONE_ERROR);
 
-      const params: CaptureParams = { format };
-      if (quality !== undefined) params.quality = quality;
+      const params = captureBase(format, quality);
 
       let boxModel: { model?: { border?: number[] } };
       try {
@@ -104,8 +148,10 @@ export class ScreenshotTool implements Tool {
       params.clip = { x, y, width, height, scale: 1 };
       shot = await sendCommand<{ data: string }>(target.tabId, 'Page.captureScreenshot', params);
     } else {
-      const params: CaptureParams & { captureBeyondViewport?: boolean } = { format };
-      if (quality !== undefined) params.quality = quality;
+      const params: CaptureParams & { captureBeyondViewport?: boolean } = captureBase(
+        format,
+        quality,
+      );
       if (fullPage) params.captureBeyondViewport = true;
       try {
         shot = await sendCommand<{ data: string }>(target.tabId, 'Page.captureScreenshot', params);

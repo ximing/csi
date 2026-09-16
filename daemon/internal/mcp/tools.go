@@ -217,8 +217,8 @@ var toolDefs = []toolDef{
 		name:        "screenshot",
 		description: "Take a screenshot of the current page (or one element) and save it to a file; returns the file path.",
 		props: map[string]any{
-			"format":   strEnumProp("Image format (default png).", "png", "jpeg"),
-			"quality":  intProp("JPEG quality 0-100 (jpeg only)."),
+			"format":   strEnumProp("Image format (default webp). If omitted, inferred from path extension (.png/.jpg/.jpeg/.webp).", "webp", "jpeg", "png"),
+			"quality":  intProp("WebP/JPEG quality 0-100 (webp and jpeg only; default 80)."),
 			"selector": strProp("@eN ref or CSS selector to capture only that element."),
 			"fullPage": boolProp("Capture the full scrollable page. Mutually exclusive with selector."),
 			"path":     strProp("Output file path, written verbatim (prefer absolute; relative is vs the daemon cwd). Default: a temp file."),

@@ -116,19 +116,19 @@ func saveArtifact(action string, args map[string]any, d map[string]any) (any, er
 }
 
 // saveScreenshot 扩展返回 {format, dataLength, data(base64)}，
-// daemon 解码落盘后返回 {format, path, sizeBytes, mimeType}。
+// daemon 解码后原样落盘（协议 §5：不二次转码），返回 {format, path, sizeBytes, mimeType}。
 func saveScreenshot(args map[string]any, data any) (any, error) {
 	d, _ := data.(map[string]any)
 	format, _ := d["format"].(string)
 	if format == "" {
-		format = "png"
+		format = "webp" // 协议 §4.6 默认
 	}
 	raw, err := decodeBase64Field(d, "data")
 	if err != nil {
 		return nil, fmt.Errorf("screenshot: %w", err)
 	}
 
-	ext := format // png / jpeg
+	ext := format // webp / jpeg / png
 	path, _ := args["path"].(string)
 	if path == "" {
 		path = filepath.Join(os.TempDir(),
@@ -250,6 +250,8 @@ func mimeTypeFor(ext string) string {
 	switch ext {
 	case "jpeg", "jpg":
 		return "image/jpeg"
+	case "webp":
+		return "image/webp"
 	case "pdf":
 		return "application/pdf"
 	default:
