@@ -22,6 +22,12 @@ Go daemon：AI 客户端的 HTTP 入口 + 扩展的 WS 服务端 + 会话状态 
 - 业务错误一律放响应 body 的 `error` 字段，HTTP 状态码只用于传输层错误（协议 §2.1）。
 - 代码注释用中文，引用协议章节时写 `协议 §x.y` 格式。
 
+## Homebrew 通道
+
+- 仅 brew services 拉起的 `serve` 注入 `CSI_BREW_SERVICE=1`。此时 `GET /status` 带 `supervisor: "brew-services"`（协议 §2.2），否则省略该字段。
+- `POST /restart` 在 brew 通道只优雅退出，禁止 `spawnReplacement`（协议 §2.6）；由 Homebrew KeepAlive 拉起新进程读 config。其它通道仍 spawn + 退出。
+- `csi stop` / `csi restart`（含 `--force`）见到 `supervisor: "brew-services"` 必须拒绝，提示 `brew services stop|restart csi`。
+
 ## 开发偏好
 
 - 测试：标准 `go test ./...`，测试文件与被测文件同包同目录。

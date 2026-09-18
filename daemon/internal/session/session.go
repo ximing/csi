@@ -3,19 +3,23 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 )
 
 const (
-	// MaxSessions session 数上限；超出淘汰最久未访问者（LRU）。
+	// MaxSessions session 数上限；超出时只淘汰空 owned 集且未持锁的 LRU；无受害者则跳过（协议 §3.4）。
 	MaxSessions = 256
 	// MaxNameLength session 名长度上限（按字节，len()），防失控客户端刷爆内存。
 	MaxNameLength = 128
-	// IdleTTL 闲置回收阈值；回收无副作用（session 只持 tab 映射，协议 §3.4 有降级路径）。
-	IdleTTL = 24 * time.Hour
+	// IdleTTL 闲置回收阈值；仅空 owned 集且未持锁的 session 可回收（协议 §3.4）。
+	IdleTTL      = 24 * time.Hour
+	sessionsFile = "sessions.json"
 )
 
 // Session 单个会话的标签状态。
@@ -35,13 +39,89 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	seq      int64
+	dir      string // 非空则落盘 sessions.json（协议 §3.4）；空 = 纯内存
 	// Now 注入时钟（测试用）；nil 时用 time.Now。
 	Now func() time.Time
 }
 
-// NewManager 创建 Manager。
+// persistedSession 落盘形状，不含 gate / lastAccess（协议 §3.4）。
+type persistedSession struct {
+	TabIDs       []int  `json:"tabIds"`
+	CurrentTabID int    `json:"currentTabId"`
+	Borrowed     bool   `json:"borrowed"`
+	GroupTitle   string `json:"groupTitle"`
+}
+
+// NewManager 创建纯内存 Manager（测试用；不落盘）。
 func NewManager() *Manager {
 	return &Manager{sessions: make(map[string]*Session)}
+}
+
+// NewManagerPersist 从 dir/sessions.json 加载；缺失或损坏当空表。
+// 加载后的 session 视为刚访问，不立刻 TTL（协议 §3.4）。
+func NewManagerPersist(dir string) *Manager {
+	m := &Manager{sessions: make(map[string]*Session), dir: dir}
+	m.load()
+	return m
+}
+
+func (m *Manager) load() {
+	if m.dir == "" {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(m.dir, sessionsFile))
+	if err != nil {
+		return
+	}
+	var in map[string]persistedSession
+	if json.Unmarshal(data, &in) != nil {
+		return
+	}
+	now := m.now()
+	for name, p := range in {
+		m.seq++
+		tabIDs := make([]int, len(p.TabIDs))
+		copy(tabIDs, p.TabIDs)
+		m.sessions[name] = &Session{
+			TabIDs:       tabIDs,
+			CurrentTabID: p.CurrentTabID,
+			Borrowed:     p.Borrowed,
+			GroupTitle:   p.GroupTitle,
+			gate:         &fifo{},
+			lastUsed:     m.seq,
+			lastAccess:   now,
+		}
+	}
+}
+
+// saveLocked 原子写 sessions.json（临时文件 + Rename）。dir 为空则跳过。
+func (m *Manager) saveLocked() {
+	if m.dir == "" {
+		return
+	}
+	out := make(map[string]persistedSession, len(m.sessions))
+	for name, s := range m.sessions {
+		tabIDs := make([]int, len(s.TabIDs))
+		copy(tabIDs, s.TabIDs)
+		out[name] = persistedSession{
+			TabIDs:       tabIDs,
+			CurrentTabID: s.CurrentTabID,
+			Borrowed:     s.Borrowed,
+			GroupTitle:   s.GroupTitle,
+		}
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return
+	}
+	path := filepath.Join(m.dir, sessionsFile)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+	}
 }
 
 func (m *Manager) get(name string) *Session {
@@ -70,21 +150,25 @@ func (m *Manager) now() time.Time {
 	return time.Now()
 }
 
-// sweepLocked 惰性清扫闲置超 TTL 的 session；持有锁（busy）的跳过。
+// sweepLocked 惰性清扫闲置超 TTL 的 session。
+// 有 owned tab（len(TabIDs)>0）或持有锁（busy）的跳过（协议 §3.4）。
 func (m *Manager) sweepLocked(now time.Time) {
 	for n, s := range m.sessions {
-		if now.Sub(s.lastAccess) > IdleTTL && !s.gate.busy() {
+		if len(s.TabIDs) > 0 || s.gate.busy() {
+			continue
+		}
+		if now.Sub(s.lastAccess) > IdleTTL {
 			delete(m.sessions, n)
 		}
 	}
 }
 
-// evictLRULocked 淘汰最久未访问且未持锁的一个 session。
+// evictLRULocked 只在空 owned 集且未持锁的 session 里挑 LRU；没有受害者则 no-op（协议 §3.4）。
 func (m *Manager) evictLRULocked() {
 	var victim string
 	var min int64 = math.MaxInt64
 	for n, s := range m.sessions {
-		if s.gate.busy() {
+		if len(s.TabIDs) > 0 || s.gate.busy() {
 			continue
 		}
 		if s.lastUsed < min {
@@ -117,8 +201,9 @@ func (m *Manager) Inject(name string, args map[string]any) map[string]any {
 	defer m.mu.Unlock()
 
 	s := m.get(name)
-	if gt, ok := args["group_title"].(string); ok && gt != "" {
+	if gt, ok := args["group_title"].(string); ok && gt != "" && gt != s.GroupTitle {
 		s.GroupTitle = gt
+		m.saveLocked()
 	}
 
 	out := make(map[string]any, len(args)+4)
@@ -138,6 +223,7 @@ func (m *Manager) Inject(name string, args map[string]any) map[string]any {
 func (m *Manager) Update(name, tool string, data any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer m.saveLocked()
 
 	s := m.get(name)
 	d, _ := data.(map[string]any)
@@ -218,7 +304,9 @@ func (m *Manager) CurrentTab(name string) int {
 func (m *Manager) ForgetTab(name string, tabId int) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return forgetTabLocked(m.get(name), tabId)
+	next := forgetTabLocked(m.get(name), tabId)
+	m.saveLocked()
+	return next
 }
 
 func forgetTabLocked(s *Session, tabId int) int {

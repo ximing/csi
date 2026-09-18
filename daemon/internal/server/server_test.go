@@ -1188,3 +1188,33 @@ func TestWSAuth(t *testing.T) {
 		t.Fatalf("hello_ack: err=%v type=%q", err, ack.Type)
 	}
 }
+// TestStatusSupervisor 默认省略 supervisor；非空则输出（协议 §2.2）。
+func TestStatusSupervisor(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rc, _ := daemon.LoadConfig(dir)
+	srv := server.New(rc, dir, nil)
+
+	req := httptest.NewRequest("GET", "/status", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var noSup map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &noSup); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := noSup["supervisor"]; ok {
+		t.Fatalf("默认不得输出 supervisor, got %v", noSup)
+	}
+
+	srv.Supervisor = "brew-services"
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, httptest.NewRequest("GET", "/status", nil))
+	var withSup map[string]any
+	if err := json.Unmarshal(w2.Body.Bytes(), &withSup); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if withSup["supervisor"] != "brew-services" {
+		t.Fatalf("supervisor = %v, want brew-services", withSup["supervisor"])
+	}
+}
+

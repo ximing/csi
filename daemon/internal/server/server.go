@@ -40,8 +40,12 @@ type Server struct {
 	// OnConfigApplied POST /config 保存成功后回调（如更新日志保留天数）；可为 nil。
 	OnConfigApplied func(daemon.Config)
 
-	// Restarter POST /restart 触发：拉起替代进程并安排本进程退出；nil 表示不支持。
+	// Restarter POST /restart 触发：非 brew 拉起替代进程并安排本进程退出；
+	// brew 通道只安排退出（协议 §2.6）。nil 表示不支持。
 	Restarter func() error
+
+	// Supervisor 非空时 /status 输出该值（协议 §2.2：brew 通道为 brew-services）。
+	Supervisor string
 
 	cfgMu sync.RWMutex
 	cfg   *daemon.ResolvedConfig
@@ -56,7 +60,7 @@ func New(cfg *daemon.ResolvedConfig, dir string, logger *log.Logger) *Server {
 	hub := ws.New(version.Version, logger)
 	hub.SetDaemonTools(tools.Names())
 	hub.SetToolTimeout(time.Duration(cfg.Values.ToolTimeoutSeconds) * time.Second)
-	sessions := session.NewManager()
+	sessions := session.NewManagerPersist(dir) // 落盘 sessions.json（协议 §3.4）
 	be := backend.NewExtensionBackend(hub)
 	ex := tools.NewExecutor(be, sessions)
 	ex.Inventory = hub
@@ -203,6 +207,7 @@ type statusResponse struct {
 	BindHost           string    `json:"bind_host"`
 	UpdateAvailable    *bool     `json:"update_available,omitempty"`
 	LatestVersion      string    `json:"latest_version,omitempty"`
+	Supervisor         string    `json:"supervisor,omitempty"` // 协议 §2.2：空则省略
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +227,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Sessions:           s.Sessions.Names(),
 		Port:               s.Port,
 		BindHost:           s.BindHost,
+		Supervisor:         s.Supervisor,
 	}
 	if s.UpdateChecker != nil {
 		if cache := s.UpdateChecker.ReadCache(); cache != nil {
@@ -383,7 +389,7 @@ func (s *Server) handlePostConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, commandResponse{Success: true, Data: map[string]any{"restart_required": restartRequired}})
 }
 
-// handleRestart 触发自重启：Restarter 拉起替代进程并安排本进程退出。
+// handleRestart 触发自重启：Restarter 安排本进程退出（非 brew 会先 spawn）。
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	if s.Restarter == nil {
 		writeJSON(w, commandResponse{Success: false, Error: "restart not supported"})

@@ -323,7 +323,10 @@ func TestArtifactReadHint(t *testing.T) {
 func TestForwardAuthHeader(t *testing.T) {
 	var gotAuth []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		// 只记 POST /command；转发前的 GET /config（读超时配置）不算（协议 §3.3）。
+		if r.Method == http.MethodPost {
+			gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"success":true,"data":{"success":true}}`)
 	}))

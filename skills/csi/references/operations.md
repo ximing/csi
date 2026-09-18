@@ -45,7 +45,7 @@ By default the daemon binds `127.0.0.1` only and needs no auth: loopback binding
 
 ## Do NOT do automatically
 
-Never run `stop` / `restart` / `csi uninstall` / `csi update` / `autostart on` / `autostart off` on your own. `stop`/`restart` kill the running daemon and any in-flight work. `csi uninstall` goes further — it stops the daemon, removes login autostart and the daily update task, and deletes `~/.csi` entirely. `csi update` replaces the binary and restarts the daemon — whether to upgrade is the user's call. `autostart on`/`off` change whether the daemon comes back at login — that needs the user's OK. If a hard restart is genuinely needed, ask the user to run `csi restart` by hand. If they want login autostart, ask them to run `csi autostart on`.
+Never run `stop` / `restart` / `csi uninstall` / `csi update` / `autostart on` / `autostart off` / `brew services stop` / `brew services restart` on your own. `stop`/`restart` kill the running daemon and any in-flight work. `csi uninstall` goes further — it stops the daemon, removes login autostart and the daily update task, and deletes `~/.csi` entirely. `csi update` replaces the binary and restarts the daemon — whether to upgrade is the user's call. `autostart on`/`off` change whether the daemon comes back at login — that needs the user's OK. `brew services stop`/`restart` change Homebrew supervision — same class of machine-level change. If a hard restart is genuinely needed, ask the user to run `csi restart` by hand. If they want login autostart, ask them to run `csi autostart on`. If `csi stop` or `csi restart` prints that you should use `brew services stop|restart csi`, tell the user that command — do not run `brew services *` yourself.
 
 Also do not "fix" version mismatches yourself:
 
@@ -68,6 +68,7 @@ Also do not "fix" version mismatches yourself:
 - `port` (int) — the port the daemon is bound to (10088 unless overridden)
 - `update_available` (bool) — a newer release exists. Only present when an update check has been cached (by the daily update task or a `csi update --check` run); absent means "no check result yet", not "up to date"
 - `latest_version` (string) — newest release version from that cached check; present and absent together with `update_available`
+- `supervisor` (string) — present only when Homebrew launched the daemon (`CSI_BREW_SERVICE=1`); value is `brew-services`. Omitted otherwise. `csi stop` / `csi restart` (including `--force`) refuse when this is set and tell the user to use `brew services stop|restart csi`
 
 There is also `GET /healthz`, which returns `200 OK` with body `ok` — use it for a cheap liveness probe.
 

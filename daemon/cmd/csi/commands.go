@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"csi/daemon/internal/autostart"
 	"csi/daemon/internal/daemon"
 	mcpserver "csi/daemon/internal/mcp"
 	"csi/daemon/internal/server"
@@ -68,6 +69,17 @@ func cmdServe() error {
 	srv := server.New(cfg, dir, logger)
 	srv.OnConfigApplied = func(c daemon.Config) { daily.SetKeepDays(c.LogRetentionDays) }
 	srv.UpdateChecker = &update.Checker{Dir: dir}
+
+	brew := brewSupervised()
+	if brew {
+		srv.Supervisor = "brew-services" // 协议 §2.2
+		if home, err := os.UserHomeDir(); err != nil {
+			logger.Printf("autostart disable: %v", err)
+		} else {
+			maybeDisableCurlAutostart(true, home, autostart.Disable, logger.Printf)
+		}
+	}
+
 	httpSrv := &http.Server{
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -82,8 +94,10 @@ func cmdServe() error {
 
 	restartCh := make(chan struct{}, 1)
 	srv.Restarter = func() error {
-		if err := spawnReplacement(dir); err != nil {
-			return err
+		if restartSpawnsReplacement(brew) { // 协议 §2.6：brew 不 spawn
+			if err := spawnReplacement(dir); err != nil {
+				return err
+			}
 		}
 		restartCh <- struct{}{}
 		return nil
@@ -111,7 +125,8 @@ func cmdServe() error {
 		}
 		return nil
 	case <-restartCh:
-		// 替代进程已拉起（bind 重试等本进程释放端口）；优雅退出。
+		// 非 brew：替代进程已拉起（bind 重试等本进程释放端口）。
+		// brew：只退出，由 Homebrew KeepAlive 拉起新 serve（协议 §2.6）。
 		// HTTP 响应已随 handler 返回发出（Shutdown 等在途 handler 结束）。
 		logger.Printf("restarted via /restart, shutting down")
 		srv.Hub.Close()
@@ -231,7 +246,7 @@ func cmdMCP() error {
 	return mcpserver.Run(context.Background())
 }
 
-// cmdStop 停止后台 daemon。--force 跳过身份校验直接终止。
+// cmdStop 停止后台 daemon。--force 跳过身份校验直接终止；brew 监督仍拒绝（协议 §2.2）。
 func cmdStop() error {
 	force := false
 	for _, a := range os.Args[2:] {
@@ -251,10 +266,14 @@ func cmdStop() error {
 
 // cmdRestart 重启后台 daemon：先按身份校验停止；身份不确认时，
 // 因 restart 语义即用户明确要求重启，自动按 --force 处理。
+// brew 监督直接拒绝，不走 stop+start（协议 §2.2）。
 func cmdRestart() error {
 	dir, err := daemon.RunDir()
 	if err != nil {
 		return err
+	}
+	if st, _ := fetchStatus(daemon.Port()); st != nil && st.Supervisor == "brew-services" {
+		return errBrewSupervised
 	}
 	if err := stopDaemon(dir, false); err != nil {
 		var nc *notCSIError
@@ -276,8 +295,13 @@ func (e *notCSIError) Error() string {
 	return fmt.Sprintf("pid %d is alive but not responding as csi (possibly recycled PID); use csi stop --force", e.pid)
 }
 
-// stopDaemon 停止后台 daemon。force 跳过身份校验（防 PID 复用误杀，见 decideStop）。
+// stopDaemon 停止后台 daemon。force 跳过身份校验（防 PID 复用误杀，见 decideStop）；
+// brew 监督在 force 之前先看 /status.supervisor，--force 同样拒绝（协议 §2.2）。
 func stopDaemon(dir string, force bool) error {
+	st, _ := fetchStatus(daemon.Port()) // 不可达时 st 为 nil；force 也要看 supervisor
+	if st != nil && st.Supervisor == "brew-services" {
+		return errBrewSupervised
+	}
 	pid, err := daemon.ReadPID(dir)
 	if err != nil {
 		daemon.RemovePID(dir, -1) // 文件缺失/损坏：无条件清理
@@ -285,7 +309,6 @@ func stopDaemon(dir string, force bool) error {
 		return nil
 	}
 	if !force {
-		st, _ := fetchStatus(daemon.Port()) // 不可达时 st 为 nil，按活态继续判定
 		switch decideStop(pid, st, daemon.PIDAlive(pid)) {
 		case stopNotRunning:
 			daemon.RemovePID(dir, pid) // 进程已死：只删它的残留文件
@@ -293,6 +316,8 @@ func stopDaemon(dir string, force bool) error {
 			return nil
 		case stopRefuseForeign:
 			return &notCSIError{pid: pid}
+		case stopRefuseBrew:
+			return errBrewSupervised
 		}
 	}
 	if !daemon.PIDAlive(pid) { // force 模式或身份确认后进程刚好退出
@@ -321,7 +346,8 @@ func stopDaemon(dir string, force bool) error {
 
 // statusReply /status 响应中 stop/start 身份校验需要的字段。
 type statusReply struct {
-	PID int `json:"pid"`
+	PID        int    `json:"pid"`
+	Supervisor string `json:"supervisor,omitempty"`
 }
 
 // newDaemonGet 构造对 daemon 的 GET 请求；config.json 配了 api_key 时
@@ -366,11 +392,39 @@ const (
 	stopProceed       stopDecision = iota // 身份确认，可终止
 	stopNotRunning                        // 进程已死：清理 pid 文件
 	stopRefuseForeign                     // 进程活着但不是 csi（疑似 PID 复用）：拒绝
+	stopRefuseBrew                        // brew 监督：拒绝（含 --force）
 )
 
+// errBrewSupervised 协议 §2.2：csi stop/restart（含 --force）见到 brew-services 必须拒绝。
+var errBrewSupervised = errors.New("csi is managed by brew services; use brew services stop|restart csi")
+
+// brewSupervised Homebrew service 注入 CSI_BREW_SERVICE=1（协议 §2.2）。
+func brewSupervised() bool {
+	return os.Getenv("CSI_BREW_SERVICE") == "1"
+}
+
+// restartSpawnsReplacement 协议 §2.6：brew 通道只优雅退出，由 KeepAlive 拉起新进程。
+func restartSpawnsReplacement(brew bool) bool {
+	return !brew
+}
+
+// maybeDisableCurlAutostart brew 通道启动时幂等拆掉 curl 登录自启，避免两套监督抢端口。
+// disable 可注入，单测禁止碰本机 LaunchAgents。失败只打日志，不让 serve 失败。
+func maybeDisableCurlAutostart(brew bool, home string, disable func(string) error, logf func(string, ...any)) {
+	if !brew || disable == nil {
+		return
+	}
+	if err := disable(home); err != nil && logf != nil {
+		logf("autostart disable: %v", err)
+	}
+}
+
 // decideStop 根据 /status 应答与进程活态决定 stop 行为。
-// 仅当 /status 可达且 pid 匹配才放行；其余情况按活态区分清理或拒绝。
+// brew 监督（协议 §2.2）即使 pid 匹配也拒绝；其余仅当 /status 可达且 pid 匹配才放行。
 func decideStop(pid int, st *statusReply, alive bool) stopDecision {
+	if st != nil && st.Supervisor == "brew-services" {
+		return stopRefuseBrew
+	}
 	if st != nil && st.PID == pid {
 		return stopProceed
 	}
