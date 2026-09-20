@@ -1,44 +1,44 @@
 # CSI
 
-**English** | [简体中文](README.zh-CN.md)
+[English](README.en.md) | **简体中文**
 
 **CSI** — Ctrl+Shift+I，每个程序员都按过的 DevTools 快捷键；也是 Crime Scene Investigation——AI 勘查浏览器案发现场。
 
-**Browser automation for AI agents.** Let AI (Claude Code and other agents) control your **real Chrome browser** — navigate, click, type, read pages, take screenshots, save PDFs — using your actual login sessions. No automation-flagged browser, no separate profile: the agent drives the Chrome you already use. Under the hood it's a local Go daemon plus a Chrome extension (MV3) talking over the **Chrome DevTools Protocol (CDP)** — a lightweight alternative to MCP-based browser control or Playwright/Selenium when you need your **real login sessions** instead of a fresh headless profile.
+**给 AI agent 用的浏览器自动化(browser automation)工具。** 让 AI(Claude Code 及其它 agent)控制你**真实的 Chrome 浏览器**——导航、点击、输入、读取页面、截图、保存 PDF——使用你实际的登录态。不需要带自动化标记的浏览器,也不需要单独的 profile:agent 直接驱动你正在用的那台 Chrome。底层是本地 Go daemon 加 Chrome 扩展(MV3),通过 **Chrome DevTools Protocol (CDP)** 执行——相比 MCP 浏览器控制或 Playwright/Selenium,它是需要**真实登录态**(而非全新无头 profile)时的轻量替代。
 
-## Architecture
+## 架构
 
 ```
-AI client (Claude Code skill)
+AI 客户端 (Claude Code skill)
         │  HTTP POST /command  (JSON)
         ▼
 ┌─────────────────────────────┐
 │  daemon (Go)                │  127.0.0.1:10088
-│  HTTP server + WS server    │  loopback only, no auth (v1)
+│  HTTP server + WS server    │  仅回环，无鉴权 (v1)
 └─────────────────────────────┘
-        ▲  WebSocket /ws  (extension is the WS client, auto-reconnects)
+        ▲  WebSocket /ws  (扩展作为 WS 客户端，自动重连)
         │
 ┌─────────────────────────────┐
-│  Chrome extension (MV3 SW)  │  runs in your real Chrome
-│  executes tools via CDP     │  debugger API on your tabs
+│  Chrome 扩展 (MV3 SW)        │  跑在你真实的 Chrome 里
+│  通过 CDP 执行工具           │  对你的标签页调用 debugger API
 └─────────────────────────────┘
 ```
 
-- The daemon is an HTTP server for AI clients and a WebSocket server for the extension. The extension connects out to the daemon; only one extension connection is kept at a time.
-- Every command carries a `session` name; each session's tabs are collected into a Chrome tab group (`agent:<session>`) so you can see at a glance what the agent is doing.
-- Screenshots and PDFs are written to disk by the daemon and returned as file paths.
+- daemon 既是 AI 客户端的 HTTP server，也是扩展的 WebSocket server。扩展主动连向 daemon；同一时刻只保留一个扩展连接。
+- 每条命令都带一个 `session` 名；每个 session 的标签页会被收进一个 Chrome 标签组（`agent:<session>`），一眼就能看出 agent 在干什么。
+- 截图和 PDF 由 daemon 写到磁盘，返回文件路径。
 
-The full wire contract is in [docs/protocol.md](docs/protocol.md).
+完整的线上协议契约见 [docs/protocol.md](docs/protocol.md)。
 
-## Quick start
+## 快速开始
 
-Prerequisites: Chrome. The extension comes from the [Chrome Web Store](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol) or a prebuilt zip on [GitHub Releases](https://github.com/ximing/csi/releases). The daemon is always a prebuilt binary from Releases — no Go/Node, and you do not need to build from source.
+前置条件：Chrome。扩展从 [Chrome 应用商店](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol) 或 [GitHub Releases](https://github.com/ximing/csi/releases) 的预编译 zip 安装。daemon 始终是 Releases 上的预编译二进制——不需要 Go/Node，也不需要从源码构建。
 
-### Option A — Chrome Web Store (recommended)
+### 方式 A — Chrome 应用商店（推荐）
 
-**1. Install the extension** from the [Chrome Web Store](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol).
+**1. 安装扩展**：打开 [Chrome 应用商店里的 CSI](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol)。
 
-**2. Install the daemon** (and Claude Code skills). `--no-extension` skips the unpacked zip — the store already has the extension:
+**2. 安装 daemon**（以及 Claude Code 技能）。`--no-extension` 会跳过解压版 zip——商店里已经有扩展了：
 
 ```bash
 # macOS / Linux
@@ -50,20 +50,20 @@ curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.s
 $env:CSI_NO_EXTENSION='1'; irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
 ```
 
-**3. Open the extension popup** and confirm it shows "connected".
+**3. 打开扩展弹窗**，确认显示"已连接"。
 
-**4. Check everything is wired up** (the installer already started the daemon; `csi start` is idempotent — safe to run anytime):
+**4. 检查一切就绪**（安装器已经启动了 daemon；`csi start` 是幂等的——随时可安全运行）：
 
 ```bash
 curl -s http://127.0.0.1:10088/status
 # → {"running":true,"extension_connected":true,...}
 ```
 
-### Option B — GitHub Release (sideload)
+### 方式 B — GitHub Release（手动加载）
 
-Use this when you cannot use the Chrome Web Store. The installer downloads the prebuilt daemon, `csi-extension.zip`, and skills.
+无法使用 Chrome 应用商店时用这个。安装器会下载预编译 daemon、`csi-extension.zip` 和技能。
 
-**1. Install** — daemon → `~/.csi/bin`, extension → `~/.csi/extension`, Claude Code skills → `~/.claude/skills/csi` + `~/.claude/skills/csi-e2e`; the daemon is started at the end:
+**1. 安装** —— daemon → `~/.csi/bin`，扩展 → `~/.csi/extension`，Claude Code 技能 → `~/.claude/skills/csi` + `~/.claude/skills/csi-e2e`；安装末尾会启动 daemon：
 
 ```bash
 # macOS / Linux
@@ -75,15 +75,15 @@ curl -fsSL https://raw.githubusercontent.com/ximing/csi/master/scripts/install.s
 irm https://raw.githubusercontent.com/ximing/csi/master/scripts/install.ps1 | iex
 ```
 
-**2. Load the extension in Chrome** (manual step): `chrome://extensions` → Developer mode → Load unpacked → select `~/.csi/extension`. Open the extension popup and confirm it shows "connected".
+**2. 在 Chrome 中加载扩展**（手动步骤）：`chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选择 `~/.csi/extension`。打开扩展弹窗，确认显示"已连接"。
 
-**3. Check status** — same `curl` as in Option A.
+**3. 检查状态** —— 与方式 A 同一个 `curl`。
 
-Both installers accept the same flags: `--no-extension` / `-NoExtension` (skip the unpacked zip; also `CSI_NO_EXTENSION=1`), `--no-start` / `-NoStart` (don't start the daemon), `--no-autostart` / `-NoAutostart` (don't register login autostart; also `CSI_NO_AUTOSTART=1`; re-running the installer turns autostart back on even after `csi autostart off`), `--no-skill` / `-NoSkill` (skip skills entirely), `--agents codex,cursor` / `-Agents codex,cursor` (pick skill targets — see [Coding Agent Skills](#coding-agent-skills)), `-y` / `-Yes` (don't prompt before overwriting an existing skill install). Pin a specific release with `CSI_VERSION=v0.1.0`.
+两个安装器接受相同的旗标：`--no-extension` / `-NoExtension`（跳过解压版 zip；也可用 `CSI_NO_EXTENSION=1`），`--no-start` / `-NoStart`（不启动 daemon），`--no-autostart` / `-NoAutostart`（不注册登录自启；也可用 `CSI_NO_AUTOSTART=1`；再跑一次安装器会把曾经 `csi autostart off` 过的自启重新打开），`--no-skill` / `-NoSkill`（完全跳过技能），`--agents codex,cursor` / `-Agents codex,cursor`（选择技能安装目标，见[编程 Agent Skills](#编程-agent-skills)），`-y` / `-Yes`（覆盖已存在的技能安装前不再询问）。用 `CSI_VERSION=v0.1.0` 固定某个 release。
 
-### Option C — Homebrew (macOS / Linux, daemon only)
+### 方式 C — Homebrew（macOS / Linux，仅 daemon）
 
-If you live in Homebrew, the daemon is available from our tap — prebuilt binary, managed by `brew services` with KeepAlive (restarts on crash, starts at login):
+习惯用 Homebrew 的话，daemon 可以从我们的 tap 安装 —— 预编译二进制，由 `brew services` 托管（KeepAlive：崩溃自动拉起 + 登录自启）：
 
 ```bash
 brew tap ximing/csi
@@ -91,20 +91,20 @@ brew install csi
 brew services start csi
 ```
 
-Notes:
+说明：
 
-- The formula installs **only the daemon**. Get the extension from the Chrome Web Store (Option A, steps 1 & 3), and the skills via your agent's plugin command (see [Coding Agent Skills](#coding-agent-skills)).
-- Stop / restart with `brew services stop|restart csi` — a plain `csi stop` won't stick: KeepAlive brings the daemon right back.
-- Already running a curl-installed daemon? Stop it first (`csi stop`, or `~/.csi/bin/csi stop`) so the two don't fight over port `10088`.
+- formula **只装 daemon**。扩展走 Chrome 应用商店（方式 A 第 1、3 步）；技能用各 Agent 的插件命令安装（见[编程 Agent Skills](#编程-agent-skills)）。
+- 停止 / 重启用 `brew services stop|restart csi` —— 直接 `csi stop` 停不住，KeepAlive 会把 daemon 立刻拉回来。
+- 本机已有 curl 安装器装的 daemon 在跑？先 `csi stop`（或 `~/.csi/bin/csi stop`）再启动，避免两个进程抢 `10088` 端口。
 
-| | curl installer (Options A/B) | Homebrew (Option C) |
+| | curl 安装器（方式 A/B） | Homebrew（方式 C） |
 |---|---|---|
-| Installs | daemon + skills (+ extension zip) | daemon only |
-| Binary | `~/.csi/bin/csi` | Homebrew prefix |
-| Start / stop | `csi start` / `csi stop` | `brew services start|stop csi` |
-| Login persistence | `csi autostart` (no KeepAlive) | `brew services` KeepAlive |
+| 装什么 | daemon + 技能（+ 扩展 zip） | 仅 daemon |
+| 二进制位置 | `~/.csi/bin/csi` | Homebrew prefix |
+| 启动 / 停止 | `csi start` / `csi stop` | `brew services start|stop csi` |
+| 登录保活 | `csi autostart`（无 KeepAlive） | `brew services` KeepAlive |
 
-**Drive the browser:**
+**驱动浏览器：**
 
 ```bash
 curl -s -X POST http://127.0.0.1:10088/command \
@@ -120,70 +120,70 @@ curl -s -X POST http://127.0.0.1:10088/command \
   -d '{"action":"screenshot","args":{},"session":"demo"}'
 ```
 
-The installer also copies two Claude Code skills to `~/.claude/skills/`: `csi` (browser control — used automatically whenever you ask Claude Code to interact with websites) and `csi-e2e` (e2e test suites — see below).
+安装器还会把两个 Claude Code 技能复制到 `~/.claude/skills/`：`csi`（浏览器控制——你让 Claude Code 与网站交互时会自动启用）和 `csi-e2e`（e2e 测试套件——见下文）。
 
-## Upgrading
+## 升级
 
-Pick the channel that matches how you installed:
+按你当初的安装方式选一条：
 
-- **Re-run the installer** — it is idempotent, so the install commands from [Quick start](#quick-start) double as a full upgrade (daemon + skills + extension zip). The daemon is restarted automatically at the end.
-- **`csi update`** — updates just the daemon binary in place: downloads the new release, verifies the checksum, swaps the binary, and restarts the daemon if it is running. `csi update --check` only reports versions (`current` / `latest` / `update_available`) without changing anything; `--with-skills` also refreshes the skill packs under `~/.claude/skills/`, `--with-extension` refreshes the sideloaded extension under `~/.csi/extension`. Homebrew installs are refused (self-update would overwrite brew-managed files) — use `brew upgrade csi` instead.
-- **`brew upgrade csi`** — for Homebrew (Option C) users.
+- **重跑安装器** —— 安装器是幂等的，[快速开始](#快速开始)里的安装命令直接当升级用（daemon + 技能 + 扩展 zip 全套），装完自动重启 daemon。
+- **`csi update`** —— 只更新 daemon 二进制：下载新 release、校验 checksum、就地替换，daemon 在跑就顺便重启。`csi update --check` 只报告版本（`current` / `latest` / `update_available`），不动任何东西；`--with-skills` 顺带刷新 `~/.claude/skills/` 下的技能包，`--with-extension` 顺带刷新 `~/.csi/extension` 的解压版扩展。Homebrew 装的会被拒绝（自更新会覆盖 brew 管的文件）——请用 `brew upgrade csi`。
+- **`brew upgrade csi`** —— Homebrew（方式 C）用户。
 
-The installer also registers a **daily update task** alongside login autostart: once a day it probes for a new release and self-updates the daemon. `csi autostart off` removes both the login entry and the daily task; `csi autostart on` brings both back. To see what it would find, run `csi update --check` yourself.
+安装器注册登录自启的同时还会注册一个**每日更新任务**：每天探一次新 release 并自更新 daemon。`csi autostart off` 会把登录项和每日任务一起撤掉，`csi autostart on` 一起装回来。想先看看有没有新版本，自己跑 `csi update --check`。
 
-The extension and the skills move on their own tracks:
+扩展和技能各走各的轨道：
 
-- **Chrome Web Store extension** — Chrome updates it automatically; nothing to do.
-- **Sideloaded extension** — re-run the installer or `csi update --with-extension`, then hit reload on `chrome://extensions`.
-- **Skills** — `csi update --with-skills`, re-run the installer, or re-install via your agent's plugin command.
+- **应用商店版扩展** —— Chrome 会自动更新，不用管。
+- **手动加载的扩展** —— 重跑安装器或 `csi update --with-extension`，然后到 `chrome://extensions` 点一下刷新。
+- **技能** —— `csi update --with-skills`、重跑安装器，或用各 Agent 的插件命令重装。
 
-## Uninstalling
+## 卸载
 
 ```bash
-csi uninstall        # asks for confirmation; -y skips the prompt
+csi uninstall        # 会询问确认；-y 跳过确认
 ```
 
-This stops the daemon, removes login autostart and the daily update task, and deletes `~/.csi` (binary, config, logs). Two things it deliberately leaves to you:
+它会停掉 daemon、撤掉登录自启和每日更新任务、删掉 `~/.csi`（二进制、配置、日志）。有两样它特意留给你手动清：
 
-- **Skill directories** — remove `~/.claude/skills/csi` and `~/.claude/skills/csi-e2e` (plus the copies under any other agents' skill dirs you installed to).
-- **Chrome extension** — remove it at `chrome://extensions`. For a sideloaded install the unpacked entry is enough; `~/.csi/extension` is already gone.
+- **技能目录** —— 删掉 `~/.claude/skills/csi` 和 `~/.claude/skills/csi-e2e`（以及你装到其它 Agent 技能目录下的同名副本）。
+- **Chrome 扩展** —— 到 `chrome://extensions` 移除；手动加载版删掉解压条目即可（`~/.csi/extension` 已经没了）。
 
-Homebrew installs keep the binary in the brew prefix, so finish with `brew services stop csi && brew uninstall csi`.
+Homebrew 安装的二进制在 brew prefix 里，收尾再跑 `brew services stop csi && brew uninstall csi`。
 
 ## MCP server
 
-`csi mcp` runs a stdio MCP server exposing all 21 browser tools. It is a thin proxy: each tool call is forwarded to the local daemon's `POST /command` (same `CSI_PORT`, default 10088), so the daemon must be running (`csi start`).
+`csi mcp` 跑一个 stdio MCP server，暴露全部 21 个浏览器工具。它是一个薄代理：每次工具调用都转发给本地 daemon 的 `POST /command`（同一个 `CSI_PORT`，默认 10088），所以 daemon 必须在运行（`csi start`）。
 
-Mount it in Claude Code:
+在 Claude Code 中挂载：
 
 ```bash
 claude mcp add csi -- ~/.csi/bin/csi mcp
 ```
 
-Each tool also takes an optional top-level `session` argument (default `"default"`) that maps to the daemon's session field. `screenshot`/`save_as_pdf` return a file path — view it with the Read tool.
+每个工具还接受一个可选的顶层 `session` 参数（默认 `"default"`），映射到 daemon 的 session 字段。`screenshot`/`save_as_pdf` 返回文件路径——用 Read 工具查看。
 
-## E2E testing skill
+## E2E 测试技能
 
-The installer also drops a second skill, `csi-e2e`, into `~/.claude/skills/`. It turns natural-language browser scenarios into replayable e2e regression suites — driven by the same daemon, no test framework, no dependencies beyond Node ≥ 18:
+安装器还会把第二个技能 `csi-e2e` 放进 `~/.claude/skills/`。它把自然语言描述的浏览器场景变成可重放的 e2e 回归套件——由同一个 daemon 驱动，不需要测试框架，除了 Node ≥ 18 没有别的依赖：
 
-1. **Describe** — the model writes `e2e/cases/<name>.md` in your project: a header declaring the URL under test and how to start the app, then numbered steps each with a machine-checkable 【预期】.
-2. **Verify** — it executes the case live in your real Chrome via the daemon, iterating until every expectation holds.
-3. **Solidify** — what passed gets translated into `e2e/suites/<name>.mjs` (plain Node scripts talking to the daemon over HTTP).
-4. **Replay** — `node e2e/run.mjs [suite...]`, no model involved.
+1. **描述** —— 模型在你的项目里写 `e2e/cases/<name>.md`：一个声明被测 URL 和如何启动应用的头部，然后是带机器可校验【预期】的编号步骤。
+2. **验证** —— 它通过 daemon 在你真实的 Chrome 里现场执行用例，反复迭代直到每个预期都成立。
+3. **固化** —— 通过的部分被翻译成 `e2e/suites/<name>.mjs`（通过 HTTP 与 daemon 通信的纯 Node 脚本）。
+4. **重放** —— `node e2e/run.mjs [suite...]`，不涉及模型。
 
-Ask Claude Code to "write an e2e test for X" in any web project and the skill kicks in. See [skills/csi-e2e/SKILL.md](skills/csi-e2e/SKILL.md) for the full workflow.
+在任何 web 项目里让 Claude Code"给 X 写个 e2e 测试"，技能就会启动。完整工作流见 [skills/csi-e2e/SKILL.md](skills/csi-e2e/SKILL.md)。
 
-## Coding Agent Skills
+## 编程 Agent Skills
 
-CSI ships [Agent Skills](https://code.claude.com/docs/en/claude-code/skills) in [`skills/`](./skills) that teach coding agents to drive your real Chrome browser:
+CSI 在 [`skills/`](./skills) 下内置 [Agent Skills](https://code.claude.com/docs/en/claude-code/skills)，教编程 Agent 驱动你真实的 Chrome：
 
-| Skill | Purpose |
+| Skill | 用途 |
 | --- | --- |
-| [`csi`](./skills/csi) | Drive the user's real Chrome via the local daemon — navigate, click, type, screenshot, save PDF, with real login sessions. |
-| [`csi-e2e`](./skills/csi-e2e) | Turn natural-language browser scenarios into replayable e2e regression suites (describe → verify → solidify → replay). |
+| [`csi`](./skills/csi) | 通过本地 daemon 驱动用户真实 Chrome —— 导航、点击、输入、截图、存 PDF，带真实登录态。 |
+| [`csi-e2e`](./skills/csi-e2e) | 把自然语言浏览器场景变成可重放的 e2e 回归套件（描述 → 验证 → 固化 → 重放）。 |
 
-The skills are plain `SKILL.md` documents (plus `references/` and templates) with no runtime dependency, so the same files work across coding tools. Installation differs by tool — if you use more than one, install separately for each.
+技能本体是纯 `SKILL.md` 文档（外加 `references/` 与模板），零运行时依赖，同一份文件适用于各编程工具。安装方式因工具而异 —— 多个工具同时使用时，需要分别为每个工具安装。
 
 ### Claude Code
 
@@ -192,11 +192,11 @@ The skills are plain `SKILL.md` documents (plus `references/` and templates) wit
 /plugin install csi@csi
 ```
 
-Or manually: `cp -r skills/csi skills/csi-e2e ~/.claude/skills/`
+或手动安装：`cp -r skills/csi skills/csi-e2e ~/.claude/skills/`
 
 ### Codex App / Codex CLI
 
-This repository doubles as a Codex plugin marketplace (see [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)), so no official listing is needed:
+本仓库自身就是一个 Codex 插件市场（见 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)），无需官方上架：
 
 ```bash
 codex plugin marketplace add ximing/csi
@@ -205,11 +205,11 @@ codex plugin add csi@csi
 
 ### Cursor
 
-The plugin manifest lives at [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json). In Cursor Agent chat run `/add-plugin csi`, or search for `csi` in the plugin marketplace. Manually, copy the skill directories into `.cursor/skills/` of your project.
+插件清单在 [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json)。在 Cursor Agent 对话框中执行 `/add-plugin csi`，或在插件市场搜索 `csi`。也可以手动把技能目录拷进项目的 `.cursor/skills/`。
 
 ### Grok Build CLI
 
-Install from xAI's official plugin marketplace (listing in review at [xai-org/plugin-marketplace#266](https://github.com/xai-org/plugin-marketplace/pull/266)):
+从 xAI 官方插件市场安装（收录 PR 已提交、审核中：[xai-org/plugin-marketplace#266](https://github.com/xai-org/plugin-marketplace/pull/266)）：
 
 ```bash
 grok plugin install csi@xai-official --trust
@@ -221,11 +221,11 @@ grok plugin install csi@xai-official --trust
 /plugins install https://github.com/ximing/csi
 ```
 
-Then start a fresh session (`/new`) so the plugin loads.
+安装后新开会话（`/new`）使插件生效。
 
 ### OpenCode
 
-Add the plugin to `opencode.json` (global or project-level); it registers `skills/` through OpenCode's plugin system:
+在 `opencode.json`（全局或项目级）里加插件；它会通过 OpenCode 插件系统注册 `skills/`：
 
 ```json
 {
@@ -239,34 +239,34 @@ Add the plugin to `opencode.json` (global or project-level); it registers `skill
 pi install git:github.com/ximing/csi
 ```
 
-The package manifest in [`package.json`](package.json) declares the `skills/` directory for Pi's native skill discovery.
+[`package.json`](package.json) 里的包清单为 Pi 的原生技能发现声明了 `skills/` 目录。
 
-> Note: the shell/PowerShell installers in [Quick start](#quick-start) can also drop the skills into other tools' directories directly — run them with `--agents codex,cursor,agents,opencode` (or `all`; PowerShell: `-Agents ...`). Default is `claude` only. Targets: `~/.codex/skills/` (Codex), `~/.cursor/skills/` (Cursor), `~/.agents/skills/` (the cross-tool standard dir, read by Cursor and OpenCode), `~/.config/opencode/skills/` (OpenCode). Kimi, Grok Build, and Pi use their own plugin install commands above — the installer doesn't cover them. The daemon is still required either way; the Chrome extension comes from the [Chrome Web Store](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol) or the Release zip. Skills only teach the agent how to talk to the daemon.
+> 说明：[快速开始](#快速开始)里的 shell/PowerShell 安装器也可以直接把技能装进其他工具的目录 —— 加 `--agents codex,cursor,agents,opencode`（或 `all`；PowerShell 端 `-Agents ...`），默认只装 `claude`。目标：`~/.codex/skills/`（Codex）、`~/.cursor/skills/`（Cursor）、`~/.agents/skills/`（跨工具标准目录，Cursor 和 OpenCode 都读）、`~/.config/opencode/skills/`（OpenCode）。Kimi、Grok Build、Pi 用上面各自的插件安装命令，安装器不覆盖。无论哪种方式，daemon 仍然必需；Chrome 扩展从 [Chrome 应用商店](https://chromewebstore.google.com/detail/csi/mlnlngdpkodcnblmdgdnlaidijaffeol) 或 Release zip 安装。技能只是教 Agent 怎么与 daemon 对话。
 
-## Tools
+## 工具
 
-21 tools: `navigate`, `find_tab`, `snapshot` (default compact YAML accessibility tree with `@e` refs), `click`, `fill` (inputs + contenteditable), `evaluate`, `network`, `mouse_click` (trusted coordinate-level clicks), `wait`, `scroll`, `hover`, `key_type`, `send_keys`, `cdp` (raw passthrough), `screenshot`, `save_as_pdf`, `upload`, `list_tabs`, `close_tab`, `close_session`, `list_frames`. See [docs/protocol.md](docs/protocol.md) §4 for the exact contract.
+21 个工具：`navigate`、`find_tab`、`snapshot`（默认 compact YAML 无障碍树，带 `@e` 引用）、`click`、`fill`（输入框 + contenteditable）、`evaluate`、`network`、`mouse_click`（可信的坐标级点击）、`wait`、`scroll`、`hover`、`key_type`、`send_keys`、`cdp`（原始透传）、`screenshot`、`save_as_pdf`、`upload`、`list_tabs`、`close_tab`、`close_session`、`list_frames`。精确契约见 [docs/protocol.md](docs/protocol.md) §4。
 
-## Directory layout
+## 目录结构
 
 ```
 csi/
-├── docs/protocol.md        # the single source of truth for the wire protocol
-├── daemon/                 # Go daemon (HTTP + WS server, session state)
+├── docs/protocol.md        # 线上协议的唯一事实来源
+├── daemon/                 # Go daemon（HTTP + WS server，session 状态）
 │   └── cmd/csi/
-├── extension/              # Chrome MV3 extension (TypeScript, service worker)
-│   └── dist/               # build output — load this in chrome://extensions
-├── skills/csi/             # coding-agent skill: browser control (SKILL.md + references/)
-├── skills/csi-e2e/         # coding-agent skill: describe→verify→solidify→replay e2e suites
-├── .claude-plugin/         # plugin manifests: Claude Code, Codex, Cursor, Kimi, OpenCode, Pi
-│   └── ...                 # (.claude-plugin/ .codex-plugin/ .agents/ .cursor-plugin/ .kimi-plugin/ .opencode/)
-├── scripts/                # installers: install.sh (macOS/Linux), install.ps1 (Windows)
-└── .github/workflows/      # release.yml — tag v* → cross-build daemon + extension → GitHub Release
+├── extension/              # Chrome MV3 扩展（TypeScript，service worker）
+│   └── dist/               # 构建产物——在 chrome://extensions 里加载这个
+├── skills/csi/             # 编程 Agent 技能：浏览器控制（SKILL.md + references/）
+├── skills/csi-e2e/         # 编程 Agent 技能：描述→验证→固化→重放 e2e 套件
+├── .claude-plugin/         # 各工具插件清单：Claude Code、Codex、Cursor、Kimi、OpenCode、Pi
+│   └── ...                 #（.claude-plugin/ .codex-plugin/ .agents/ .cursor-plugin/ .kimi-plugin/ .opencode/）
+├── scripts/                # 安装器：install.sh（macOS/Linux）、install.ps1（Windows）
+└── .github/workflows/      # release.yml——打 v* tag → 交叉编译 daemon + 扩展 → GitHub Release
 ```
 
-## Development
+## 开发
 
-This section is for contributors. To *use* CSI, install the extension from the Chrome Web Store or a GitHub Release zip — do not build from source unless you are changing the code.
+这一节给贡献者。**使用** CSI 请从 Chrome 应用商店或 GitHub Release zip 安装扩展——不要从源码构建，除非你在改代码。
 
 ```bash
 # daemon
@@ -274,33 +274,33 @@ cd daemon
 go test ./...
 go build -o ~/.csi/bin/csi ./cmd/csi
 
-# extension
+# 扩展
 cd extension
 npm install
-npm run build        # outputs extension/dist — reload in chrome://extensions
+npm run build        # 产出 extension/dist——在 chrome://extensions 里 reload
 
-# release (pushes a tag → workflow cross-builds everything and drafts a Release)
+# 发版（推一个 tag → workflow 交叉编译一切并起草 Release）
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-Protocol changes: edit `docs/protocol.md` first, then update both sides. The protocol file is the contract; implementations must follow it.
+协议变更：先改 `docs/protocol.md`，再改两侧实现。协议文件就是契约；实现必须服从它。
 
-Port: default `10088`, override with the `CSI_PORT` environment variable (set the same port in the extension popup). Click the extension icon → Settings to open the options page: view daemon status, change the port / log retention days / tool timeout, and adjust the auto-reconnect interval.
+端口：默认 `10088`，用 `CSI_PORT` 环境变量覆盖（在扩展弹窗里设置相同端口）。点扩展图标 → Settings 打开设置页：查看 daemon 状态、改端口 / 日志保留天数 / 工具超时，以及调整自动重连间隔。
 
-## Security notes
+## 安全说明
 
-- The daemon binds `127.0.0.1` only; there is no authentication in v1 — loopback is the isolation boundary (this machine vs the network, not a process sandbox). Anything that can `POST /command` can drive your browser. `/ws` additionally rejects browser pages whose `Origin` is not `chrome-extension://…`; empty Origin (curl, tests) is still allowed. That is not authentication — a local process can still connect. A hijacked slot receives `tool_call`s; it cannot drive the real extension.
-- `evaluate` and `cdp` are arbitrary code execution channels in the page. That is a designed capability, not a bug — treat skill prompts accordingly.
-- `screenshot` / `save_as_pdf` write the caller-supplied `path` as-is (parents created, existing files overwritten). There is no path sandbox: a local process that can `POST /command` is already in the loopback trust domain and can write those files itself. Prefer an absolute `path` — relative ones resolve against the daemon's cwd, which is not the client's. See [docs/protocol.md](docs/protocol.md) §7.
-- `upload` passes caller-supplied `files` paths as-is to Chrome `DOM.setFileInputFiles`. There is no Downloads (or other) path sandbox: the product is attaching user-specified local files — including project files — to a page file input. A random webpage cannot `POST /command`; if an agent is tricked into uploading secrets, that is an agent/user trust issue. See [docs/protocol.md](docs/protocol.md) §7.
+- daemon 只绑 `127.0.0.1`；v1 没有鉴权——回环就是隔离边界（本机 vs 网络，不是进程沙箱）。能 `POST /command` 的进程就能驱动你的浏览器。`/ws` 另外拒绝非 `chrome-extension://…` 的浏览器 Origin；空 Origin（curl、测试）仍放行。这不是鉴权——本机进程照样能连。抢到槽位的客户端只能收到 `tool_call`，不能驱动真扩展。
+- `evaluate` 和 `cdp` 是页面内的任意代码执行通道。这是设计能力，不是 bug——据此对待技能提示。
+- `screenshot` / `save_as_pdf` 按调用方给的 `path` 原样落盘（父目录自建、覆盖写）。没有路径沙箱：能 `POST /command` 的本地进程已经在 loopback 信任域里，自己也能写这些文件。`path` 请用绝对路径——相对路径相对的是 daemon 的 cwd，不是调用方的。详见 [docs/protocol.md](docs/protocol.md) §7。
+- `upload` 把调用方给的 `files` 路径原样交给 Chrome `DOM.setFileInputFiles`。没有 Downloads（或其它）路径沙箱：产品就是把用户指定的本地文件——包括项目文件——塞进网页 file input。随机网页不能 `POST /command`；若 AI 被诱导去上传私钥，那是 AI 客户端/用户的信任问题。详见 [docs/protocol.md](docs/protocol.md) §7。
 
-## License
+## 许可
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — any noncommercial purpose is permitted (personal use, research, education, charities, government...); commercial use is not licensed. If you need a commercial license, open an issue.
+[PolyForm Noncommercial 1.0.0](LICENSE)——任何非商用目的都被允许（个人使用、研究、教育、慈善、政府机构……）；商用未获许可。需要商用授权请开 issue。
 
-## Roadmap
+## 路线图
 
-- **0.4 Agent reliability** — done: compact YAML snapshots, a real `wait` tool, `scroll` / `hover`, full-page screenshots, and a version handshake so a stale store extension says "please update" instead of `unknown tool`. Spec: [docs/superpowers/specs/2026-03-30-agent-reliability-design.md](docs/superpowers/specs/2026-03-30-agent-reliability-design.md).
-- **0.5 Autostart** — done: `csi autostart on|off` plus installer default-on, so a reboot does not leave the daemon dead.
-- **0.6 Hard pages** — iframe targeting (refs carry `frameId`) is done. Still open: JS dialogs, downloads (CWS permission needed).
-- **DirectCDPBackend**: connect to [obscura](https://github.com/h4ckf0r0day/obscura) — a Rust headless browser with a built-in CDP server. The daemon would talk directly to its CDP WebSocket, no Chrome extension needed, for fully headless automation alongside the current real-Chrome mode.
+- **0.4 Agent 可靠性** — 已做：compact YAML snapshot、真正的 `wait`、`scroll` / `hover`、整页截图、版本握手（商店扩展过旧时说「请升级」而不是 `unknown tool`）。规格：[docs/superpowers/specs/2026-03-30-agent-reliability-design.md](docs/superpowers/specs/2026-03-30-agent-reliability-design.md)。
+- **0.5 开机自启** — 已做：`csi autostart on|off` + 安装器默认打开，重启电脑后 daemon 还在。
+- **0.6 难页面** — iframe（ref 自带 `frameId`）已做。还没做：JS 对话框、下载（要过 CWS 权限审核）。
+- **DirectCDPBackend**：连接 [obscura](https://github.com/h4ckf0r0day/obscura)——一个带内置 CDP server 的 Rust 无头浏览器。daemon 会直接和它的 CDP WebSocket 对话，不需要 Chrome 扩展，在当前真实 Chrome 模式之外提供完全无头的自动化。
