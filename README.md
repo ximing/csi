@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="extension/icons/128.png" alt="CSI icon" width="96">
+</p>
+
 # CSI
 
 [English](README.en.md) | **简体中文**
