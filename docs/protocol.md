@@ -80,6 +80,7 @@ AI 客户端 ──HTTP──▶ daemon (127.0.0.1:10088) ◀──WS(/ws)──
 | `_tabId===0` 且工具需要页面目标 | `session has no current tab; call navigate first, or find_tab(active:true) to borrow the user's tab` | `no_session_target` |
 | `@e` 在当前 tab 的 ref store 中不存在 | `<tool>: unknown ref "…". Run snapshot first to get refs.` | `unknown_ref` |
 | `@e` 所属 document epoch 已过期，或节点已替换 | `<tool>: stale ref "…". Page navigated; run snapshot again.` | `stale_ref` |
+| 页面顶层声明拒绝 agent 操作（§4.7） | `<tool>: this page opted out of agent operation (meta name="csi" content="disallow"); CSI will not act on this site` | `page_opt_out` |
 | 结果无法投递（WS 传输超限、落盘写盘失败等） | `result too large to deliver: <reason>` | `result_too_large` |
 
 `result_too_large` 只用于**无法投递**的场景；snapshot full / network detail / evaluate / cdp 的内容超预算**不**走此 code——自动转 artifact（§3.5/§5），因为「调用方要完整内容」是可满足的请求，不是错误用法。错误文案以稳定英文 `result too large to deliver` 开头；`reason` 形如 `ws transport limit exceeded` / `failed to persist artifact: <os error>`。WS 传输上限的具体数值与两侧行为见 §3.2。
@@ -476,6 +477,21 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - `format` 缺省且 `path` 以 `.png` / `.jpg` / `.jpeg` / `.webp` 结尾（大小写不敏感）时按扩展名推断（`.jpg`/`.jpeg` → `jpeg`）。显式 `format` 优先于扩展名；`path` 仍按字面落盘（§5），不会改写扩展名。未知扩展名或不带 `path` → 默认 `webp`。
 - 需要无损归档时显式 `format:"png"`（或 `path` 以 `.png` 结尾且不传 `format`）。
 
+### 4.7 页面 opt-out（`<meta name="csi" content="disallow">`）
+
+站点可在**顶层 document** 声明拒绝 agent 操作，CSI 自愿遵守：
+
+```html
+<meta name="csi" content="disallow">
+```
+
+- **匹配**：`name` 匹配大小写不敏感；`content` 去空白后小写等于 `disallow` 才生效，其他值（含缺省）忽略。同一 document 多个 `name=csi` 时，任一 `content` 为 `disallow` 即命中。只检查顶层 document；iframe 内的声明不生效、不传染顶层。
+- **判定时机**：工具执行前的**确定性程序检查**（不经 LLM）。`navigate` 在页面 load 完成后检查终态文档；所有 tab-aimed 工具（§4 表中带页面目标的 17 个）在 attach 后、执行前检查。命中即失败，`code:"page_opt_out"`（§2.1 错误表），文案明确告知 Agent 该站点禁止自动化操作、勿再对本页重试。
+- **作用域**：顶层声明对整个 tab 的所有 tab-aimed 工具生效（含进帧操作与 `evaluate` / `cdp`）。`close_tab` / `close_session` / `find_tab` / `list_tabs` 不受影响——清理与枚举永远可用。
+- **navigate 命中后的 tab**：复用已有 owned tab 时留下该 tab（随后 `close_tab` / `close_session` 仍可用）。新建 tab（`newTab` 或无可复用 owned tab）命中后由扩展关闭该 tab——daemon 只在成功路径收养，不关会留下 session 无法清理的标签。
+- **缓存**：同一 tab 的同一 `documentEpoch`（§4.1）只评估一次（一次 CDP `Runtime.evaluate`）；导航 / reload 提升 epoch 后重新评估。缓存只在扩展 SW 内存，不落盘。`document.readyState === 'loading'` 时的否定结果（未看到 disallow）不写入缓存，下一次工具再探；肯定命中即使仍 loading 也可缓存。探针失败或返回形状非法时不写缓存，本次视为未声明。
+- **已知边界**：页面脚本可在检查后增删 meta（TOCTOU）。本机制是声明式协议（与 robots.txt 同类），表达站点意愿、靠 CSI 自愿遵守，防的不是对抗者。
+
 ## 5. 大结果后处理（daemon 侧）
 
 - `screenshot`：扩展返回 `{format, dataLength, data(base64)}`（`format` 为捕获所用编码，默认 `webp`，见 §4）。daemon base64 解码后**原样**写入 `args.path`（父目录自动创建、覆盖写），不做二次转码；未提供 `path` 时写入 `$TMPDIR/csi-screenshot-<ts>-<rand>.<ext>`（`<ext>` 为 `webp` / `jpeg` / `png`）。最终响应 `{format, path, sizeBytes, mimeType}`，`mimeType` 为 `image/webp` / `image/jpeg` / `image/png`。
@@ -498,6 +514,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - snapshot 的 `match`、network 的 `limit`/`cursor`/`body_mode`、evaluate/cdp 的 `max_chars` 是**输出加工参数**：它们只决定结果的裁剪、分页或落盘方式，不改变操作目标与语义。旧扩展忽略这些参数后返回的是**安全超集**（未裁剪的更大结果，仍然是合法数据），而不是错误目标或错误数据。因此这些参数**不做 daemon 版本闸**——与 `frame` 的参数闸（§3.3）不同：`frame` 必须闸是因为旧扩展会把进帧意图静默打到顶层帧、操作错误对象；结果预算参数被忽略最坏只是结果偏大。客户端对偏大结果自行分块或改用显式 `body_mode:file` 等规避。
 - `auth_enabled` / `api_key`（§2.7）与 `GET /admin`（§2.8）：旧客户端忽略未知 config 字段；鉴权默认关闭时行为与旧版完全一致。
 - 本版本起 `screenshot` 默认 `format=webp`（`quality` 80）。显式 `png`/`jpeg` 行为不变。`format` 缺省且 `path` 带已知图片扩展名时按扩展名推断，避免 `path: foo.png` 写入 webp 字节。旧扩展仍默认 png；新客户端不传 `format` 时由新扩展产出 webp。`webp` 作为 format 取值不做版本闸：旧扩展把未知 `format` 原样交给 CDP，Chrome 的 `Page.captureScreenshot` 早已支持 webp。
+- 页面 opt-out（§4.7）自 0.8.0 起：未声明 `<meta name="csi" content="disallow">` 的页面行为与旧版完全一致；声明页面新扩展返回 `page_opt_out`，旧客户端忽略未知 `code` 仍能读 `error` 文案。daemon 无需改动（`page_opt_out` 不是 `stale_target` 那类需要 daemon 对账的 code，原样透传）。
 
 ## 7. 安全约束（威胁模型）
 

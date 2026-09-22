@@ -294,6 +294,16 @@ Port: default `10088`, override with the `CSI_PORT` environment variable (set th
 - `screenshot` / `save_as_pdf` write the caller-supplied `path` as-is (parents created, existing files overwritten). There is no path sandbox: a local process that can `POST /command` is already in the loopback trust domain and can write those files itself. Prefer an absolute `path` — relative ones resolve against the daemon's cwd, which is not the client's. See [docs/protocol.md](docs/protocol.md) §7.
 - `upload` passes caller-supplied `files` paths as-is to Chrome `DOM.setFileInputFiles`. There is no Downloads (or other) path sandbox: the product is attaching user-specified local files — including project files — to a page file input. A random webpage cannot `POST /command`; if an agent is tricked into uploading secrets, that is an agent/user trust issue. See [docs/protocol.md](docs/protocol.md) §7.
 
+## How a website can opt out of CSI
+
+A site can declare that it refuses agent operation by adding one meta tag to the **top-level document**; CSI honors it voluntarily (protocol [§4.7](docs/protocol.md)):
+
+```html
+<meta name="csi" content="disallow">
+```
+
+When matched, CSI refuses tab-aimed tools on the page (clicks, screenshots, `evaluate`, `cdp` are all blocked; `navigate` fails with `page_opt_out` after loading) and tells the agent explicitly that the site disallows automated operation. `close_tab` / `close_session` / `find_tab` / `list_tabs` still work. A `navigate` that created a new tab closes that tab itself. The check is a deterministic program check before tool execution; a page script adding/removing the meta afterwards is a known, accepted boundary. Declarations inside iframes have no effect. Normal browsing is unaffected — this constrains CSI only.
+
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE) — any noncommercial purpose is permitted (personal use, research, education, charities, government...); commercial use is not licensed. If you need a commercial license, open an issue.

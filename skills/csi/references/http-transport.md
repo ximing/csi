@@ -42,6 +42,7 @@ Error codes worth branching on:
 | `no_session_target` | Session has no current tab | `navigate` first, or `find_tab(active:true)` to borrow the user's tab |
 | `unknown_ref` | `@e` not in this tab's ref table | `snapshot` first |
 | `stale_ref` | `@e` predates the current page load | `snapshot` again, use fresh refs |
+| `page_opt_out` | The page declares `<meta name="csi" content="disallow">` — the site opted out of agent operation. CSI refuses to act on it; this is intentional, not a failure to recover from | **Stop.** Do not retry this page with other tools, frames, `evaluate`, or `cdp` — all are blocked. Tell the user this site disallows agents; if they need the content, ask them to do it manually. `close_tab`/`close_session` still work on a tab the session already owned. A `navigate` that opened a new tab closes that tab itself |
 | `result_too_large` | Result could not be delivered at all (transport cap / artifact persist failed) | Narrow the request; see `large-results.md` |
 
 Uncoded errors: `extension not connected` (see `operations.md`), `unknown tool: x` (daemon older than the tool — check `/status.version`), `tool call timeout (120s)`.

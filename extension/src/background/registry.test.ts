@@ -530,3 +530,146 @@ describe('dispatchTool concurrency rules (spec 用例 3/4/6/13b/15/17)', () => {
     }
   });
 });
+
+const { forgetPageOptOut } = await import('./page-optout');
+const refs2 = await import('./refs');
+
+describe('dispatchTool 页面 opt-out（协议 §4.7）', () => {
+  beforeEach(() => {
+    forgetPageOptOut(10);
+  });
+
+  it('meta 命中 disallow → tab-aimed 工具拒绝 page_opt_out，工具自身命令不发出', async () => {
+    const original = chrome.debugger.sendCommand;
+    const toolCalls: string[] = [];
+    (chrome.debugger as { sendCommand: typeof chrome.debugger.sendCommand }).sendCommand = (async (
+      debuggee: { tabId: number },
+      method: string,
+      params?: unknown,
+    ) => {
+      debuggerCalls.push({ tabId: debuggee.tabId, method, t: Date.now() });
+      // 只拦截 meta 探针；其余（Page.enable 等）回默认 fake
+      if (method === 'Runtime.evaluate') {
+        const expr = (params as { expression?: string })?.expression ?? '';
+        if (expr.includes('meta[name="csi" i]')) return { result: { value: { ready: true, optOut: true } } };
+        toolCalls.push('evaluate:' + expr);
+        return {};
+      }
+      if (method === 'Input.insertText') toolCalls.push(method);
+      return original(debuggee, method, params as object);
+    }) as typeof chrome.debugger.sendCommand;
+    try {
+      await expect(
+        dispatchTool('key_type', { text: 'x', _tabId: 10, _tabIds: [10], _session: 's' }),
+      ).rejects.toMatchObject({
+        code: 'page_opt_out',
+        message: expect.stringContaining('key_type: this page opted out of agent operation'),
+      });
+      expect(toolCalls).toHaveLength(0);
+    } finally {
+      restoreSendCommand(original);
+    }
+  });
+
+  it('无 meta → 工具照常执行，且同 epoch 只探一次', async () => {
+    const original = chrome.debugger.sendCommand;
+    let probes = 0;
+    (chrome.debugger as { sendCommand: typeof chrome.debugger.sendCommand }).sendCommand = (async (
+      debuggee: { tabId: number },
+      method: string,
+      params?: unknown,
+    ) => {
+      debuggerCalls.push({ tabId: debuggee.tabId, method, t: Date.now() });
+      if (method === 'Runtime.evaluate') {
+        const expr = (params as { expression?: string })?.expression ?? '';
+        if (expr.includes('meta[name="csi" i]')) {
+          probes += 1;
+          return { result: { value: { ready: true, optOut: false } } };
+        }
+      }
+      return original(debuggee, method, params as object);
+    }) as typeof chrome.debugger.sendCommand;
+    try {
+      await dispatchTool('key_type', { text: 'x', _tabId: 10, _tabIds: [10], _session: 's' });
+      await dispatchTool('key_type', { text: 'y', _tabId: 10, _tabIds: [10], _session: 's' });
+      expect(probes).toBe(1);
+      // 导航提升 epoch 后重新探测
+      refs2.bumpEpoch(10, 'navigate');
+      await dispatchTool('key_type', { text: 'z', _tabId: 10, _tabIds: [10], _session: 's' });
+      expect(probes).toBe(2);
+    } finally {
+      restoreSendCommand(original);
+    }
+  });
+
+  it('evaluate / cdp 同样被拦，工具自身命令不发出', async () => {
+    const original = chrome.debugger.sendCommand;
+    const toolCalls: string[] = [];
+    (chrome.debugger as { sendCommand: typeof chrome.debugger.sendCommand }).sendCommand = (async (
+      debuggee: { tabId: number },
+      method: string,
+      params?: unknown,
+    ) => {
+      debuggerCalls.push({ tabId: debuggee.tabId, method, t: Date.now() });
+      if (method === 'Runtime.evaluate') {
+        const expr = (params as { expression?: string })?.expression ?? '';
+        if (expr.includes('meta[name="csi" i]')) return { result: { value: { ready: true, optOut: true } } };
+        toolCalls.push('evaluate');
+        return { result: { type: 'number', value: 1 } };
+      }
+      if (method === 'Input.dispatchMouseEvent') toolCalls.push(method);
+      return original(debuggee, method, params as object);
+    }) as typeof chrome.debugger.sendCommand;
+    try {
+      await expect(
+        dispatchTool('evaluate', { code: '1+1', _tabId: 10, _tabIds: [10], _session: 's' }),
+      ).rejects.toMatchObject({ code: 'page_opt_out' });
+      await expect(
+        dispatchTool('cdp', {
+          method: 'Input.dispatchMouseEvent',
+          _tabId: 10,
+          _tabIds: [10],
+          _session: 's',
+        }),
+      ).rejects.toMatchObject({ code: 'page_opt_out' });
+      expect(toolCalls).toHaveLength(0);
+    } finally {
+      restoreSendCommand(original);
+    }
+  });
+
+  it('close_tab / list_tabs / find_tab / close_session 不探 meta', async () => {
+    const original = chrome.debugger.sendCommand;
+    let probes = 0;
+    (chrome.debugger as { sendCommand: typeof chrome.debugger.sendCommand }).sendCommand = (async (
+      debuggee: { tabId: number },
+      method: string,
+      params?: unknown,
+    ) => {
+      debuggerCalls.push({ tabId: debuggee.tabId, method, t: Date.now() });
+      if (method === 'Runtime.evaluate') {
+        const expr = (params as { expression?: string })?.expression ?? '';
+        if (expr.includes('meta[name="csi" i]')) {
+          probes += 1;
+          return { result: { value: { ready: true, optOut: true } } };
+        }
+      }
+      return original(debuggee, method, params as object);
+    }) as typeof chrome.debugger.sendCommand;
+    try {
+      await dispatchTool('list_tabs', { _tabId: 10, _tabIds: [10], _session: 's' });
+      await dispatchTool('find_tab', {
+        url: 'https://a.example',
+        _tabId: 10,
+        _tabIds: [10],
+        _session: 's',
+      });
+      await dispatchTool('close_tab', { _tabId: 10, _tabIds: [10], _session: 's' });
+      addTab({ id: 11, url: 'https://a.example', status: 'complete' });
+      await dispatchTool('close_session', { _tabId: 11, _tabIds: [11], _session: 's' });
+      expect(probes).toBe(0);
+    } finally {
+      restoreSendCommand(original);
+    }
+  });
+});

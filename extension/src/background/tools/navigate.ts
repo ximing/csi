@@ -9,6 +9,7 @@ import { addToSessionGroup } from '../tab-group';
 import { enqueueTab } from '../tab-queue';
 import { sessionTabIds } from '../session-tabs';
 import { bumpEpoch } from '../refs';
+import { assertPageAllowed, isPageOptOutError } from '../page-optout';
 import { asStaleTarget, staleTargetError } from '../stale-target';
 
 const LOAD_TIMEOUT_MS = 30_000;
@@ -108,6 +109,9 @@ export class NavigateTool implements Tool {
             bumpEpoch(tabId, 'navigate');
             await this.waitForLoad(tabId, sessionName, { prevUrl: currentUrl }).promise;
           }
+          // 终态文档 opt-out 检查（协议 §4.7）：页面已加载（同 robots.txt 语义：
+          // 请求已发出，但 CSI 不再深入操作），命中即报错，结果进 epoch 缓存。
+          await assertPageAllowed(tabId, 'navigate');
           return { success: true, url, tabId, frameId };
         } catch (err) {
           // 自排队路径不经 registry 出口：排队/执行期间 tab 被关的裸错
@@ -128,8 +132,21 @@ export class NavigateTool implements Tool {
         // 到终态 url），探测不得要求字面相等——快速 redirect 的 complete 事件
         // 可能早于监听注册，只能靠探测命中。
         await this.waitForLoad(tabId, sessionName, {}).promise;
+        // 终态文档 opt-out 检查（协议 §4.7）：redirect 后的最终页面才算数。
+        await assertPageAllowed(tabId, 'navigate');
         return { success: true, url, tabId };
       } catch (err) {
+        // 新建 tab 尚未被 daemon 收养：opt-out 必须自己关掉，否则变成
+        // session 关不掉的孤儿（协议 §4.7）。先认 page_opt_out 再
+        // asStaleTarget——remove 之后 tabs.get 失败会把 code 改写成 stale_target。
+        if (isPageOptOutError(err)) {
+          try {
+            await chrome.tabs.remove(tabId);
+          } catch {
+            // tab 已不在：仍报 page_opt_out
+          }
+          throw err;
+        }
         // 新建 tab 在 attach/加载期间被关：同样报 stale_target；该 id 不在
         // daemon 的 owned 集里，ForgetTab 是无害 no-op。
         const stale = await asStaleTarget(tabId, sessionName, err);

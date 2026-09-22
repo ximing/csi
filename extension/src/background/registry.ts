@@ -5,6 +5,7 @@
 import type { ToolArgs } from '../shared/messages';
 import type { TargetContext, Tool } from './tools/types';
 import { ensureAttached } from './debugger-session';
+import { assertPageAllowed } from './page-optout';
 import { ensureGroupRemovedListener } from './tab-group';
 import { currentEpoch } from './refs';
 import { enqueueTab } from './tab-queue';
@@ -140,6 +141,8 @@ export async function dispatchTool(name: string, args: ToolArgs): Promise<unknow
       }
       try {
         const ctx: TargetContext = { tabId, documentEpoch: currentEpoch(tabId) };
+        // 页面 opt-out（协议 §4.7）：attach 后、执行前的确定性检查。
+        await assertPageAllowed(tabId, name);
         return await tool.execute(args, ctx);
       } catch (err) {
         // tool.execute 执行期 tab 被关：CDP/tabs API 抛的是无 code 裸错，

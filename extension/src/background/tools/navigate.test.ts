@@ -14,6 +14,7 @@ import {
   removeTabSilently,
   resetChromeState,
   stubSendCommand,
+  tabsRemoved,
   updatedListenerCount,
 } from '../test-chrome';
 
@@ -22,6 +23,8 @@ installChrome();
 const { NavigateTool } = await import('./navigate');
 const { enqueueTab, dropTabQueue } = await import('../tab-queue');
 const refs = await import('../refs');
+const { forgetPageOptOut } = await import('../page-optout');
+const { deleteAttachedState } = await import('../debugger-session');
 
 const ctx = { tabId: 10, documentEpoch: 1 };
 
@@ -519,5 +522,115 @@ describe('navigate tab 死亡出口（协议 §3.3/§3.4 的 stale_target）', (
         ctx,
       ),
     ).rejects.toMatchObject({ code: 'stale_target' });
+  });
+});
+
+describe('navigate 页面 opt-out（协议 §4.7）', () => {
+  beforeEach(() => {
+    forgetPageOptOut(10);
+  });
+
+  it('load 后终态文档带 disallow meta → page_opt_out，而非成功', async () => {
+    const events: string[] = [];
+    const stub = stubSendCommand({
+      'Runtime.evaluate': () => {
+        events.push('evaluate');
+        return { result: { value: { ready: true, optOut: true } } };
+      },
+    });
+    const pending = new NavigateTool().execute(
+      { url: 'https://b.example', _tabId: 10, _tabIds: [10], _session: 's' },
+      ctx,
+    );
+    await vi.waitFor(() => {
+      expect(debuggerCalls.some((c) => c.method === 'Page.navigate')).toBe(true);
+    });
+    fireUpdated(10, { status: 'loading' }, { id: 10, url: 'https://b.example', status: 'loading' });
+    events.push('complete');
+    fireUpdated(10, { status: 'complete' }, { id: 10, url: 'https://b.example', status: 'complete' });
+    await expect(pending).rejects.toMatchObject({
+      code: 'page_opt_out',
+      message: expect.stringContaining('navigate: this page opted out of agent operation'),
+    });
+    expect(events).toEqual(['complete', 'evaluate']);
+    expect(tabsRemoved).toEqual([]);
+    stub.restore();
+  });
+
+  it('reload 路径 load 后同样检查：meta 命中 → page_opt_out，tab 留下', async () => {
+    const events: string[] = [];
+    const stub = stubSendCommand({
+      'Runtime.evaluate': () => {
+        events.push('evaluate');
+        return { result: { value: { ready: true, optOut: true } } };
+      },
+    });
+    const pending = new NavigateTool().execute(
+      { url: 'https://a.example', _tabId: 10, _tabIds: [10], _session: 's' },
+      ctx,
+    );
+    await vi.waitFor(() => {
+      expect(debuggerCalls.some((c) => c.method === 'Page.reload')).toBe(true);
+    });
+    fireUpdated(10, { status: 'loading' });
+    events.push('complete');
+    fireUpdated(10, { status: 'complete' });
+    await expect(pending).rejects.toMatchObject({ code: 'page_opt_out' });
+    expect(events).toEqual(['complete', 'evaluate']);
+    expect(tabsRemoved).toEqual([]);
+    stub.restore();
+  });
+
+  it('无 meta → 成功返回，行为与旧版一致', async () => {
+    const stub = stubSendCommand({
+      'Runtime.evaluate': () => ({ result: { value: { ready: true, optOut: false } } }),
+    });
+    const pending = new NavigateTool().execute(
+      { url: 'https://b.example', _tabId: 10, _tabIds: [10], _session: 's' },
+      ctx,
+    );
+    await vi.waitFor(() => {
+      expect(debuggerCalls.some((c) => c.method === 'Page.navigate')).toBe(true);
+    });
+    fireUpdated(10, { status: 'loading' }, { id: 10, url: 'https://b.example', status: 'loading' });
+    fireUpdated(10, { status: 'complete' }, { id: 10, url: 'https://b.example', status: 'complete' });
+    const res = (await pending) as { success: boolean; url: string };
+    expect(res.success).toBe(true);
+    stub.restore();
+  });
+
+  it('newTab 新建路径同样检查：meta 命中 → page_opt_out', async () => {
+    // 前序用例可能用过 200 号 tab（fake 的 create 从 200 起）：清掉跨用例的
+    // 模块态（attach 缓存 / epoch / opt-out 缓存 / 队列），保证本用例干净。
+    forgetPageOptOut(200);
+    deleteAttachedState(200);
+    refs.deleteTargetState(200);
+    dropTabQueue(200);
+    const original = chrome.debugger.sendCommand;
+    (chrome.debugger as { sendCommand: typeof chrome.debugger.sendCommand }).sendCommand = (async (
+      debuggee: { tabId: number },
+      method: string,
+      params?: unknown,
+    ) => {
+      debuggerCalls.push({ tabId: debuggee.tabId, method, t: Date.now() });
+      if (method === 'Runtime.evaluate') return { result: { value: { ready: true, optOut: true } } };
+      return original(debuggee, method, params as object);
+    }) as typeof chrome.debugger.sendCommand;
+    try {
+      const pending = new NavigateTool().execute(
+        { url: 'https://b.example', newTab: true, _session: 's' },
+        ctx,
+      );
+      // 先挂 rejection 断言：fake create 出的 tab 初始即 complete，waitForLoad
+      // 的探针可能立即 resolve，pending 会在我们 await 前就 reject。
+      const assertion = expect(pending).rejects.toMatchObject({ code: 'page_opt_out' });
+      await vi.waitFor(() => {
+        expect(debuggerCalls.some((c) => c.tabId === 200 && c.method === 'Page.enable')).toBe(true);
+      });
+      await assertion;
+      expect(tabsRemoved).toEqual([200]);
+    } finally {
+      (chrome.debugger as { sendCommand: typeof chrome.debugger.sendCommand }).sendCommand = original;
+    }
   });
 });

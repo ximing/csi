@@ -294,6 +294,16 @@ git tag v0.1.0 && git push origin v0.1.0
 - `screenshot` / `save_as_pdf` 按调用方给的 `path` 原样落盘（父目录自建、覆盖写）。没有路径沙箱：能 `POST /command` 的本地进程已经在 loopback 信任域里，自己也能写这些文件。`path` 请用绝对路径——相对路径相对的是 daemon 的 cwd，不是调用方的。详见 [docs/protocol.md](docs/protocol.md) §7。
 - `upload` 把调用方给的 `files` 路径原样交给 Chrome `DOM.setFileInputFiles`。没有 Downloads（或其它）路径沙箱：产品就是把用户指定的本地文件——包括项目文件——塞进网页 file input。随机网页不能 `POST /command`；若 AI 被诱导去上传私钥，那是 AI 客户端/用户的信任问题。详见 [docs/protocol.md](docs/protocol.md) §7。
 
+## 网站如何拒绝 CSI（页面 opt-out）
+
+站点在**顶层页面**加一行 meta，即可声明拒绝 agent 操作，CSI 会自觉遵守（协议 [§4.7](docs/protocol.md)）：
+
+```html
+<meta name="csi" content="disallow">
+```
+
+命中后 CSI 拒绝对该页面执行 tab-aimed 工具（点击、截图、evaluate、cdp 全部被拦，`navigate` 在加载后报错 `page_opt_out`），并把「该站点禁止自动化操作」明确告知 Agent。`close_tab` / `close_session` / `find_tab` / `list_tabs` 不受影响。`navigate` 新建的 tab 命中后由扩展关掉。声明是工具执行前的确定性程序判定；页面脚本事后增删 meta 属于已知边界。iframe 内的声明不生效。普通浏览不受任何影响——只约束 CSI。
+
 ## 许可
 
 [PolyForm Noncommercial 1.0.0](LICENSE)——任何非商用目的都被允许（个人使用、研究、教育、慈善、政府机构……）；商用未获许可。需要商用授权请开 issue。
