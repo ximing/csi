@@ -54,15 +54,28 @@ function parseProbe(res: ProbeCdp | undefined): { ready: boolean; optOut: boolea
   return { ready, optOut };
 }
 
-/** 顶层 document 是否声明 opt-out；同一 documentEpoch 只评估一次（协议 §4.7）。 */
+/** 顶层 document 是否声明 opt-out。epoch 与 tab URL 都没变时只评估一次（协议 §4.7）。 */
 export async function pageOptOut(tabId: number): Promise<boolean> {
   const epoch = currentEpoch(tabId);
   const hit = cache.get(tabId);
   if (hit && hit.epoch === epoch) return hit.optOut;
-  const res = await sendCommand<ProbeCdp>(tabId, 'Runtime.evaluate', {
-    expression: PAGE_OPT_OUT_PROBE,
-    returnByValue: true,
-  });
+  let res: ProbeCdp | undefined;
+  try {
+    res = await sendCommand<ProbeCdp>(tabId, 'Runtime.evaluate', {
+      expression: PAGE_OPT_OUT_PROBE,
+      returnByValue: true,
+    });
+  } catch (err) {
+    // 命令被拒绝且 tab 还在：与 exceptionDetails 一样，本次当未声明、不写缓存。
+    // tab 已经没了则把原错误抛回去，调用方归类 stale_target——
+    // 当成未声明会让 navigate 成功收养一个死 tab。
+    try {
+      await chrome.tabs.get(tabId);
+    } catch {
+      throw err;
+    }
+    return false;
+  }
   const parsed = parseProbe(res);
   // 失败 / 形状非法：本次当未声明，不写缓存，下次再探。
   if (!parsed) return false;
@@ -87,3 +100,9 @@ export function forgetPageOptOut(tabId: number): void {
 
 // 兜底自清：与 refs.ts 同款——tab 关闭后回收缓存，防死 tab 状态泄漏到 SW 重启。
 chrome.tabs.onRemoved.addListener((tabId) => forgetPageOptOut(tabId));
+
+// 主帧 Page.frameNavigated 在 MV3 里会丢。URL 一变就丢掉 opt-out 缓存，
+// 避免上一页的「允许」在 epoch 没涨时继续放行。refs 仍只跟 epoch。
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url) forgetPageOptOut(tabId);
+});

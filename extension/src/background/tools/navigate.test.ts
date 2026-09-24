@@ -633,4 +633,62 @@ describe('navigate 页面 opt-out（协议 §4.7）', () => {
       (chrome.debugger as { sendCommand: typeof chrome.debugger.sendCommand }).sendCommand = original;
     }
   });
+
+  it('探针命令被拒绝且 tab 仍在：当未声明，新建 tab 不关且 navigate 成功', async () => {
+    forgetPageOptOut(200);
+    deleteAttachedState(200);
+    refs.deleteTargetState(200);
+    dropTabQueue(200);
+    const stub = stubSendCommand({
+      'Runtime.evaluate': () => {
+        throw new Error('Inspected target navigated or closed');
+      },
+    });
+    try {
+      const pending = new NavigateTool().execute(
+        { url: 'https://b.example', newTab: true, _session: 's' },
+        ctx,
+      );
+      // fake create 出的 tab 初始即 complete，要在第一次 await 前挂上断言。
+      const assertion = expect(pending).resolves.toMatchObject({
+        success: true,
+        url: 'https://b.example',
+        tabId: 200,
+      });
+      await vi.waitFor(() => {
+        expect(debuggerCalls.some((c) => c.tabId === 200 && c.method === 'Page.enable')).toBe(true);
+      });
+      await assertion;
+      expect(tabsRemoved).toEqual([]);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('探针命令被拒绝且 tab 已不在：stale_target，不把死 tab 报成成功', async () => {
+    forgetPageOptOut(200);
+    deleteAttachedState(200);
+    refs.deleteTargetState(200);
+    dropTabQueue(200);
+    const stub = stubSendCommand({
+      'Runtime.evaluate': () => {
+        removeTabSilently(200);
+        throw new Error('Inspected target navigated or closed');
+      },
+    });
+    try {
+      const pending = new NavigateTool().execute(
+        { url: 'https://b.example', newTab: true, _session: 's' },
+        ctx,
+      );
+      const assertion = expect(pending).rejects.toMatchObject({ code: 'stale_target' });
+      await vi.waitFor(() => {
+        expect(debuggerCalls.some((c) => c.tabId === 200 && c.method === 'Page.enable')).toBe(true);
+      });
+      await assertion;
+      expect(tabsRemoved).toEqual([]);
+    } finally {
+      stub.restore();
+    }
+  });
 });

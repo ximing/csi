@@ -489,7 +489,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - **判定时机**：工具执行前的**确定性程序检查**（不经 LLM）。`navigate` 在页面 load 完成后检查终态文档；所有 tab-aimed 工具（§4 表中带页面目标的 17 个）在 attach 后、执行前检查。命中即失败，`code:"page_opt_out"`（§2.1 错误表），文案明确告知 Agent 该站点禁止自动化操作、勿再对本页重试。
 - **作用域**：顶层声明对整个 tab 的所有 tab-aimed 工具生效（含进帧操作与 `evaluate` / `cdp`）。`close_tab` / `close_session` / `find_tab` / `list_tabs` 不受影响——清理与枚举永远可用。
 - **navigate 命中后的 tab**：复用已有 owned tab 时留下该 tab（随后 `close_tab` / `close_session` 仍可用）。新建 tab（`newTab` 或无可复用 owned tab）命中后由扩展关闭该 tab——daemon 只在成功路径收养，不关会留下 session 无法清理的标签。
-- **缓存**：同一 tab 的同一 `documentEpoch`（§4.1）只评估一次（一次 CDP `Runtime.evaluate`）；导航 / reload 提升 epoch 后重新评估。缓存只在扩展 SW 内存，不落盘。`document.readyState === 'loading'` 时的否定结果（未看到 disallow）不写入缓存，下一次工具再探；肯定命中即使仍 loading 也可缓存。探针失败或返回形状非法时不写缓存，本次视为未声明。
+- **缓存**：同一 tab 在 `documentEpoch`（§4.1）与 tab URL 都不变时只评估一次（一次 CDP `Runtime.evaluate`）。导航 / reload 提升 epoch 后重新评估。`tabs.onUpdated` 带上新 `url` 时也丢弃这份缓存，下一次工具再探——主帧 `Page.frameNavigated` 在 MV3 里可能丢失，只靠 epoch 会把上一份「未声明」带到新文档。缓存只在扩展 SW 内存，不落盘。`document.readyState === 'loading'` 时的否定结果（未看到 disallow）不写入缓存，下一次工具再探；肯定命中即使仍 loading 也可缓存。探针失败（返回体带 `exceptionDetails`、形状非法，或 CDP 命令被拒绝）不写缓存，本次视为未声明。命令被拒绝时若 tab 已不存在，不按未声明放行，原错误交给调用方归类为 `stale_target`（§3.3/§3.4），避免 navigate 把已死的新建 tab 报成成功并收养。
 - **已知边界**：页面脚本可在检查后增删 meta（TOCTOU）。本机制是声明式协议（与 robots.txt 同类），表达站点意愿、靠 CSI 自愿遵守，防的不是对抗者。
 
 ## 5. 大结果后处理（daemon 侧）

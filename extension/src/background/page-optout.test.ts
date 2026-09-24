@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 /**
  * 页面 opt-out（协议 §4.7）单测：meta 匹配语义、同一 documentEpoch 只评估
- * 一次、epoch 提升后重新评估、loading/失败探针不缓存、tab 关闭回收缓存、
+ * 一次、epoch 提升或 url 变化后重新评估、loading/失败探针不缓存、
+ * 命令被拒绝时 tab 还在则当未声明、tab 已死则原错误上抛、tab 关闭回收缓存、
  * 命中抛 page_opt_out。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addTab,
   fireRemoved,
+  fireUpdated,
   installChrome,
+  removeTabSilently,
   resetChromeState,
   stubSendCommand,
 } from './test-chrome';
@@ -222,6 +225,60 @@ describe('epoch 缓存', () => {
     await expect(pageOptOut(10)).resolves.toBe(false);
     await expect(pageOptOut(10)).resolves.toBe(true);
     expect(probes).toBe(2);
+    stub.restore();
+  });
+
+  it('CDP 命令被拒绝且 tab 仍在：当未声明、不缓存，下次再探', async () => {
+    let probes = 0;
+    const stub = stubSendCommand({
+      'Runtime.evaluate': () => {
+        probes += 1;
+        if (probes === 1) throw new Error('Inspected target navigated or closed');
+        return cdpProbe(true);
+      },
+    });
+    await expect(pageOptOut(10)).resolves.toBe(false);
+    await expect(pageOptOut(10)).resolves.toBe(true);
+    expect(probes).toBe(2);
+    stub.restore();
+  });
+
+  it('CDP 命令被拒绝且 tab 已不在：原错误上抛，不当成未声明', async () => {
+    const stub = stubSendCommand({
+      'Runtime.evaluate': () => {
+        removeTabSilently(10);
+        throw new Error('Inspected target navigated or closed');
+      },
+    });
+    await expect(pageOptOut(10)).rejects.toThrow('Inspected target navigated or closed');
+    stub.restore();
+  });
+
+  it('url 变化丢弃缓存，即使 epoch 没涨也重新评估', async () => {
+    let optOut = false;
+    const stub = stubSendCommand({
+      'Runtime.evaluate': () => cdpProbe(optOut),
+    });
+    await expect(pageOptOut(10)).resolves.toBe(false);
+    fireUpdated(10, { url: 'https://optout.example/' });
+    optOut = true;
+    await expect(pageOptOut(10)).resolves.toBe(true);
+    expect(stub.calls.filter((c) => isMetaProbe(c.params))).toHaveLength(2);
+    stub.restore();
+  });
+
+  it('只有 status、没有 url 的 onUpdated 不丢弃缓存', async () => {
+    let probes = 0;
+    const stub = stubSendCommand({
+      'Runtime.evaluate': () => {
+        probes += 1;
+        return cdpProbe(false);
+      },
+    });
+    await pageOptOut(10);
+    fireUpdated(10, { status: 'complete' });
+    await pageOptOut(10);
+    expect(probes).toBe(1);
     stub.restore();
   });
 
