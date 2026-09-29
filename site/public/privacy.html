@@ -117,10 +117,10 @@
       <div class="container">
         <span class="tape">Evidence Handled Locally</span>
         <h1>隐私政策 · Privacy Policy</h1>
-        <p class="updated">最后更新 / Last updated: 2026-03-27 · <a href="https://github.com/ximing/csi/blob/master/docs/privacy-policy.md">docs/privacy-policy.md</a></p>
+        <p class="updated">最后更新 / Last updated: 2026-09-30 · <a href="https://github.com/ximing/csi/blob/master/docs/privacy-policy.md">docs/privacy-policy.md</a></p>
         <div class="tldr">
-          <strong>TL;DR</strong> — CSI 不收集、不存储、不传输你的任何数据：没有遥测、没有分析、没有远端服务器。一切发生在你的本机。<br />
-          CSI does not collect, store, or transmit any of your data: no telemetry, no analytics, no remote servers. Everything happens on your own machine.
+          <strong>TL;DR</strong> — CSI 不向项目维护者收集或上传你的浏览器数据：没有遥测、没有分析、没有远端服务器。默认通过本机连接执行；可配置 daemon 地址。<br />
+          CSI does not collect or upload your browser data to the project maintainers: no telemetry, no analytics, no remote servers. Connections are local by default; the daemon address is configurable.
         </div>
       </div>
     </header>
@@ -130,20 +130,22 @@
         <p class="lang-tag">中文</p>
 
         <h2><span class="num">1</span>概述</h2>
-        <p>CSI 是一个开源项目（<a href="https://github.com/ximing/csi">github.com/ximing/csi</a>），由一个 Chrome 扩展和一个运行在你自己电脑上的本地 daemon 组成，让本机运行的 AI 客户端（如 Claude Code）通过回环连接操控你真实的 Chrome 浏览器。</p>
+        <p>CSI 是一个开源项目（<a href="https://github.com/ximing/csi">github.com/ximing/csi</a>），由一个 Chrome 扩展和一个运行在你自己电脑上的本地 daemon 组成，让本机运行的 AI 客户端（如 Claude Code）默认通过回环连接操控你真实的 Chrome 浏览器。</p>
 
         <h2><span class="num">2</span>我们不收集什么</h2>
-        <p>CSI 没有遥测、没有分析统计、没有崩溃上报、没有账号系统，也不运营任何远端服务器。扩展和 daemon 都不会向我们（或任何第三方）发送任何数据——我们甚至没有接收数据的服务器。</p>
+        <p>CSI 没有遥测、没有分析统计、没有崩溃上报、没有账号系统，也不运营任何远端服务器。浏览器工具结果发送到用户配置的 daemon，并返回给调用客户端；CSI 不把浏览器数据作为遥测发送给项目维护者。更新检查与软件下载会访问发布服务。</p>
 
-        <h2><span class="num">3</span>数据如何流动（全部在本机）</h2>
+        <h2><span class="num">3</span>数据如何流动（默认使用本机连接）</h2>
         <ul>
-          <li>Chrome 扩展只通过 WebSocket 连接本机 daemon（默认 <code>ws://127.0.0.1:10088/ws</code>）。</li>
-          <li>daemon 只监听 <code>127.0.0.1</code>（回环地址），不接受来自本机以外的连接。</li>
+          <li>Chrome 扩展通过 WebSocket 连接你配置的 daemon（默认 <code>ws://127.0.0.1:10088/ws</code>）。</li>
+          <li>daemon 默认监听 <code>127.0.0.1</code>（回环地址）；用户可通过 bind_host / CSI_HOST 配置非回环监听，让网络客户端访问。</li>
           <li>所有浏览器操作（导航、点击、输入、读取页面、截图、导出 PDF、标签页与标签组管理）都发生在你本机的 Chrome 里，使用你自己已登录的会话。</li>
           <li>截图与 PDF 由 daemon 写入本机磁盘（默认为系统临时目录，或指令中指定的路径），不会上传。</li>
-          <li>扩展仅使用 <code>chrome.storage.local</code> 保存连接设置（daemon 地址、重连周期等），这些数据留在你的浏览器本地配置中。</li>
-          <li>daemon 在本机 <code>~/.csi/</code> 下写配置、PID 文件和运行日志；日志按天滚动，最多保留 3 天。</li>
+          <li>扩展使用 <code>chrome.storage.local</code> 保存连接与窗口设置（daemon 地址、重连周期等），这些数据留在你的浏览器本地配置中。</li>
+          <li>daemon 在本机 <code>~/.csi/</code> 下写配置、PID 文件和运行日志；日志按天滚动，默认保留 3 天（可配置）。</li>
         </ul>
+
+        <p>用户配置非本机 daemon 地址或开放非回环监听后，工具结果可能通过网络传输给获准访问的客户端。</p>
 
         <h2><span class="num">4</span>第三方 AI 客户端</h2>
         <p>向 daemon 发出指令的是你自己在本机运行的 AI 客户端（例如 Claude Code）。页面内容、截图路径等工具结果会返回给该客户端；<strong>该客户端可能会按其自身隐私政策把内容发送到它自己的云端服务</strong>。这属于 AI 客户端的行为，不在 CSI 的控制范围内——请同时阅读你所用 AI 客户端的隐私政策。</p>
@@ -158,7 +160,7 @@
         </ul>
 
         <h2><span class="num">6</span>安全边界</h2>
-        <p>v1 的 daemon 无鉴权，回环地址就是唯一的隔离边界：任何以你的用户身份在本机运行的进程都可以向 daemon 发指令、驱动你的浏览器。请据此决定在本机运行哪些程序。</p>
+        <p>daemon 默认回环监听、鉴权关闭。本机可访问该端口的进程能驱动浏览器；配置非回环监听会扩大访问范围。auth_enabled 开启且 api_key 非空时，请求须通过 key 鉴权（探活与管理页静态入口除外）。</p>
 
         <h2><span class="num">7</span>数据留存与删除</h2>
         <p>我们不持有你的任何数据，因此无从删除。本机产物（截图、PDF、日志、配置）都在你自己的磁盘上，删除对应文件即可；卸载扩展会清除其 <code>chrome.storage.local</code> 中的设置。</p>
@@ -171,20 +173,22 @@
         <p class="lang-tag">English</p>
 
         <h2><span class="num">1</span>Overview</h2>
-        <p>CSI is an open-source project (<a href="https://github.com/ximing/csi">github.com/ximing/csi</a>) consisting of a Chrome extension and a local daemon running on your own machine. It lets AI clients running locally on your computer (such as Claude Code) drive your real Chrome browser over a loopback connection.</p>
+        <p>CSI is an open-source project (<a href="https://github.com/ximing/csi">github.com/ximing/csi</a>) consisting of a Chrome extension and a local daemon running on your own machine. It lets AI clients running locally on your computer (such as Claude Code) drive your real Chrome browser over a loopback connection by default.</p>
 
         <h2><span class="num">2</span>What we do not collect</h2>
-        <p>CSI has no telemetry, no analytics, no crash reporting, no accounts, and no remote servers. Neither the extension nor the daemon sends any data to us (or to any third party) — we do not even operate a server that could receive it.</p>
+        <p>CSI has no telemetry, no analytics, no crash reporting, no accounts, and no remote servers. Browser tool results are sent to the configured daemon and returned to the calling client. CSI does not send browser data to project maintainers as telemetry. Update checks and software downloads contact release services.</p>
 
-        <h2><span class="num">3</span>How data flows (entirely on your machine)</h2>
+        <h2><span class="num">3</span>How data flows (local connection by default)</h2>
         <ul>
-          <li>The Chrome extension connects only to the local daemon over WebSocket (default <code>ws://127.0.0.1:10088/ws</code>).</li>
-          <li>The daemon listens on <code>127.0.0.1</code> (loopback) only and accepts no connections from outside your machine.</li>
+          <li>The Chrome extension connects to the configured daemon over WebSocket (default <code>ws://127.0.0.1:10088/ws</code>).</li>
+          <li>The daemon defaults to <code>127.0.0.1</code> (loopback). Users can configure bind_host / CSI_HOST to accept network clients.</li>
           <li>All browser actions (navigate, click, type, read pages, screenshots, save-as-PDF, tab and tab-group management) happen inside your own Chrome, using your own logged-in sessions.</li>
           <li>Screenshots and PDFs are written to your local disk by the daemon (the system temp directory by default, or a path given in the command). They are never uploaded.</li>
-          <li>The extension stores only connection settings (daemon URL, reconnect interval, etc.) in <code>chrome.storage.local</code>, which stays inside your browser profile.</li>
-          <li>The daemon writes its config, PID file, and runtime logs under <code>~/.csi/</code> on your machine; logs rotate daily and are kept for at most 3 days.</li>
+          <li>The extension stores connection and window settings (daemon URL, reconnect interval, etc.) in <code>chrome.storage.local</code>, which stays inside your browser profile.</li>
+          <li>The daemon writes its config, PID file, and runtime logs under <code>~/.csi/</code> on your machine; logs rotate daily and are kept for 3 days by default (configurable).</li>
         </ul>
+
+        <p>If users configure a non-local daemon address or non-loopback listening, tool results may travel over the network to authorized clients.</p>
 
         <h2><span class="num">4</span>Third-party AI clients</h2>
         <p>Commands are sent to the daemon by AI clients that you run locally (e.g., Claude Code). Tool results such as page content or screenshot file paths are returned to that client; <strong>the client may transmit this content to its own cloud service under its own privacy policy</strong>. That is the AI client's behavior and is outside CSI's control — please also read the privacy policy of the AI client you use.</p>
@@ -199,7 +203,7 @@
         </ul>
 
         <h2><span class="num">6</span>Security boundary</h2>
-        <p>The v1 daemon has no authentication; the loopback address is the only isolation boundary. Any process running as your user on your machine can send commands to the daemon and drive your browser. Choose what you run locally accordingly.</p>
+        <p>The daemon defaults to loopback with authentication disabled. Local processes that can reach the port can drive the browser; a non-loopback bind expands access. When auth_enabled is true and api_key is nonempty, requests require the key, except health checks and the static admin entry points.</p>
 
         <h2><span class="num">7</span>Retention and deletion</h2>
         <p>We hold none of your data, so there is nothing for us to delete. Local artifacts (screenshots, PDFs, logs, config) live on your own disk — delete the files to remove them. Uninstalling the extension clears its settings from <code>chrome.storage.local</code>.</p>

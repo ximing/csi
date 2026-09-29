@@ -6,11 +6,17 @@
 // 反之亦然（防"五源都列了工具但忘了 register → 运行时 unknown tool"）。
 // 用法: node scripts/skill-ci/check-tools.mjs
 import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// Optional fixture root for negative tests; defaults to the working repository.
+const repoRoot = process.argv[2] ? resolve(process.argv[2]) : join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (p) => readFileSync(join(repoRoot, p), 'utf8');
+
+function addUnique(set, value) {
+  if (set.has(value)) throw new Error(`[check-tools] duplicate definition: ${value}`);
+  set.add(value);
+}
 
 function sorted(set) {
   return [...set].sort();
@@ -21,7 +27,7 @@ function protocolTools() {
   const doc = read('docs/protocol.md');
   const sec = doc.slice(doc.indexOf('## 4.'), doc.indexOf('## 5.'));
   const out = new Set();
-  for (const m of sec.matchAll(/^\|\s*\d+\s*\|\s*`([a-z_]+)`/gm)) out.add(m[1]);
+  for (const m of sec.matchAll(/^\|\s*\d+\s*\|\s*`([a-z_]+)`/gm)) addUnique(out, m[1]);
   return out;
 }
 
@@ -30,7 +36,7 @@ function daemonTools() {
   const src = read('daemon/internal/tools/tools.go');
   const body = src.slice(src.indexOf('validTools = map[string]bool{'));
   const out = new Set();
-  for (const m of body.matchAll(/^\s*"([a-z_]+)":\s*true,/gm)) out.add(m[1]);
+  for (const m of body.matchAll(/^\s*"([a-z_]+)":\s*true,/gm)) addUnique(out, m[1]);
   return out;
 }
 
@@ -38,7 +44,7 @@ function daemonTools() {
 function mcpTools() {
   const src = read('daemon/internal/mcp/tools.go');
   const out = new Set();
-  for (const m of src.matchAll(/^\s*name:\s*"([a-z_]+)",/gm)) out.add(m[1]);
+  for (const m of src.matchAll(/^\s*name:\s*"([a-z_]+)",/gm)) addUnique(out, m[1]);
   return out;
 }
 
@@ -50,7 +56,7 @@ function extensionTools() {
     if (!name.endsWith('.ts') || name.endsWith('.test.ts') || name === 'types.ts') continue;
     const src = readFileSync(join(dir, name), 'utf8');
     const m = src.match(/readonly name = '([a-z_]+)'/);
-    if (m) out.add(m[1]);
+    if (m) addUnique(out, m[1]);
   }
   return out;
 }
@@ -77,7 +83,7 @@ function registeredToolClasses() {
   // 剥掉行注释，避免把注释掉的 register 调用算作已注册
   const body = (end < 0 ? src.slice(start) : src.slice(start, end)).replace(/\/\/[^\n]*/g, '');
   const out = new Set();
-  for (const m of body.matchAll(/\bregister\w*\(\s*new\s+(\w+)\s*\(/g)) out.add(m[1]);
+  for (const m of body.matchAll(/\bregister\w*\(\s*new\s+(\w+)\s*\(/g)) addUnique(out, m[1]);
   return out;
 }
 
@@ -90,7 +96,7 @@ function skillTools() {
   const end = rest.indexOf('\n## ');
   const sec = end < 0 ? rest : rest.slice(0, end);
   const out = new Set();
-  for (const m of sec.matchAll(/^\|\s*`([a-z_]+)`\s*\|/gm)) out.add(m[1]);
+  for (const m of sec.matchAll(/^\|\s*`([a-z_]+)`\s*\|/gm)) addUnique(out, m[1]);
   return out;
 }
 
@@ -107,6 +113,10 @@ for (const set of Object.values(sources)) for (const t of set) union.add(t);
 
 let failures = 0;
 for (const [label, set] of Object.entries(sources)) {
+  if (set.size === 0) {
+    console.error(`[check-tools] FAIL: ${label} parsed empty; check source format`);
+    failures++;
+  }
   console.log(`[check-tools] ${label}: ${sorted(set).length} tools`);
   const missing = sorted(new Set([...union].filter((t) => !set.has(t))));
   if (missing.length) {

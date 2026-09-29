@@ -1,15 +1,13 @@
 /**
- * close_tab / close_session 共用的 per-tab 状态清理（queue + @e refs）。
+ * close_tab / close_session 共用的 per-tab 状态清理（统一生命周期入口）。
  * 不变量只有一条，两处共用：tab 确认不在了才清；瞬时失败（tab 仍在）绝不
  * 清——活 tab 的队列尾被删会让在飞任务与新任务并发跑同一 tab。
  */
-import { dropTabQueue } from '../tab-queue';
-import { deleteTargetState } from '../refs';
+import { removeTabState } from '../tab-lifecycle';
 
 /** tab 已确认移除（remove 成功）后的直接清理。 */
 export function cleanupTabState(tabId: number): void {
-  dropTabQueue(tabId);
-  deleteTargetState(tabId);
+  removeTabState(tabId);
 }
 
 /**

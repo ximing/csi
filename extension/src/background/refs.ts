@@ -2,6 +2,7 @@
  * The `@eN` reference table produced by `snapshot` and consumed by
  * selector-taking tools. Per-tab + per-documentEpoch (协议 §4.1).
  */
+import { registerTabLifecycle } from './tab-lifecycle';
 import { ToolError } from './tool-error';
 
 export interface RefEntry {
@@ -125,7 +126,10 @@ export function deleteTargetState(tabId: number): void {
 
 // 兜底自清：close 工具的瞬时失败路径会刻意保留 refs（tab 还在），tab 随后
 // 被关掉时由这里回收，避免死 tab 的 @e 表泄漏到 SW 重启。
-chrome.tabs.onRemoved.addListener((tabId) => deleteTargetState(tabId));
+registerTabLifecycle({
+  removed: deleteTargetState,
+  detached: (tabId) => bumpEpoch(tabId, 'reattach'),
+});
 
 /**
  * 子帧跨文档导航后只作废该帧的 ref（协议 §4.1：主文档 commit 才提升 epoch）。

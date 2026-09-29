@@ -18,7 +18,7 @@ AI 客户端 (Claude Code skill)
         ▼
 ┌─────────────────────────────┐
 │  daemon (Go)                │  127.0.0.1:10088
-│  HTTP server + WS server    │  仅回环，无鉴权 (v1)
+│  HTTP server + WS server    │  默认回环，鉴权可选
 └─────────────────────────────┘
         ▲  WebSocket /ws  (扩展作为 WS 客户端，自动重连)
         │
@@ -289,13 +289,14 @@ git tag v0.1.0 && git push origin v0.1.0
 
 协议变更：先改 `docs/protocol.md`，再改两侧实现。协议文件就是契约；实现必须服从它。
 
-端口：默认 `10088`，用 `CSI_PORT` 环境变量覆盖（在扩展弹窗里设置相同端口）。点扩展图标 → Settings 打开设置页：查看 daemon 状态、改端口 / 日志保留天数 / 工具超时，以及调整自动重连间隔。
+端口：默认 `10088`，用 `CSI_PORT` 环境变量覆盖（在扩展弹窗里设置相同端口）。点扩展图标 → Settings 打开设置页：查看 daemon 状态、改端口 / 日志保留天数 / 工具超时，以及调整自动重连间隔。监听地址和鉴权可在 daemon 管理页 `/admin` 配置。
 
 ## 安全说明
 
-- daemon 只绑 `127.0.0.1`；v1 没有鉴权——回环就是隔离边界（本机 vs 网络，不是进程沙箱）。能 `POST /command` 的进程就能驱动你的浏览器。`/ws` 另外拒绝非 `chrome-extension://…` 的浏览器 Origin；空 Origin（curl、测试）仍放行。这不是鉴权——本机进程照样能连。抢到槽位的客户端只能收到 `tool_call`，不能驱动真扩展。
+- daemon 默认绑定 `127.0.0.1`、鉴权默认关闭。可通过 `bind_host` / `CSI_HOST` 修改监听地址；设置 `auth_enabled:true` 且 `api_key` 非空后启用鉴权。HTTP API 使用 `Authorization: Bearer <key>`，`/ws` 使用 `?api_key=<key>`；`/healthz`、`/admin` 和根路径免鉴权。详细规则见协议 §2.7。
+- 默认配置下，能访问回环端口的本机进程可驱动浏览器；非回环监听会扩大可访问范围，开启鉴权后需要持有 key。`/ws` 还会检查浏览器 Origin，但 Origin 检查不能替代鉴权。
 - `evaluate` 和 `cdp` 是页面内的任意代码执行通道。这是设计能力，不是 bug——据此对待技能提示。
-- `screenshot` / `save_as_pdf` 按调用方给的 `path` 原样落盘（父目录自建、覆盖写）。没有路径沙箱：能 `POST /command` 的本地进程已经在 loopback 信任域里，自己也能写这些文件。`path` 请用绝对路径——相对路径相对的是 daemon 的 cwd，不是调用方的。详见 [docs/protocol.md](docs/protocol.md) §7。
+- `screenshot` / `save_as_pdf` 按调用方给的 `path` 原样落盘（父目录自建、覆盖写）。没有路径沙箱：获准调用 `POST /command` 的客户端可让 daemon 以其运行用户的权限写文件；远程调用方也拥有这项能力。`path` 请用绝对路径——相对路径相对的是 daemon 的 cwd，不是调用方的。详见 [docs/protocol.md](docs/protocol.md) §7。
 - `upload` 把调用方给的 `files` 路径原样交给 Chrome `DOM.setFileInputFiles`。没有 Downloads（或其它）路径沙箱：产品就是把用户指定的本地文件——包括项目文件——塞进网页 file input。随机网页不能 `POST /command`；若 AI 被诱导去上传私钥，那是 AI 客户端/用户的信任问题。详见 [docs/protocol.md](docs/protocol.md) §7。
 
 ## 网站如何拒绝 CSI（页面 opt-out）

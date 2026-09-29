@@ -35,30 +35,13 @@ import { ListTabsTool } from './tools/list-tabs';
 import { ListFramesTool } from './tools/list-frames';
 import { CloseSessionTool } from './tools/close-session';
 
-const registry = new Map<string, Tool>();
+type ExecutionMode = 'tab' | 'self';
+const registry = new Map<string, { tool: Tool; mode: ExecutionMode }>();
 
-function register(tool: Tool): void {
-  registry.set(tool.name, tool);
+function register(tool: Tool, mode: ExecutionMode): void {
+  if (registry.has(tool.name)) throw new Error(`duplicate tool: ${tool.name}`);
+  registry.set(tool.name, { tool, mode });
 }
-
-const TAB_AIMED = new Set([
-  'snapshot',
-  'click',
-  'fill',
-  'evaluate',
-  'network',
-  'mouse_click',
-  'wait',
-  'scroll',
-  'hover',
-  'key_type',
-  'send_keys',
-  'cdp',
-  'screenshot',
-  'save_as_pdf',
-  'upload',
-  'list_frames',
-]);
 
 export function toolNames(): string[] {
   return [...registry.keys()];
@@ -66,27 +49,28 @@ export function toolNames(): string[] {
 
 export function registerAllTools(): void {
   ensureGroupRemovedListener();
-  register(new NavigateTool());
-  register(new FindTabTool());
-  register(new EvaluateTool());
-  register(new NetworkTool());
-  register(new SnapshotTool());
-  register(new ClickTool());
-  register(new FillTool());
-  register(new MouseClickTool());
-  register(new CdpTool());
-  register(new KeyTypeTool());
-  register(new SendKeysTool());
-  register(new WaitTool());
-  register(new ScrollTool());
-  register(new HoverTool());
-  register(new ScreenshotTool());
-  register(new SaveAsPdfTool());
-  register(new UploadTool());
-  register(new CloseTabTool());
-  register(new ListTabsTool());
-  register(new ListFramesTool());
-  register(new CloseSessionTool());
+  registry.clear();
+  register(new NavigateTool(), 'self');
+  register(new FindTabTool(), 'self');
+  register(new EvaluateTool(), 'tab');
+  register(new NetworkTool(), 'tab');
+  register(new SnapshotTool(), 'tab');
+  register(new ClickTool(), 'tab');
+  register(new FillTool(), 'tab');
+  register(new MouseClickTool(), 'tab');
+  register(new CdpTool(), 'tab');
+  register(new KeyTypeTool(), 'tab');
+  register(new SendKeysTool(), 'tab');
+  register(new WaitTool(), 'tab');
+  register(new ScrollTool(), 'tab');
+  register(new HoverTool(), 'tab');
+  register(new ScreenshotTool(), 'tab');
+  register(new SaveAsPdfTool(), 'tab');
+  register(new UploadTool(), 'tab');
+  register(new CloseTabTool(), 'self');
+  register(new ListTabsTool(), 'self');
+  register(new ListFramesTool(), 'tab');
+  register(new CloseSessionTool(), 'self');
 }
 
 const noneTarget: TargetContext = { tabId: 0, documentEpoch: 0 };
@@ -110,19 +94,13 @@ export async function resolveTabTarget(args: ToolArgs): Promise<number> {
 }
 
 export async function dispatchTool(name: string, args: ToolArgs): Promise<unknown> {
-  const tool = registry.get(name);
-  if (!tool) {
+  const entry = registry.get(name);
+  if (!entry) {
     throw new Error(`unknown tool: ${name}. Available: ${[...registry.keys()].join(', ')}`);
   }
 
-  if (name === 'list_tabs') {
-    return tool.execute(args, noneTarget);
-  }
-  if (name === 'find_tab' || name === 'navigate' || name === 'close_tab' || name === 'close_session') {
-    return tool.execute(args, noneTarget);
-  }
-
-  if (TAB_AIMED.has(name)) {
+  const { tool, mode } = entry;
+  if (mode === 'tab') {
     const tabId = await resolveTabTarget(args);
     const session = typeof args._session === 'string' ? args._session : 'default';
     return enqueueTab(tabId, async () => {

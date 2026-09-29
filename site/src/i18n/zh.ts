@@ -104,7 +104,7 @@ export const zh = {
     tapeWarn: '⚠ 警示',
     tapePower: '⚡ 能力',
     items: [
-      { title: '回环即边界', desc: 'daemon 只绑 127.0.0.1，v1 无鉴权——回环就是隔离边界。任何以你用户身份运行的进程都能驱动你的浏览器。' },
+      { title: '默认回环连接', desc: 'daemon 默认绑定 127.0.0.1，鉴权默认关闭。可配置监听地址和 API key；非回环监听会扩大访问范围。' },
       { title: '设计能力', desc: 'evaluate 与 cdp 是页面内的任意代码执行通道。这是设计能力，不是 bug——据此对待技能提示。' },
     ],
   },

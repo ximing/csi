@@ -2,10 +2,11 @@
 // 必须等于 daemon/internal/mcp/tools.go 对应 toolDef 的 props 键（顶层参数，session 除外）。
 // 某一侧加/删参数而另一侧未同步 → 退出码 1 并列出差异。用法: node scripts/skill-ci/check-schemas.mjs
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// Optional fixture root for negative tests; defaults to the working repository.
+const repoRoot = process.argv[2] ? resolve(process.argv[2]) : join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (p) => readFileSync(join(repoRoot, p), 'utf8');
 
 // 1. 协议 §4 args 列：取 `| N | `name` | <args> |` 第三列；剥掉括号注释（含 `match`({role?,…})
@@ -18,6 +19,7 @@ function protocolArgs() {
     const cell = m[2].replace(/\([^)]*\)/g, '');
     const args = new Set();
     for (const t of cell.matchAll(/`([A-Za-z_][A-Za-z0-9_]*)`/g)) args.add(t[1]);
+    if (out.has(m[1])) throw new Error(`[check-schemas] duplicate protocol tool: ${m[1]}`);
     out.set(m[1], args);
   }
   return out;
@@ -33,7 +35,8 @@ function mcpArgs() {
     const nameM = line.match(/^\t\tname:\s*"([a-z_]+)",/);
     if (nameM) {
       tool = nameM[1];
-      if (!out.has(tool)) out.set(tool, new Set());
+      if (out.has(tool)) throw new Error(`[check-schemas] duplicate MCP tool: ${tool}`);
+      out.set(tool, new Set());
       continue;
     }
     if (!tool) continue;
@@ -44,6 +47,7 @@ function mcpArgs() {
     if (inProps) {
       const keyM = line.match(/^\t\t\t"([^"]+)":/);
       if (keyM) {
+        if (out.get(tool).has(keyM[1])) throw new Error(`[check-schemas] duplicate property: ${tool}.${keyM[1]}`);
         out.get(tool).add(keyM[1]);
         continue;
       }
@@ -57,6 +61,10 @@ const protocol = protocolArgs();
 const mcp = mcpArgs();
 
 let failures = 0;
+if (!protocol.size || !mcp.size) {
+  console.error('[check-schemas] FAIL: empty schema source; check source format');
+  failures++;
+}
 const tools = new Set([...protocol.keys(), ...mcp.keys()]);
 for (const tool of [...tools].sort()) {
   const p = protocol.get(tool);

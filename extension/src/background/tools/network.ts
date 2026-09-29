@@ -1,3 +1,4 @@
+import { registerTabLifecycle } from '../tab-lifecycle';
 /**
  * network (protocol §4 / §4.5): start/stop capture, list collected requests,
  * fetch a response body. Capture state is per-tab; a single global
@@ -51,12 +52,14 @@ export function resetNetworkState(): void {
   seqByTab.clear();
 }
 
-chrome.tabs.onRemoved.addListener((tabId) => {
+function clearNetworkState(tabId: number): void {
   capturingTabIds.delete(tabId);
   requestsByTab.delete(tabId);
   droppedByTab.delete(tabId);
   seqByTab.delete(tabId);
-});
+}
+
+registerTabLifecycle({ removed: clearNetworkState });
 
 /** 写入一条新请求；表满时丢最旧并累计 droppedCount（协议 §4.5）。 */
 function recordRequest(tabId: number, entry: Omit<CapturedRequest, 'seq'>): void {

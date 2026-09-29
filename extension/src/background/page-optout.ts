@@ -1,3 +1,4 @@
+import { registerTabLifecycle } from './tab-lifecycle';
 /**
  * 页面 opt-out（协议 §4.7）：顶层 document 声明
  * `<meta name="csi" content="disallow">` 时，CSI 拒绝对该 tab 执行
@@ -99,7 +100,7 @@ export function forgetPageOptOut(tabId: number): void {
 }
 
 // 兜底自清：与 refs.ts 同款——tab 关闭后回收缓存，防死 tab 状态泄漏到 SW 重启。
-chrome.tabs.onRemoved.addListener((tabId) => forgetPageOptOut(tabId));
+registerTabLifecycle({ removed: forgetPageOptOut, detached: forgetPageOptOut });
 
 // 主帧 Page.frameNavigated 在 MV3 里会丢。URL 一变就丢掉 opt-out 缓存，
 // 避免上一页的「允许」在 epoch 没涨时继续放行。refs 仍只跟 epoch。

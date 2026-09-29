@@ -18,7 +18,7 @@ AI client (Claude Code skill)
         ▼
 ┌─────────────────────────────┐
 │  daemon (Go)                │  127.0.0.1:10088
-│  HTTP server + WS server    │  loopback only, no auth (v1)
+│  HTTP server + WS server    │  loopback default, optional auth
 └─────────────────────────────┘
         ▲  WebSocket /ws  (extension is the WS client, auto-reconnects)
         │
@@ -293,9 +293,10 @@ Port: default `10088`, override with the `CSI_PORT` environment variable (set th
 
 ## Security notes
 
-- The daemon binds `127.0.0.1` only; there is no authentication in v1 — loopback is the isolation boundary (this machine vs the network, not a process sandbox). Anything that can `POST /command` can drive your browser. `/ws` additionally rejects browser pages whose `Origin` is not `chrome-extension://…`; empty Origin (curl, tests) is still allowed. That is not authentication — a local process can still connect. A hijacked slot receives `tool_call`s; it cannot drive the real extension.
+- The daemon defaults to `127.0.0.1` with authentication disabled. `bind_host` / `CSI_HOST` can change the bind address. Authentication is active when `auth_enabled` is true and `api_key` is nonempty: HTTP APIs use `Authorization: Bearer <key>`, and `/ws` uses `?api_key=<key>`. `/healthz`, `/admin`, and the root path are exempt. See protocol §2.7.
+- With the default settings, local processes that can reach the loopback port can drive the browser. A non-loopback bind expands access; enabling authentication requires callers to hold the key. The WebSocket Origin check is separate from authentication.
 - `evaluate` and `cdp` are arbitrary code execution channels in the page. That is a designed capability, not a bug — treat skill prompts accordingly.
-- `screenshot` / `save_as_pdf` write the caller-supplied `path` as-is (parents created, existing files overwritten). There is no path sandbox: a local process that can `POST /command` is already in the loopback trust domain and can write those files itself. Prefer an absolute `path` — relative ones resolve against the daemon's cwd, which is not the client's. See [docs/protocol.md](docs/protocol.md) §7.
+- `screenshot` / `save_as_pdf` write the caller-supplied `path` as-is (parents created, existing files overwritten). There is no path sandbox: an authorized caller, including a remote caller, can request writes with the daemon process’s filesystem permissions. Prefer an absolute `path` — relative ones resolve against the daemon's cwd, which is not the client's. See [docs/protocol.md](docs/protocol.md) §7.
 - `upload` passes caller-supplied `files` paths as-is to Chrome `DOM.setFileInputFiles`. There is no Downloads (or other) path sandbox: the product is attaching user-specified local files — including project files — to a page file input. A random webpage cannot `POST /command`; if an agent is tricked into uploading secrets, that is an agent/user trust issue. See [docs/protocol.md](docs/protocol.md) §7.
 
 ## How a website can opt out of CSI

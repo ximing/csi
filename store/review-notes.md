@@ -4,9 +4,9 @@
 
 ## Single purpose（单一用途声明）
 
-> CSI lets a locally installed AI agent daemon control the user's own Chrome browser — open pages, click, fill forms, read page content, take screenshots, and automate web tasks — using the user's real browser sessions. The extension is the browser-side executor for the CSI daemon, a companion program the user installs and runs on their own machine (127.0.0.1 only). Every action the extension takes is a tool call issued by that local daemon on the user's behalf.
+> CSI lets a locally installed AI agent daemon control the user's own Chrome browser — open pages, click, fill forms, read page content, take screenshots, and automate web tasks — using the user's real browser sessions. The extension is the browser-side executor for the CSI daemon, a companion program the user installs and runs on their own machine (127.0.0.1 by default). Every action the extension takes is a tool call issued by that local daemon on the user's behalf.
 
-中译（仅供自己参考，不必提交）：CSI 让本机安装的 AI agent daemon 控制用户自己的 Chrome 浏览器——打开页面、点击、填表、读取页面内容、截图、自动化网页任务——全程使用用户真实的浏览器会话。扩展是 CSI daemon 的浏览器侧执行器；daemon 是用户自行安装、只监听 127.0.0.1 的本地程序。扩展的一切动作都是 daemon 代表用户发起的工具调用。
+中译（仅供自己参考，不必提交）：CSI 让本机安装的 AI agent daemon 控制用户自己的 Chrome 浏览器——打开页面、点击、填表、读取页面内容、截图、自动化网页任务——全程使用用户真实的浏览器会话。扩展是 CSI daemon 的浏览器侧执行器；daemon 是用户自行安装、默认监听 127.0.0.1 的本地程序。扩展的一切动作都是 daemon 代表用户发起的工具调用。
 
 ## Permission justifications（权限用途说明）
 
@@ -20,7 +20,7 @@
 
 ### storage
 
-> `chrome.storage.local` stores only the extension's own connection settings: whether it should connect to the local daemon (`ws_should_connect`), the daemon WebSocket URL (`local_url`, default `ws://127.0.0.1:10088/ws`), and the reconnect-alarm period. These values persist across service-worker suspension so the extension can resume its connection. No browsing data, page content, or personal information is stored.
+> `chrome.storage.local` stores the extension's connection and window settings: whether it should connect to the local daemon (`ws_should_connect`), the daemon WebSocket URL (`local_url`, default `ws://127.0.0.1:10088/ws`), the reconnect-alarm period, and the Agent window preference. These values persist across service-worker suspension so the extension can resume its connection. No browsing data, page content, or personal information is stored.
 
 ### alarms
 
@@ -36,7 +36,7 @@
 
 ### host_permissions — `<all_urls>`
 
-> The extension's purpose is to let the user's local AI agent operate any website the user is logged into — that is the product. The set of sites is not known in advance: the user may ask the agent to read or act on any page they can open themselves. Host access is exercised exclusively through the `chrome.debugger` CDP session on the specific tab a command targets, at the moment the local daemon issues that command; there is no background crawling, no content script injected into pages, and no data sent anywhere except the loopback daemon. Broad host permission is required because a per-site opt-in list would defeat the single purpose of the extension.
+> The extension's purpose is to let the user's local AI agent operate any website the user is logged into — that is the product. The set of sites is not known in advance: the user may ask the agent to read or act on any page they can open themselves. Host access is exercised exclusively through the `chrome.debugger` CDP session on the specific tab a command targets, at the moment the local daemon issues that command; there is no background crawling, no content script injected into pages, and no data sent anywhere except the configured daemon (loopback by default). Broad host permission is required because a per-site opt-in list would defeat the single purpose of the extension.
 
 ## 数据使用披露（Data usage）
 
@@ -45,20 +45,20 @@ CWS 认证问答建议答案：
 - **Does your extension collect or transmit user data?** → **No.**
 - 详细说明（若要求补充）：
 
-> The extension does not collect, transmit, sell, or share any user data with any third party, and does not transmit any data off the user's machine. Its only network connection is a WebSocket (and, from the options page, plain HTTP status checks) to a companion daemon running on the same computer at 127.0.0.1 (default port 10088), installed and controlled by the user. Page content, screenshots, and automation results travel exclusively over that loopback connection to the local daemon; nothing is sent to any remote server. The extension stores no personal data — only its own connection settings in chrome.storage.local.
+> The extension sends browser tool results to the daemon address configured by the user, which defaults to ws://127.0.0.1:10088/ws. The options page also makes HTTP requests to the configured daemon. Page content and automation results are returned to the client that issued the command. A non-local daemon address or network-accessible daemon can therefore carry data beyond the browser's machine. Browser data is not sent to the project maintainers. Connection and window preferences are stored locally in the browser.
 
-- 对应勾选项：所有 data type（personal communications / health / financial / authentication / browsing history 等）均声明 **not collected**。注意：虽然扩展技术上能读取页面内容，但按 CWS 定义"collect"指传输给开发者或第三方——这里数据不出本机、开发者无任何服务端，因此如实填"不收集"。
+- 提交数据披露时使用上述实际数据流描述；不要再以“数据一定不出本机”为依据。
 - Privacy policy URL：因不收集数据，CWS 不强制要求隐私政策链接；如后台坚持要填，可放 GitHub 仓库 README 链接。
 
 ## Remote code 声明
 
-> This extension does not load or execute any remote code. All JavaScript is bundled at build time (Vite) into the extension package; there are no remote script tags, no dynamic `import()` of remote modules, no `eval`/`new Function`, and no code fetched at runtime. The only runtime network traffic is the loopback WebSocket to the local daemon (`ws://127.0.0.1:10088/ws` by default), which carries JSON tool-call messages — never executable code. Verified by inspecting `src/`: the only `fetch`/URL references resolve to `127.0.0.1`.
+> Extension JavaScript is bundled at build time with Vite. Runtime connections use the daemon URL configured by the user (loopback by default), over WebSocket and HTTP. Tool calls include CDP and evaluate capabilities that can execute caller-supplied code inside the target page; this is separate from loading extension JavaScript.
 
 后台对应勾选：**No, my extension does not use remote hosted code.**
 
 ## 给审核员的备注（Notes for reviewers）
 
-> CSI is one half of a two-part local system: this extension plus an open-source daemon (Go binary, https://github.com/ximing/csi) that the user installs on their own machine. The daemon listens only on 127.0.0.1:10088 and relays tool calls from a local AI client to the extension over a loopback WebSocket. Without the daemon, the extension still loads cleanly — its popup simply shows "Disconnected".
+> CSI is one half of a two-part local system: this extension plus an open-source daemon (Go binary, https://github.com/ximing/csi) that the user installs on their own machine. The daemon listens on 127.0.0.1:10088 by default and relays tool calls from a local AI client to the extension over a loopback WebSocket. Without the daemon, the extension still loads cleanly — its popup simply shows "Disconnected".
 >
 > To review:
 > 1. Load the extension unpacked (or install from the submitted package). The popup shows connection status and the daemon address.
@@ -71,6 +71,6 @@ CWS 认证问答建议答案：
 
 - [x] single purpose
 - [x] 权限 justification × 7（tabs / debugger / storage / alarms / tabGroups / windows / `<all_urls>`）
-- [x] 数据使用披露（不收集、不出本机）
+- [x] 数据使用披露（按配置的 daemon 数据流说明）
 - [x] remote code 声明（已核实 src 无远程加载）
 - [x] 审核员测试方式备注

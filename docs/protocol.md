@@ -239,6 +239,7 @@ daemon 自重启：拉起替代 `serve` 进程后立即响应 `{ "success": true
 
 - 工具默认超时 **120s**（可用 `POST /config` 修改 `tool_timeout_seconds`，5–600；navigate 内部页面加载超时 30s 由扩展自行处理）。
 - `csi mcp` 转发 `POST /command` 时，其 HTTP 客户端超时为当前生效的 `tool_timeout_seconds` + 10s（读 `GET /config`），不是写死 130s。`/config` 不可达时回退 130s。
+- 当前超时只结束 daemon 的等待，不取消扩展中已经开始的工具；迟到结果不会更新 session。调用方收到超时后不得假设网页操作未发生，尤其不能自动重试有副作用的点击/提交。扩展同 tab 队列仍等待原工具 Promise 结束。可查询操作与恢复方案见 [设计提案](design/timeout-recovery.md)，尚未实现。
 - 扩展收到未知 `type` 时忽略并打日志。
 
 ### 3.4 daemon 注入的 session 内部字段
@@ -531,7 +532,7 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 
 - 驱动用户真实 Chrome（含已登录会话）。
 - `evaluate` / `cdp` 是页面内任意代码执行通道——skill 文档需提示。
-- `screenshot` / `save_as_pdf` 按 `args.path` 原样落盘（§5）：任何能 POST `/command` 的本地进程，都能让 daemon 以其自身权限写文件系统上的任意路径。daemon 与典型调用方同 UID；调用方自己也能写这些文件。这不是 confused deputy，也不超出「loopback 是隔离边界」的假设。v1 **不会**把 `path` 锁进 `$TMPDIR` 或某个 screenshots 基目录——那会破坏「存到项目目录」的产品需求。
-- `upload` 的 `files` 按调用方字面交给 Chrome `DOM.setFileInputFiles`（§4）：当前页的 file input 会按 HTML 文件控件语义拿到这些本地文件。这是产品能力（把用户指定的本地文件——包括项目文件——塞进网页上传框），不是路径遍历，也不是网页自己发起的读盘。调用方是能 POST `/command` 的本地主体；随机网页不能打 `/command`。daemon 与典型调用方同 UID，调用方自己也能读这些文件。v1 **不会**把 `files` 锁进 `~/Downloads`——那会破坏「上传项目文件」的产品需求。`cdp` 是裸透传，能发同一条 CDP 命令。
+- `screenshot` / `save_as_pdf` 按 `args.path` 原样落盘（§5）：任何能 POST `/command` 的本地进程，都能让 daemon 以其自身权限写文件系统上的任意路径。默认本机调用时，daemon 与典型调用方同 UID；非回环监听下，获准访问的远程调用方同样可请求 daemon 以其运行用户权限写文件。v1 **不会**把 `path` 锁进 `$TMPDIR` 或某个 screenshots 基目录——那会破坏「存到项目目录」的产品需求。
+- `upload` 的 `files` 按调用方字面交给 Chrome `DOM.setFileInputFiles`（§4）：当前页的 file input 会按 HTML 文件控件语义拿到这些本地文件。这是产品能力（把用户指定的本地文件——包括项目文件——塞进网页上传框），不是路径遍历，也不是网页自己发起的读盘。调用方是获准 POST `/command` 的主体；非回环监听下，远程调用方也可请求上传 Chrome 所在机器上的文件。v1 **不会**把 `files` 锁进 `~/Downloads`——那会破坏「上传项目文件」的产品需求。`cdp` 是裸透传，能发同一条 CDP 命令。
 
 明确不在 v1 范围内：对 `path` / `upload.files` 做沙箱。非回环监听已通过 `bind_host` 支持、鉴权已通过 `auth_enabled`/`api_key` 支持（均默认关闭），见上文与 §2.7。

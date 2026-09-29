@@ -191,3 +191,8 @@ export function installChrome(): void {
     },
   });
 }
+
+/** Simulate a debugger detach without removing the tab. */
+export function fireDebuggerDetach(tabId: number): void {
+  for (const fn of [...onDetach]) fn({ tabId }, 'canceled_by_user');
+}

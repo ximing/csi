@@ -20,7 +20,7 @@ CSI — AI control for your real Chrome
 CSI — Crime Scene Investigation
 ```
 
-**zh-CN（19 字符）**
+**zh-CN（24 字符）**
 
 ```
 CSI — 让 AI 控制你的真实 Chrome
@@ -34,19 +34,19 @@ CSI — 让 AI 控制你的真实 Chrome
 
 CWS 硬限制 ≤132 字符。下列字符数按 Unicode 字符计（与 CWS 口径一致）。
 
-**EN（128 字符）**
+**EN（124 字符）**
 
 ```
-Let AI control your real Chrome: navigate, click, type, read, screenshot, save PDFs — with your real login sessions. Local only.
+Let AI control your Chrome: navigate, click, type, read, screenshot, save PDFs — with your login sessions. Local by default.
 ```
 
-**zh-CN（70 字符）**
+**zh-CN（71 字符）**
 
 ```
-让 AI 控制你真实的 Chrome：导航、点击、输入、读取页面、截图、保存 PDF——使用你实际的登录态。本地 daemon，仅回环监听。
+让 AI 控制你真实的 Chrome：导航、点击、输入、读取页面、截图、保存 PDF——使用你实际的登录态。本地 daemon，默认回环监听。
 ```
 
-说明：中文版把"仅回环监听"放进短描述，因为安全边界是本扩展的差异化卖点，且中文字符密度高、放得下；英文版 132 字符放不下等值表述，安全边界由详细描述第一段承担。
+说明：中文版把"默认回环监听"放进短描述，因为安全边界是本扩展的差异化卖点，且中文字符密度高、放得下；英文版简述默认本地连接，完整安全边界由详细描述承担。
 
 ---
 
@@ -62,7 +62,7 @@ CSI lets an AI agent (Claude Code or any MCP-capable client) control your real C
 The name is a double pun: Ctrl+Shift+I, the DevTools shortcut every developer knows, and Crime Scene Investigation — the AI investigates the scene of your browser.
 
 How it works:
-This extension is one half of the system. It connects over WebSocket to a local daemon (a small Go binary, installed separately from the project's GitHub Releases) that listens on 127.0.0.1:10088 only. AI clients send commands to the daemon over plain HTTP; the daemon relays them to this extension, which executes them in your tabs via the Chrome DevTools Protocol debugger API.
+This extension is one half of the system. It connects over WebSocket to a local daemon (a small Go binary, installed separately from the project's GitHub Releases) that listens on 127.0.0.1:10088 by default. AI clients send commands to the daemon over plain HTTP; the daemon relays them to this extension, which executes them in your tabs via the Chrome DevTools Protocol debugger API.
 
 What the agent can do in your browser:
 - Navigate, find tabs, and read pages as an accessibility tree with stable element references
@@ -76,9 +76,9 @@ See what the agent is doing:
 Every command carries a session name, and each session's tabs are gathered into a Chrome tab group labeled "agent:<session>". You can watch the agent work in real time — and close the group to stop it.
 
 Security model, stated plainly:
-- The daemon binds 127.0.0.1 only. Loopback is the isolation boundary — there is no authentication in v1, so anything running as your user can drive your browser. Install this only if that trade-off is acceptable to you.
+- The daemon binds 127.0.0.1 by default. The bind address and API-key authentication are configurable; authentication defaults to off. Non-loopback binding expands access beyond this machine.
 - The evaluate and cdp tools are arbitrary code execution channels inside the page. That is a designed capability for agent use, not a bug.
-- The extension talks only to the local daemon. It sends nothing to any remote server.
+- The extension communicates with the configured daemon (local by default). It does not send browser data to the project maintainers.
 
 Requirements:
 - The companion daemon, installed from the project's GitHub Releases (macOS, Linux, Windows installers provided)
@@ -95,7 +95,7 @@ CSI 让 AI agent（Claude Code 或任何支持 MCP 的客户端）控制你真�
 名字是个双关：Ctrl+Shift+I，每个程序员都按过的 DevTools 快捷键；也是 Crime Scene Investigation——AI 勘查浏览器案发现场。
 
 工作原理：
-本扩展是系统的一半。它通过 WebSocket 连接一个本地 daemon（一个小型 Go 二进制，需从项目的 GitHub Releases 单独安装），daemon 只监听 127.0.0.1:10088。AI 客户端通过普通 HTTP 向 daemon 发送命令，daemon 转发给本扩展，扩展通过 Chrome DevTools Protocol 的 debugger API 在你的标签页里执行。
+本扩展是系统的一半。它通过 WebSocket 连接一个本地 daemon（一个小型 Go 二进制，需从项目的 GitHub Releases 单独安装），daemon 默认监听 127.0.0.1:10088。AI 客户端通过普通 HTTP 向 daemon 发送命令，daemon 转发给本扩展，扩展通过 Chrome DevTools Protocol 的 debugger API 在你的标签页里执行。
 
 agent 在你的浏览器里能做什么：
 - 导航、查找标签页，把页面读成带稳定元素引用的无障碍树
@@ -109,9 +109,9 @@ agent 在你的浏览器里能做什么：
 每条命令都带一个 session 名，每个 session 的标签页会被收进一个名为 "agent:<session>" 的 Chrome 标签组。你可以实时看着 agent 工作——关掉标签组即可让它停下。
 
 安全模型，照实说：
-- daemon 只绑定 127.0.0.1。回环就是隔离边界——v1 没有鉴权，任何以你的用户身份运行的进程都能驱动你的浏览器。只有在你接受这个权衡时才安装。
+- daemon 默认绑定 127.0.0.1，鉴权默认关闭；可配置监听地址和 API key。非回环监听会扩大访问范围。
 - evaluate 和 cdp 工具是页面内的任意代码执行通道。这是为 agent 设计的能力，不是 bug。
-- 扩展只与本地 daemon 通信，不向任何远程服务器发送数据。
+- 扩展与配置的 daemon 通信（默认本机），不向项目维护者发送浏览器数据。
 
 前置要求：
 - 配套 daemon，从项目的 GitHub Releases 安装（提供 macOS、Linux、Windows 安装器）
@@ -163,8 +163,8 @@ agent 在你的浏览器里能做什么：
 供截图 agent 参考，5 条，按建议排序。每条附中英 caption。
 
 1. **架构总览图**（一张自绘图，非截图也可放第一位）
-   - EN: "AI client → local daemon (127.0.0.1 only) → this extension → your real tabs."
-   - zh-CN: "AI 客户端 → 本地 daemon（仅 127.0.0.1）→ 本扩展 → 你真实的标签页。"
+   - EN: "AI client → local daemon (127.0.0.1 by default) → this extension → your real tabs."
+   - zh-CN: "AI 客户端 → 本地 daemon（默认 127.0.0.1）→ 本扩展 → 你真实的标签页。"
 
 2. **tab group 可视化**：Chrome 标签条上挂着 `agent:demo` 标签组，组内几个标签页正在变化
    - EN: "Every agent session gets its own tab group — watch it work, close it to stop."

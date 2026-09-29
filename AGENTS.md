@@ -4,7 +4,7 @@
 
 CSI 让 AI 控制用户真实的 Chrome 浏览器（带真实登录态）。三个组件：
 
-- `daemon/`（Go）— HTTP server（AI 客户端入口，`POST /command`）+ WS server（扩展接入），绑定 `127.0.0.1:10088`
+- `daemon/`（Go）— HTTP server（AI 客户端入口，`POST /command`）+ WS server（扩展接入），默认绑定 `127.0.0.1:10088`
 - `extension/`（TS, MV3）— 跑在用户真实 Chrome 里，通过 CDP debugger API 执行工具
 - `skills/csi/`、`skills/csi-e2e/` — 随安装器分发到 `~/.Codex/skills/` 的 Codex 技能
 
@@ -13,7 +13,7 @@ CSI 让 AI 控制用户真实的 Chrome 浏览器（带真实登录态）。三�
 ## 全局规则
 
 - **协议先行**：`docs/protocol.md` 是 daemon 与 extension 两侧实现的唯一契约。任何协议变更先改该文件，再改实现。跨侧同步的完整要求见 `.Codex/rules/protocol-sync.md`。
-- **安全边界不动**：daemon 只绑 `127.0.0.1`、v1 无鉴权，loopback 就是隔离边界。不要引入监听非回环地址或"加一层鉴权"之类的改动，除非用户明确要求。
+- **安全默认值不动**：daemon 默认绑定 `127.0.0.1`、鉴权默认关闭。现有实现支持 `bind_host` / `CSI_HOST` 配置监听地址，以及 `auth_enabled` + `api_key` 开启鉴权（见 `docs/protocol.md` §1、§2.7、§7）。不要改变默认监听、鉴权行为或扩大信任域，除非用户明确要求。
 - **提交风格**：commit message 用中文、随意风格。
 
 ## 开发入口

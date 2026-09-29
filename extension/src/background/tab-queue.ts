@@ -1,3 +1,4 @@
+import { registerTabLifecycle } from './tab-lifecycle';
 /**
  * Per-tab promise queue (protocol §3.4 concurrency). Occupancy lasts until
  * the tool promise settles — not until the daemon HTTP timeout.
@@ -24,7 +25,7 @@ export function dropTabQueue(tabId: number): void {
 
 // 兜底自清：close 工具的瞬时失败路径会刻意保留 queue（tab 还在），但 tab 随后
 // 被用户/页面关掉时，只有这里能清掉它的尾巴，否则泄漏到 SW 重启。
-chrome.tabs.onRemoved.addListener((tabId) => dropTabQueue(tabId));
+registerTabLifecycle({ removed: dropTabQueue });
 
 /** Test helper: number of queued tails. */
 export function tabQueueSize(): number {

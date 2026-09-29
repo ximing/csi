@@ -2,7 +2,8 @@
  * chrome.debugger lifecycle: which tabs are attached. Command destination
  * is always an explicit tabId argument — never a process-global "current tab".
  */
-import { bumpEpoch, deleteTargetState } from './refs';
+import { bumpEpoch } from './refs';
+import { registerTabLifecycle } from './tab-lifecycle';
 
 const DEBUGGER_PROTOCOL_VERSION = '1.3';
 
@@ -10,15 +11,7 @@ const attachedTabIds = new Set<number>();
 /** Tabs that have been attached at least once; re-attach bumps documentEpoch. */
 const everAttached = new Set<number>();
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  attachedTabIds.delete(tabId);
-  everAttached.delete(tabId);
-});
-
-chrome.debugger.onDetach.addListener((debugee) => {
-  if (!debugee.tabId) return;
-  attachedTabIds.delete(debugee.tabId);
-});
+registerTabLifecycle({ removed: deleteAttachedState, detached: forgetAttached });
 
 /**
  * Attach the debugger to `tabId` (idempotent). Already-attached is a no-op.
@@ -60,5 +53,4 @@ export function forgetAttached(tabId: number): void {
 export function deleteAttachedState(tabId: number): void {
   attachedTabIds.delete(tabId);
   everAttached.delete(tabId);
-  deleteTargetState(tabId);
 }

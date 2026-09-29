@@ -43,7 +43,7 @@ scripts/package-extension.sh
 
 - **Single purpose** — `review-notes.md` 的 single purpose 段
 - **每个权限的 justification** — `tabs` / `debugger` / `storage` / `alarms` / `tabGroups` / `windows` / `host_permissions <all_urls>`,共 7 条,`review-notes.md` 逐条有英文成稿
-- **数据使用披露** — 全部选"不收集/不出本机",依据与措辞见 `review-notes.md`
+- **数据使用披露** — 按实际数据流填写，依据与措辞见 `review-notes.md`
 - **远程代码声明** — 无远程代码(已核实)
 - **隐私政策 URL** — `https://ximing.github.io/csi/privacy.html`(已上线,返回 200;源文件 `docs/privacy-policy.md` + `site/public/privacy.html`)
 - **给审核员的备注** — `review-notes.md` 末尾:说明扩展需配合本机 daemon、如何测试

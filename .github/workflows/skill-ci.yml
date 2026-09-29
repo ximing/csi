@@ -43,3 +43,12 @@ jobs:
 
       - name: Version surfaces aligned
         run: node scripts/skill-ci/check-versions.mjs
+
+      - name: Contract checker negative tests
+        run: node --test scripts/skill-ci/check-tools.test.mjs
+
+      - name: Install extension dependencies
+        run: npm ci --prefix extension --ignore-scripts
+
+      - name: Runtime tool registration matches contracts
+        run: npm --prefix extension test -- src/background/tool-contract.test.ts

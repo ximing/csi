@@ -1,8 +1,8 @@
 // 0.6.0 同域 iframe（协议 §4.1）：帧发现、isolated 判定、default-world contextId 表。按 tab 分区。
 
-import { forgetAttached, sendCommand } from './debugger-session';
-import { bumpEpoch, deleteTargetState, dropRefsForFrame } from './refs';
-import { dropTabQueue } from './tab-queue';
+import { sendCommand } from './debugger-session';
+import { bumpEpoch, dropRefsForFrame } from './refs';
+import { registerTabLifecycle } from './tab-lifecycle';
 
 export interface FrameInfo {
   frameId: string;
@@ -223,19 +223,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   }
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  forgetAttached(tabId);
-  deleteTargetState(tabId);
-  dropTabQueue(tabId);
-  clearContextsForTab(tabId);
-});
-
-chrome.debugger.onDetach.addListener((debuggee) => {
-  if (!debuggee.tabId) return;
-  forgetAttached(debuggee.tabId);
-  bumpEpoch(debuggee.tabId, 'reattach');
-  clearContextsForTab(debuggee.tabId);
-});
+registerTabLifecycle({ removed: clearContextsForTab, detached: clearContextsForTab });
 
 export async function contextIdForFrame(tabId: number, frameId: string): Promise<number> {
   const key = contextKey(tabId, frameId);

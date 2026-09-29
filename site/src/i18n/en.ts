@@ -104,7 +104,7 @@ export const en = {
     tapeWarn: '⚠ Warning',
     tapePower: '⚡ Capability',
     items: [
-      { title: 'Loopback is the boundary', desc: 'The daemon binds 127.0.0.1 only; v1 has no auth — loopback is the isolation boundary. Anything running as your user can drive your browser.' },
+      { title: 'Loopback by default', desc: 'The daemon defaults to 127.0.0.1 with auth disabled. Bind address and API-key auth are configurable; a non-loopback bind expands access.' },
       { title: 'Designed capability', desc: 'evaluate and cdp are arbitrary code execution channels in the page. That is a designed capability, not a bug — treat skill prompts accordingly.' },
     ],
   },
