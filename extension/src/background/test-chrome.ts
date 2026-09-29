@@ -9,6 +9,7 @@ export interface FakeTab {
   status?: string;
   active?: boolean;
   groupId?: number;
+  windowId?: number;
 }
 
 export const debuggerCalls: { tabId: number; method: string; t: number }[] = [];
@@ -153,7 +154,7 @@ export function installChrome(): void {
       windows: {
         getLastFocused: async () => {
           const active = [...tabs.values()].find((t) => t.active);
-          return { tabs: active ? [active] : [] };
+          return { id: 1, type: 'normal', tabs: active ? [active] : [] };
         },
       },
       debugger: {

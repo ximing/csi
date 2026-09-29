@@ -5,6 +5,7 @@
 import type { ToolArgs } from '../../shared/messages';
 import type { TargetContext, Tool } from './types';
 import { ensureAttached, sendCommand } from '../debugger-session';
+import { createAgentTab } from '../agent-window';
 import { addToSessionGroup } from '../tab-group';
 import { enqueueTab } from '../tab-queue';
 import { sessionTabIds } from '../session-tabs';
@@ -122,7 +123,7 @@ export class NavigateTool implements Tool {
       });
     }
 
-    const tab = await chrome.tabs.create({ url, active: false });
+    const tab = await createAgentTab(url);
     const tabId = tab.id!;
     if (session) await addToSessionGroup(tabId, session, groupTitle);
     return enqueueTab(tabId, async () => {

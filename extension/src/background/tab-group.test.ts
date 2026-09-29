@@ -24,7 +24,7 @@ const groupRemovedListeners: ((group: { id: number }) => void)[] = [];
 const persistentOnRemoved = {
   addListener: (fn: (group: { id: number }) => void) => groupRemovedListeners.push(fn),
 };
-let groupsByTitle: { id: number; title: string }[] = [];
+let groupsByTitle: { id: number; title: string; windowId?: number }[] = [];
 let groupTabs: Record<number, { id?: number }[]> = {};
 let tabsQueryImpl: (q: Record<string, unknown>) => Promise<{ id?: number }[]>;
 let tabGroupsQueryShouldThrow = false;
@@ -53,9 +53,9 @@ beforeEach(() => {
   chrome.tabGroups = {
     TAB_GROUP_ID_NONE: -1,
     get: (id: number) => tabGroupsGetImpl(id),
-    query: async (q: { title?: string }) => {
+    query: async (q: { title?: string; windowId?: number }) => {
       if (tabGroupsQueryShouldThrow) throw new Error('tabGroups.query failed');
-      return groupsByTitle.filter((g) => g.title === q.title);
+      return groupsByTitle.filter((g) => g.title === q.title && (q.windowId === undefined || g.windowId === q.windowId));
     },
     update: async (groupId: number, opts: Record<string, unknown>) => {
       groupUpdates.push({ groupId, opts });
@@ -142,6 +142,7 @@ describe('addToSessionGroup', () => {
     expect(groupCalls).toEqual([{ tabIds: 1, groupId: 77 }]);
     expect(groupUpdates).toEqual([]);
     // 且记住了映射：第二次直接走 knownGroupId
+    addTab({ id: 2, url: 'https://b.example' });
     await tabGroup.addToSessionGroup(2, 'sess-existing');
     expect(groupCalls[1]).toEqual({ tabIds: 2, groupId: 77 });
   });
@@ -248,4 +249,15 @@ describe('ungroupClosedTabs', () => {
     await expect(tabGroup.ungroupClosedTabs([1], [1])).resolves.toBeUndefined();
     expect(ungroupCalls).toEqual([]);
   });
+});
+
+
+it('新标签在另一窗口时建本地分组，不搬回同名 session 的旧窗口', async () => {
+  groupsByTitle = [{ id: 77, title: 'agent:window-test', windowId: 1 }];
+  addTab({ id: 1, windowId: 1 });
+  await tabGroup.addToSessionGroup(1, 'window-test');
+  expect(groupCalls[0]).toEqual({ tabIds: 1, groupId: 77 });
+  addTab({ id: 2, windowId: 2 });
+  await tabGroup.addToSessionGroup(2, 'window-test');
+  expect(groupCalls[1]).toEqual({ tabIds: 2 });
 });

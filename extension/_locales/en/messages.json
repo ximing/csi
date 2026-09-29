@@ -219,5 +219,11 @@
   },
   "configAuthRequired": {
     "message": "Daemon auth is on — enter the API key below (Extension Settings) to manage config"
+  },
+  "agentIndependentWindow": {
+    "message": "Agents share a dedicated window"
+  },
+  "windowSettingFailed": {
+    "message": "Could not load or save window preference."
   }
 }

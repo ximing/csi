@@ -114,3 +114,9 @@ footer {
   opacity: 0.6;
   text-align: center;
 }
+
+.window-setting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

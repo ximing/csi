@@ -218,5 +218,11 @@
   },
   "configAuthRequired": {
     "message": "daemon 已开启鉴权——请在下方（扩展设置）填写 API key 后再管理配置"
+  },
+  "agentIndependentWindow": {
+    "message": "Agent 使用独立窗口（所有 Agent 共用）"
+  },
+  "windowSettingFailed": {
+    "message": "无法读取或保存窗口设置"
   }
 }

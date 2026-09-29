@@ -86,18 +86,25 @@ export async function addToSessionGroup(
   groupTitle?: string,
 ): Promise<void> {
   try {
-    const knownGroupId = sessionGroupIds.get(session);
+    const tab = await chrome.tabs.get(tabId);
+    const windowId = tab.windowId;
+    const groupKey = `${session}:${windowId}`;
+    const knownGroupId = sessionGroupIds.get(groupKey);
     if (knownGroupId != null) {
-      await chrome.tabs.group({ tabIds: tabId, groupId: knownGroupId });
-      return;
+      const group = await chrome.tabGroups.get(knownGroupId).catch(() => null);
+      if (group && group.windowId === windowId) {
+        await chrome.tabs.group({ tabIds: tabId, groupId: knownGroupId });
+        return;
+      }
+      sessionGroupIds.delete(groupKey);
     }
 
     const defaultTitle = `agent:${session}`;
-    const existing = await chrome.tabGroups.query({ title: defaultTitle });
+    const existing = await chrome.tabGroups.query({ title: defaultTitle, windowId });
     if (existing.length > 0) {
       const groupId = existing[0]!.id;
       await chrome.tabs.group({ tabIds: tabId, groupId });
-      sessionGroupIds.set(session, groupId);
+      sessionGroupIds.set(groupKey, groupId);
       return;
     }
 
@@ -107,7 +114,7 @@ export async function addToSessionGroup(
     const color =
       FIXED_GROUP_COLORS[session] ?? ROTATION_COLORS[rotationCounter++ % ROTATION_COLORS.length]!;
     await chrome.tabGroups.update(groupId, { title, color, collapsed: false });
-    sessionGroupIds.set(session, groupId);
+    sessionGroupIds.set(groupKey, groupId);
   } catch {
     // grouping is best-effort — never fail a navigation over it
   }

@@ -46,7 +46,7 @@ async function importPopup(): Promise<void> {
 
 function popupDom(): void {
   document.body.innerHTML = `
-    <h1 id="title"></h1>
+    <input id="agent-independent-window" type="checkbox" disabled><span id="agent-independent-window-label"></span><p id="window-setting-error" hidden></p><h1 id="title"></h1>
     <span id="status-dot" class="dot dot-off"></span>
     <span id="status-text">—</span>
     <label id="server-url-label" for="server-url"></label>
@@ -368,5 +368,27 @@ describe('设置入口', () => {
     link.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     expect(optionsOpened).toBe(true);
+  });
+});
+
+describe('独立窗口设置', () => {
+  it('缺省关闭，可保存开启', async () => {
+    const save = vi.spyOn(chrome.storage.local, 'set').mockResolvedValue();
+    await importPopup();
+    const input = document.getElementById('agent-independent-window') as HTMLInputElement;
+    await vi.waitFor(() => expect(input.disabled).toBe(false));
+    expect(input.checked).toBe(false);
+    input.click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledWith({ agentIndependentWindow: true }));
+  });
+  it('恢复已保存设置，保存失败回滚并显示错误', async () => {
+    vi.spyOn(chrome.storage.local, 'get').mockImplementation(async () => ({ agentIndependentWindow: true }));
+    vi.spyOn(chrome.storage.local, 'set').mockRejectedValue(new Error('failed'));
+    await importPopup();
+    const input = document.getElementById('agent-independent-window') as HTMLInputElement;
+    await vi.waitFor(() => expect(input.checked).toBe(true));
+    input.click();
+    await vi.waitFor(() => expect(document.getElementById('window-setting-error')!.hidden).toBe(false));
+    expect(input.checked).toBe(true);
   });
 });

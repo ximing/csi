@@ -268,12 +268,13 @@ daemon 维护 session 状态：`session → {tabIds: []int, currentTabId: int, b
 - 单标签工具（snapshot/click/fill/...）的目标就是注入的 `_tabId`（校验该 tab 仍存在之后）。**禁止**静默回退到 last-user / 当前窗口 active tab。
 - daemon 注入了非零 `_tabId` 而该 tab 已不存在：返回 `stale_target`，不得改打其它 tab。daemon 从 owned 集移除该 id（若在其中），若当前目标指向它则改到最后一个仍存活的 owned tab 或清空；**不**重放原工具。`details.nextTabId` 有则表示下一次 snapshot 可恢复到哪个 owned tab。
 - `_tabId === 0`：需要页面目标的工具返回 `no_session_target`。例外：`navigate`（无 **owned** 可复用时新建 owned tab）；`find_tab(active:true)`（按用户前台选）。
-- `navigate`：**只复用 owned 当前 tab**（`_tabId ∈ _tabIds` 且 tab 仍在且不是 `chrome://`/`edge://`）。当前目标为 borrowed、`newTab:true`、无 owned 可复用、或处于内部页时，一律 `tabs.create` 新 owned tab（`active:false`），**不得** `Page.navigate` / `reload` 用户 tab，不得把用户 tab 拉进 session 分组。随后当前目标切到这个新 owned tab。
+- `navigate`：**只复用 owned 当前 tab**（`_tabId ∈ _tabIds` 且 tab 仍在且不是 `chrome://`/`edge://`）。当前目标为 borrowed、`newTab:true`、无 owned 可复用、或处于内部页时，一律新建 owned tab（已有窗口内使用 `tabs.create`，`active:false`），**不得** `Page.navigate` / `reload` 用户 tab，不得把用户 tab 拉进 session 分组。随后当前目标切到这个新 owned tab。
 - `find_tab`：默认只在 `_tabIds` 内按 URL 域名匹配；`active:true` 时选用户正在前台浏览、且 URL 匹配的标签。命中非 owned → `borrowed:true`（不拉入分组，但是当前目标）；命中 owned → `borrowed:false`。
 - `close_tab`：当前目标 **不在** `_tabIds`（含 `_tabId === 0`）时返回 `{success:true, closed:false, code:"not_owned"}`，不关 tab、不改 owned 集。`_tabId ∈ _tabIds` 时关闭该 tab（即使 `_borrowed` 误为 true），成功返回 `{success:true, closed:true}`。`closed:false` 时必带机器可读 `code`：`not_owned`（borrowed 或无目标，不动作）、`already_closed`（tab 已不存在，daemon 将其移出 owned 集）、`close_failed`（关闭动作失败且 tab 仍在，daemon **不得**改动 owned 集）。`reason` 仅为人类可读说明；daemon 对账只看 `closed` 与 `code`，**不**做英文字符串匹配。
 - `close_session`：只关闭 `_tabIds`（owned）；即使当前目标是 borrowed，也只清 session 状态，不关用户 tab。空 `_tabIds` + 非零 `_tabId` 不得关掉那个 `_tabId`。返回 `{success, closed, remaining?, code?}`：`closed` 是本次 `tabs.remove` 成功的数量（已不存在的 tab 不计入）。若仍有 owned tab 活着（关闭动作失败），带 `remaining`（仍在的 tabId 列表）与 `code:"close_failed"`；daemon 把 owned 集**替换为** `remaining`，当前目标若不在其中则回退到 `remaining` 的最后一个或清空——**不得**把仍活着的 tab 移出 owned。若全部 owned 已不在：省略 `remaining`，daemon 在 `success` 时清空 owned 与 current（与旧扩展兼容）。
 - `list_tabs.tabs` 只列 owned。当前目标为 borrowed 时增加 `currentTarget:{tabId,borrowed:true,url,title}`，不得把 borrowed 混入 `tabs`。
-- 标签分组：`navigate` **新建 owned 标签**时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。不得对 borrowed tab 分组。
+- 新 owned 标签默认直接创建在最近聚焦的普通窗口；无普通窗口时才新建窗口。扩展 popup 可持久化开启「Agent 使用独立窗口」：所有 Agent/session 共用一个专用普通窗口；已有专用窗口就直接在其中新建标签，没有才创建，窗口关闭后重建。跨 session 并发首次打开也只创建一个专用窗口。设置只影响后续新建标签，不搬动已有页面；窗口映射保存在浏览器会话存储中，扩展 worker 重启后可恢复。此设置不改变 owned / borrowed 规则。
+- 标签分组：`navigate` **新建 owned 标签**时若带 `_session`，加入/创建标题为 `agent:<_session>`（或 `group_title` 指定值）的 tab group，颜色按 session 轮换。不得对 borrowed tab 分组。分组限定在新标签所在窗口内，不跨窗口搬动标签。
 
 ### 3.5 artifact 信封（extension → daemon 内部契约）
 

@@ -1,3 +1,4 @@
+import { AGENT_WINDOW_SETTING } from '../shared/window-settings';
 import './popup.css';
 import { DEFAULT_WS_URL } from '../shared/constants';
 import type {
@@ -131,3 +132,31 @@ document.getElementById('settings-link')!.addEventListener('click', (e) => {
   e.preventDefault();
   void chrome.runtime.openOptionsPage();
 });
+
+const independentWindow = document.getElementById('agent-independent-window') as HTMLInputElement;
+const windowSettingError = document.getElementById('window-setting-error')!;
+document.getElementById('agent-independent-window-label')!.textContent = i18n('agentIndependentWindow');
+async function loadWindowSetting(): Promise<void> {
+  try {
+    const settings = await chrome.storage.local.get(AGENT_WINDOW_SETTING);
+    independentWindow.checked = settings[AGENT_WINDOW_SETTING] === true;
+    independentWindow.disabled = false;
+  } catch {
+    windowSettingError.textContent = i18n('windowSettingFailed');
+    windowSettingError.hidden = false;
+  }
+}
+independentWindow.addEventListener('change', async () => {
+  independentWindow.disabled = true;
+  windowSettingError.hidden = true;
+  try {
+    await chrome.storage.local.set({ [AGENT_WINDOW_SETTING]: independentWindow.checked });
+  } catch {
+    independentWindow.checked = !independentWindow.checked;
+    windowSettingError.textContent = i18n('windowSettingFailed');
+    windowSettingError.hidden = false;
+  } finally {
+    independentWindow.disabled = false;
+  }
+});
+void loadWindowSetting();
