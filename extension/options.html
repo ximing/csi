@@ -7,9 +7,12 @@
 </head>
 <body>
   <main id="options">
-    <h1 id="title">CSI</h1>
+    <header class="mast">
+      <img class="mark" src="icons/icon.svg" width="36" height="36" alt="">
+      <h1 id="title">CSI</h1>
+    </header>
 
-    <section>
+    <section class="group" aria-labelledby="status-heading">
       <h2 id="status-heading">Daemon Status</h2>
       <div id="status-online" hidden>
         <dl id="status-grid">
@@ -25,41 +28,57 @@
       <p id="status-offline" class="notice" hidden></p>
     </section>
 
-    <section id="daemon-settings">
+    <section id="daemon-settings" class="group" aria-labelledby="daemon-settings-heading">
       <h2 id="daemon-settings-heading">Daemon Settings</h2>
       <p id="config-unsupported" class="notice" hidden></p>
-      <div id="config-form">
-        <label id="port-label" for="cfg-port"></label>
-        <input id="cfg-port" type="number" min="1" max="65535" spellcheck="false">
-        <p id="port-note" class="field-note" hidden></p>
-
-        <label id="log-days-label" for="cfg-log-days"></label>
-        <input id="cfg-log-days" type="number" min="1" max="30">
-
-        <label id="tool-timeout-label" for="cfg-tool-timeout"></label>
-        <input id="cfg-tool-timeout" type="number" min="5" max="600">
-
-        <div class="button-row">
-          <button id="btn-save-config" type="button"></button>
-          <button id="btn-restart" type="button" hidden></button>
+      <div id="config-form" class="sheet">
+        <div class="field">
+          <div class="field-copy">
+            <label id="port-label" for="cfg-port"></label>
+            <p id="port-note" class="field-note" hidden></p>
+          </div>
+          <input id="cfg-port" type="number" min="1" max="65535" inputmode="numeric" spellcheck="false">
         </div>
-        <p id="config-result" class="result"></p>
+
+        <div class="field">
+          <label id="log-days-label" for="cfg-log-days"></label>
+          <input id="cfg-log-days" type="number" min="1" max="30" inputmode="numeric">
+        </div>
+
+        <div class="field">
+          <label id="tool-timeout-label" for="cfg-tool-timeout"></label>
+          <input id="cfg-tool-timeout" type="number" min="5" max="600" inputmode="numeric">
+        </div>
+
+        <div class="actions">
+          <div class="button-row">
+            <button id="btn-save-config" type="button"></button>
+            <button id="btn-restart" type="button" hidden></button>
+          </div>
+          <p id="config-result" class="result"></p>
+        </div>
       </div>
     </section>
 
-    <section>
+    <section class="group" aria-labelledby="ext-settings-heading">
       <h2 id="ext-settings-heading">Extension Settings</h2>
-      <label id="reconcile-label" for="reconcile-period"></label>
-      <select id="reconcile-period">
-        <option value="30" id="reconcile-30"></option>
-        <option value="60" id="reconcile-60"></option>
-        <option value="0" id="reconcile-off"></option>
-      </select>
+      <div class="sheet">
+        <div class="field">
+          <label id="reconcile-label" for="reconcile-period"></label>
+          <select id="reconcile-period">
+            <option value="30" id="reconcile-30"></option>
+            <option value="60" id="reconcile-60"></option>
+            <option value="0" id="reconcile-off"></option>
+          </select>
+        </div>
 
-      <label id="api-key-label" for="api-key"></label>
-      <input id="api-key" type="password" spellcheck="false" autocomplete="off">
-      <p id="api-key-note" class="field-note"></p>
-      <p id="ext-result" class="result"></p>
+        <div class="field field-block">
+          <label id="api-key-label" for="api-key"></label>
+          <input id="api-key" type="password" spellcheck="false" autocomplete="off">
+          <p id="api-key-note" class="field-note"></p>
+        </div>
+        <p id="ext-result" class="result"></p>
+      </div>
     </section>
 
     <footer id="version-footer"></footer>

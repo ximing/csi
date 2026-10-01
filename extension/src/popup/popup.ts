@@ -38,13 +38,17 @@ let lastDaemonVersion = '';
 function renderVersion(daemonVersion?: string): void {
   lastDaemonVersion = daemonVersion ?? '';
   const ext = chrome.runtime.getManifest().version;
+  const footer = document.getElementById('version-footer')!;
   let text = i18n('versionFooter', ext);
+  let mismatch = false;
   if (daemonVersion) {
     text += ` · daemon ${daemonVersion}`;
     const mm = (v: string): string => v.split('.').slice(0, 2).join('.');
-    if (mm(ext) !== mm(daemonVersion)) text += ` — ${i18n('versionMismatch')}`;
+    mismatch = mm(ext) !== mm(daemonVersion);
+    if (mismatch) text += ` — ${i18n('versionMismatch')}`;
   }
-  document.getElementById('version-footer')!.textContent = text;
+  footer.textContent = text;
+  footer.classList.toggle('mismatch', mismatch);
 }
 
 function sendMessage<T>(message: RuntimeRequest): Promise<T> {

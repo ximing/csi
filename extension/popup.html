@@ -7,15 +7,20 @@
 </head>
 <body>
   <main id="popup">
-    <h1 id="title">CSI</h1>
+    <header class="mast">
+      <img class="mark" src="icons/icon.svg" width="28" height="28" alt="">
+      <h1 id="title">CSI</h1>
+    </header>
 
-    <div class="status-row">
+    <section class="status-band" aria-live="polite">
       <span id="status-dot" class="dot dot-off"></span>
       <span id="status-text">—</span>
-    </div>
+    </section>
 
-    <label id="server-url-label" for="server-url">Daemon WebSocket URL</label>
-    <input id="server-url" type="text" spellcheck="false" placeholder="ws://127.0.0.1:10088/ws">
+    <div class="url-field">
+      <label id="server-url-label" for="server-url">Daemon WebSocket URL</label>
+      <input id="server-url" type="text" spellcheck="false" autocomplete="off" placeholder="ws://127.0.0.1:10088/ws">
+    </div>
 
     <div class="button-row">
       <button id="btn-connect" type="button">Connect</button>
@@ -25,13 +30,14 @@
 
     <p id="test-result" class="test-result"></p>
 
-    <label class="window-setting">
+    <label class="switch">
       <input id="agent-independent-window" type="checkbox" disabled>
+      <span class="switch-track" aria-hidden="true"></span>
       <span id="agent-independent-window-label"></span>
     </label>
     <p id="window-setting-error" class="test-result fail" role="alert" hidden></p>
 
-    <a id="settings-link" href="#"></a>
+    <a id="settings-link" class="settings-link" href="#"></a>
 
     <footer id="version-footer"></footer>
   </main>
