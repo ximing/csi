@@ -39,7 +39,7 @@ Turn the user's scenario into a case file: a header declaring the URL under test
 
 ### 3. Verify — execute it live in the browser
 
-Drive a real browser through the daemon and execute every step of the case, iterating until all expectations hold. This is where you discover the stable selectors and wait conditions the suite will need. Read `references/workflow.md` for verification techniques and iteration discipline.
+Drive a real browser through the daemon and execute every step of the case, iterating until all expectations hold. This is where you discover the stable selectors and wait conditions the suite will need. Read `references/workflow.md` for verification techniques and iteration discipline. During this step do not send `Page.bringToFront` or `Target.activateTarget` — a background timer that fires late is not a reason to take the user's tab.
 
 **If the product's actual behavior contradicts a reasonable expectation, stop and report it to the user — that's a bug finding, not something to write around.**
 

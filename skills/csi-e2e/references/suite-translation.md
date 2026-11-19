@@ -63,9 +63,8 @@ Translation example: verification did `click @e12` (the 保存 button) → suite
 
 ### 5. Sessions and isolation
 
-- `openPage()` first thing in `run()`: it ensures the daemon, closes leftover tabs **of the e2e session only** (an intentional exception to the "close_session is user-initiated" rule — it never touches the user's other tabs), navigates, retries once with a fresh session name if the daemon's tab binding went stale, and brings the tab to front.
+- `openPage()` first thing in `run()`: it ensures the daemon, closes leftover tabs **of the e2e session only** (an intentional exception to the "close_session is user-initiated" rule — it never touches the user's other tabs), navigates, retries once with a fresh session name if the daemon's tab binding went stale, and brings the tab to front once so unattended replay can paint and run timers. That one call interrupts whoever is using the machine. Do not add another `Page.bringToFront` or `Target.activateTarget` in the suite, including after `location.reload()`. If a reloaded page is slow because it is throttled, lengthen `pollUntil`.
 - Scenarios within a suite run in order and may depend on earlier ones' state — say so in a comment. Suites must be independent of *each other*: any suite can run alone via `node e2e/run.mjs <name>`.
-- Pages that throttle timers in background tabs: `openPage` already brings to front; after any in-page `location.reload()` bring to front again.
 
 ### 6. Evidence screenshots
 

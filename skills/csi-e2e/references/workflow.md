@@ -24,7 +24,7 @@ Live verify uses `wait`. Suite replay may still use `pollUntil` (no model involv
 
 **Failure triage order.** When a step fails: `screenshot` (what's actually on screen) → `snapshot` (what the structure is) → `evaluate` (read app state — store, localStorage, DOM attributes). Most failures are one of: element not there yet (wait condition wrong), wrong element (selector matched something else), or real product bug.
 
-**Throttled tabs.** Background tabs throttle timers and rAF; if a debounced save or animation "doesn't happen", bring the tab to front (`cdp` → `Page.bringToFront`) and prefer `wait` over sleeps — throttled timers fire late, not never.
+**Throttled tabs.** Background tabs throttle timers and rAF. If a debounced save or animation does not happen, extend `wait` — throttled timers fire late, not never. Do **not** send `Page.bringToFront` or `Target.activateTarget` during live verification. That switches the user's tab and, on macOS, can activate Chrome over the app they are using. If the step still cannot be observed, stop and tell the user the page is background-throttled. Replay's `openPage` already focuses once for unattended suite runs; do not add another focus call to compensate.
 
 ## Iteration discipline
 

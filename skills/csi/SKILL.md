@@ -45,6 +45,8 @@ Drive the user's real Chrome (with their login sessions) via a local daemon: `PO
 
 Prefer `@e` refs over hand-written CSS — every `selector` arg takes `"@e3"` (from the latest snapshot) or CSS, and refs survive class-hash churn: `{"action":"click","args":{"selector":"@e3"},"session":"my-task"}`. Refs are per-tab and die on navigation — a failed `stale_ref` / `stale_target` means re-`snapshot` first, never blind-replay.
 
+**Do not take the user's screen.** Never send `Page.bringToFront` or `Target.activateTarget`, including through `cdp`. `find_tab` with `active:true` only when the user told you to use the tab they are looking at. If a timer or animation does not run, extend `wait` and say the tab is background-throttled — do not focus Chrome to make it run. Rule: `references/interaction.md`.
+
 **Screenshots are WebP.** Call `screenshot` with no `format` (quality 80, much smaller than PNG, still readable). Do **not** pass `format:"png"` or a `path` ending in `.png` — both capture a large PNG. If you pass `path`, end it `.webp`. Use PNG only when the user asked to keep a lossless file. Details: `references/large-results.md`.
 
 ## Sessions

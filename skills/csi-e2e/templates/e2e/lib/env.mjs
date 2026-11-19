@@ -33,6 +33,8 @@ export async function openPage(url, { groupTitle = 'e2e 回归' } = {}) {
     console.warn(`navigate 失败（${e.message}），换新 session ${getSession()} 重试`)
     await cmd('navigate', { url, newTab: true, group_title: groupTitle })
   }
+  // 回放为了定时器和绘制，只在这里把本套件的标签拿到前面一次。会打断正在使用电脑的人。
+  // 现场验证不要再发 Page.bringToFront / Target.activateTarget，套件里也不要追加。
   await bringToFront()
 }
 
